@@ -210,7 +210,11 @@ def batch_fit(pwm: torch.Tensor, meas: torch.Tensor, iters: int = 6, reg: float 
         rm = torch.where(inl, r, torch.zeros_like(r))
         wreg = reg * n.to(torch.float64) / 200.0
         H = Jm.transpose(1, 2) @ Jm + wreg[:, None, None] * torch.diag(1.0 / prior)[None]
+        # rigs that stopped (too few inliers) keep their z; give them a solvable system so the batch solve works
+        eye = torch.eye(4, dtype=torch.float64, device=pwm.device)[None]
+        H = torch.where(live[:, None, None], H, eye)
         gvec = (Jm.transpose(1, 2) @ rm[..., None]).squeeze(-1) + wreg[:, None] * z / prior
+        gvec = torch.where(live[:, None], torch.nan_to_num(gvec), torch.zeros_like(gvec))
         step = torch.linalg.solve(H, gvec[..., None]).squeeze(-1)
         z = torch.where(live[:, None], z - step, z)
         rms = torch.where(live, torch.sqrt((rm ** 2).sum(1) / n.clamp_min(1)) * 100.0, rms)
