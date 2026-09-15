@@ -55,6 +55,7 @@ def main() -> None:
                     help='"label=path.npz" (repeatable); "label=classic" for the hand-made feedback, "label=prior" for the physics model only')
     ap.add_argument("--out", required=True)
     ap.add_argument("--takes", type=int, default=2)
+    ap.add_argument("--harsh", type=float, default=0.0, help="0..1: rig effects the controllers do not model")
     args = ap.parse_args()
 
     out = pathlib.Path(args.out)
@@ -72,7 +73,7 @@ def main() -> None:
         label, path = spec.split("=", 1)
         entry = {"label": label, "path": path, "pieces": []}
         for i, (pid, _, _) in enumerate(PIECES):
-            env = FluteEnv(takes=args.takes, feedback=True)
+            env = FluteEnv(takes=args.takes, feedback=True, harsh=args.harsh)
             r = rollout(env, policy_for(None if path == "classic" else path), seed=RIG_SEED + i,
                         options={"target": targets[i]})
             takes = []

@@ -31,12 +31,13 @@ def main() -> None:
     ap.add_argument("--episodes", type=int, default=60)
     ap.add_argument("--takes", type=int, default=2)
     ap.add_argument("--seed0", type=int, default=3_000_000)
+    ap.add_argument("--harsh", type=float, default=0.0, help="0..1: rig effects the controllers do not model")
     args = ap.parse_args()
 
     net, meta = load_net(args.net)
     rows = []  # (take, situation, fb_valid, delay, gain_scale)
     for i in range(args.episodes):
-        env = FluteEnv(progress=0.8, takes=args.takes, feedback=True)
+        env = FluteEnv(progress=0.8, takes=args.takes, feedback=True, harsh=args.harsh)
         base = FeedbackPolicy(fb_gain=float(meta["fb_gain"]), ilc_gain=float(meta["ilc_gain"]))
         pol = FeedbackResidualPolicy(base, net, scale=float(meta["scale"]), horizon=int(meta["horizon"]),
                                      history=int(meta.get("history", 0)))
