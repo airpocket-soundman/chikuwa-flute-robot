@@ -1,7 +1,7 @@
 import numpy as np
 
-from flute_rl.sim import DT
-from flute_rl.targets import GAP_RANGE, MAX_JUMP, MIN_NOTE, make_target
+from flute_rl.sim import DT, hz_to_cents
+from flute_rl.targets import BIRDS, F_HI, F_LO, GAP_RANGE, MAX_JUMP, MIN_NOTE, bird_song, make_target
 
 
 def segments(t):
@@ -19,6 +19,19 @@ def test_no_short_notes_and_no_big_leaps():
         v = t[np.isfinite(t)]
         steps = np.abs(np.diff(v))
         assert steps.max(initial=0.0) <= MAX_JUMP + 40.0 + 1e-6  # + the deepest vibrato at a note boundary
+
+
+def test_bird_songs_fit_the_flute():
+    rng = np.random.default_rng(2)
+    lo, hi = float(hz_to_cents(F_LO)), float(hz_to_cents(F_HI))
+    for sp in BIRDS:
+        for _ in range(20):
+            t = bird_song(rng, sp)
+            v = t[np.isfinite(t)]
+            assert v.size and v.min() >= lo - 1e-6 and v.max() <= hi + 1e-6
+            assert np.isnan(t[0]) and np.isnan(t[-1])  # lead-in and tail rests like the other pieces
+    uguisu = bird_song(np.random.default_rng(0), "uguisu")
+    assert len(segments(uguisu)) == 2  # "hoo" + "hokekyo"
 
 
 def test_articulation():

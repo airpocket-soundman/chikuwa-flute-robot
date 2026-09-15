@@ -109,6 +109,68 @@ def sample_level(rng: np.random.Generator, progress: float) -> int:
     return int(rng.choice(top + 1, p=weights / weights.sum()))
 
 
+BIRDS = ("uguisu", "cuckoo", "shijukara")
+
+
+def bird_song(rng: np.random.Generator, species: str, dt: float = DT) -> np.ndarray:
+    """An easy-to-imitate bird song, already moved into the flute's range (test pieces, not training).
+
+    The shapes are rough imitations of the songs, randomised a little, not
+    measured from recordings:
+
+    * "uguisu" (Japanese bush warbler, "ho-hokekyo"): a long, slightly rising
+      "hoo", then a short "ho", a short higher "ke" and a "kyo" that falls
+    * "cuckoo": two notes falling by about a major third, repeated
+    * "shijukara" (great tit, "tsu-tsu-pee"): two short notes and a longer one, repeated
+
+    Some notes are shorter than MIN_NOTE on purpose: these pieces test how
+    close the robot can get to a real song.
+    """
+    segs: list[np.ndarray] = []
+
+    def n_steps(sec: float) -> int:
+        return max(1, int(round(sec / dt)))
+
+    def rest(sec: float) -> None:
+        segs.append(np.full(n_steps(sec), np.nan))
+
+    def note(c0: float, sec: float, c1: float | None = None) -> None:
+        segs.append(np.linspace(c0, c0 if c1 is None else c1, n_steps(sec)))
+
+    lo, hi = float(hz_to_cents(F_LO)), float(hz_to_cents(F_HI))
+    rest(rng.uniform(0.8, 1.0))
+    if species == "uguisu":
+        base = rng.uniform(lo + 100, lo + 400)
+        note(base, rng.uniform(0.9, 1.4), base + rng.uniform(30, 100))    # hoo (slowly rising)
+        rest(rng.uniform(0.08, 0.15))
+        high = base + rng.uniform(500, 800)
+        note(high - 150, rng.uniform(0.12, 0.2))                           # ho
+        note(high + 50, rng.uniform(0.1, 0.18))                            # ke
+        note(high, rng.uniform(0.35, 0.55), high - rng.uniform(250, 400))  # kyo (falling)
+    elif species == "cuckoo":
+        top = rng.uniform(lo + 500, hi - 100)
+        for i in range(int(rng.integers(3, 5))):
+            note(top, rng.uniform(0.25, 0.35))
+            rest(rng.uniform(0.06, 0.1))
+            note(top - rng.uniform(300, 400), rng.uniform(0.3, 0.45))
+            if i < 3:
+                rest(rng.uniform(0.4, 0.6))
+    elif species == "shijukara":
+        a = rng.uniform(lo + 500, hi - 50)
+        b = a - rng.uniform(300, 500)
+        for i in range(int(rng.integers(3, 5))):
+            for _ in range(2):
+                note(a, rng.uniform(0.1, 0.16))
+                rest(rng.uniform(0.04, 0.07))
+            note(b, rng.uniform(0.3, 0.4))
+            if i < 3:
+                rest(rng.uniform(0.12, 0.2))
+    else:
+        raise ValueError(f"unknown species {species!r}")
+    rest(0.2)
+    return np.clip(np.concatenate(segs), lo, hi)
+
+
 def make_bank(n: int, seed: int = 12345, progress: float = 0.8) -> list[np.ndarray]:
     """A fixed set of `n` curriculum targets, so training reuses the same pieces (and they can be saved)."""
     rng = np.random.default_rng(seed)

@@ -114,6 +114,8 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--init", type=str, default=None, help="start from a saved network")
+    ap.add_argument("--keep-snapshots", action="store_true",
+                    help="also save the network at every evaluation as <out>_genNNN.npz (for listening to progress)")
     ap.add_argument("--out", type=str, default="runs/residual.npz")
     args = ap.parse_args()
 
@@ -158,6 +160,11 @@ def main() -> None:
             if g % args.eval_every == 0 or g == args.gens:
                 cur = evaluate(pool, theta, eval_seeds)
                 report(f"gen {g:3d}", cur)
+                if args.keep_snapshots:  # this generation's parameters, whether or not they are the best
+                    net.set_flat(theta)
+                    snap = out.with_name(f"{out.stem}_gen{g:03d}.npz")
+                    net.save(snap, scale=args.scale, horizon=args.horizon, ilc_gain=args.ilc_gain,
+                             feedback=args.feedback, fb_gain=args.fb_gain, history=args.history)
                 if cur[sl, 0].mean() > best[0]:
                     best = (cur[sl, 0].mean(), theta.copy())
                     net.set_flat(theta)

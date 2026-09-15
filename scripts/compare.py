@@ -21,6 +21,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from flute_rl import MLP, AdaptivePolicy, FluteEnv, ILCPolicy, ModelResidualPolicy, PhysicsPriorPolicy, rollout  # noqa: E402
 from flute_rl.feedback import FeedbackPolicy, FeedbackResidualPolicy  # noqa: E402
 from flute_rl.policy import load_net  # noqa: E402
+from flute_rl.targets import BIRDS, bird_song, make_target, scale_notes  # noqa: E402
 
 _A: dict = {}
 
@@ -53,10 +54,29 @@ def _init(args):
     _A["ctrl"] = controllers(args.residual, args.feedback)
 
 
+def long_piece(rng):
+    """Outside the training range: several pieces in a row (10 s or more) with 2-4 s held notes mixed in."""
+    parts = []
+    while sum(len(p) for p in parts) * 0.01 < 10.0:
+        if rng.random() < 0.4:
+            parts.append(np.concatenate([np.full(int(rng.integers(20, 40)), np.nan),
+                                         np.full(int(rng.integers(200, 400)), float(rng.choice(scale_notes())))]))
+        else:
+            parts.append(make_target(rng, int(rng.integers(1, 5))))
+    return np.concatenate(parts + [np.full(20, np.nan)])
+
+
+def bird_piece(rng):
+    return bird_song(rng, str(rng.choice(BIRDS)))
+
+
+TARGET_SETS = {"curriculum": None, "long": long_piece, "birds": bird_piece}
+
+
 def _job(task):
     name, seed = task
     a = _A["args"]
-    env = FluteEnv(progress=a.progress, takes=a.takes, feedback=a.feedback)
+    env = FluteEnv(progress=a.progress, takes=a.takes, feedback=a.feedback, target_fn=TARGET_SETS[a.targets])
     r = rollout(env, _A["ctrl"][name](), seed=seed)
     return [[t["mean_abs_cents"], t["mean_reward"], t["sounding_rate"], t["gap_leak"]] for t in r["per_take"]]
 
@@ -74,6 +94,8 @@ def main() -> None:
     ap.add_argument("--progress", type=float, default=0.8)
     ap.add_argument("--residual", action="append", default=[], help="saved residual network (repeatable)")
     ap.add_argument("--feedback", action="store_true", help="env delivers the delayed live pitch; adds the feedback controllers")
+    ap.add_argument("--targets", choices=sorted(TARGET_SETS), default="curriculum",
+                    help="curriculum: like training; long: 10 s+ pieces with 2-4 s notes; birds: uguisu / cuckoo / great tit")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed0", type=int, default=2_000_000, help="first evaluation seed (keep away from training seeds)")
     ap.add_argument("--plot", type=str, default=None, help="write a per-take plot to this PNG path")
@@ -86,7 +108,7 @@ def main() -> None:
     data = {n: np.array(res[i * len(seeds):(i + 1) * len(seeds)]) for i, n in enumerate(names)}  # (episodes, takes, 3)
 
     rng = np.random.default_rng(0)
-    print(f"{args.episodes} randomised rigs x {args.takes} takes, curriculum progress {args.progress}")
+    print(f"{args.episodes} randomised rigs x {args.takes} takes, targets: {args.targets}, curriculum progress {args.progress}")
     print("mean |cents| per take [95% CI]")
     for n in names:
         cells = []

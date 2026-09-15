@@ -97,17 +97,18 @@ def synth_self(cents: np.ndarray, sounding: np.ndarray, rng: np.random.Generator
     return y / (np.max(np.abs(y)) + 1e-9) * 0.5
 
 
-def synth_source(target: np.ndarray, kind: str, rng: np.random.Generator, sr: int = SR_SOURCE) -> tuple[np.ndarray, float]:
+def synth_source(target: np.ndarray, kind: str, rng: np.random.Generator, sr: int = SR_SOURCE,
+                 shift: float | None = None) -> tuple[np.ndarray, float]:
     """A model sound for a target contour (cents per control step, NaN = rest).
 
-    Returns (audio, octave shift in cents): the source sounds at target + shift."""
+    Returns (audio, octave shift in cents): the source sounds at target + shift.
+    `shift` fixes the octave shift instead of choosing it at random."""
     if kind not in SOURCE_KINDS:
         raise ValueError(f"unknown source kind {kind!r}")
     target = np.asarray(target, dtype=float)
-    shift = {"recorder": float(rng.choice([0.0, 1200.0])),
-             "whistle": 1200.0,
-             "hum": float(rng.choice([-1200.0, -2400.0])),
-             "bird": float(rng.choice([2400.0, 3600.0]))}[kind]
+    choices = {"recorder": [0.0, 1200.0], "whistle": [1200.0], "hum": [-1200.0, -2400.0], "bird": [2400.0, 3600.0]}
+    drawn = float(rng.choice(choices[kind]))  # always drawn, so a fixed shift does not change the rest of the sound
+    shift = drawn if shift is None else float(shift)
     top = np.nanmax(target) + shift
     while cents_to_hz(top) > 0.4 * sr:  # keep the fundamental well under Nyquist
         shift -= 1200.0

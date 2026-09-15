@@ -1,0 +1,453 @@
+<title>ちくわ笛ロボット開発記</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono:wght@400;600&family=Zen+Old+Mincho:wght@600;900&display=swap">
+<style>
+:root {
+  --ground: #F2F5F6;
+  --paper: #FBFCFC;
+  --ink: #1C2833;
+  --ink-soft: #4A5A66;
+  --rule: #C9D3D8;
+  --grid: #E3E9EC;
+  --amber: #B8741A;
+  --amber-soft: #F3E3CB;
+  --teal: #2E7C80;
+  --teal-soft: #D5E8E8;
+  --display: "Zen Old Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --body: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+  --mono: "IBM Plex Mono", "Consolas", "Menlo", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #121A20;
+    --paper: #18222A;
+    --ink: #E3EAEE;
+    --ink-soft: #A7B5BE;
+    --rule: #34434D;
+    --grid: #223038;
+    --amber: #E0A24A;
+    --amber-soft: #3A2C17;
+    --teal: #63B4B7;
+    --teal-soft: #1C3334;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #121A20;
+  --paper: #18222A;
+  --ink: #E3EAEE;
+  --ink-soft: #A7B5BE;
+  --rule: #34434D;
+  --grid: #223038;
+  --amber: #E0A24A;
+  --amber-soft: #3A2C17;
+  --teal: #63B4B7;
+  --teal-soft: #1C3334;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.85;
+  padding-inline: 20px;
+  padding-block: 48px 72px;
+}
+.wrap { max-width: 880px; margin: 0 auto; display: grid; gap: 40px; }
+header { display: grid; gap: 14px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--teal); }
+h1 { font-family: var(--display); font-weight: 900; font-size: clamp(34px, 6vw, 52px); line-height: 1.25; margin: 0; text-wrap: balance; }
+h1 .ring { color: var(--amber); }
+.lede { max-width: 38em; margin: 0; color: var(--ink-soft); }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-family: var(--mono); font-size: 13px; color: var(--ink-soft); }
+.meta a { color: var(--teal); }
+h2 { font-family: var(--display); font-weight: 900; font-size: 26px; line-height: 1.4; margin: 0; text-wrap: balance; }
+h3 { font-family: var(--display); font-weight: 600; font-size: 20px; line-height: 1.45; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+a { color: var(--teal); text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; color: var(--amber); white-space: nowrap; }
+code { font-family: var(--mono); font-size: 0.88em; background: var(--teal-soft); padding: 1px 5px; border-radius: 3px; }
+
+.panel { background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 24px; display: grid; gap: 16px; }
+.chart-wrap { overflow-x: auto; }
+.chart { width: 100%; min-width: 560px; height: auto; display: block; }
+.chart text { font-family: var(--body); font-size: 12px; fill: var(--ink); }
+.chart .tick { font-family: var(--mono); fill: var(--ink-soft); font-size: 11px; }
+.chart .val { font-family: var(--mono); font-size: 11px; fill: var(--ink); }
+.chart .gridline { stroke: var(--grid); stroke-width: 1; }
+.chart .axis { stroke: var(--rule); stroke-width: 1; }
+.chart .t1 { fill: var(--rule); }
+.chart .t2 { fill: var(--amber); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--ink-soft); }
+.key { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+.key.t1 { background: var(--rule); }
+.key.t2 { background: var(--amber); }
+.caption { font-size: 13px; color: var(--ink-soft); line-height: 1.7; }
+
+.timeline { display: grid; gap: 0; }
+.step { display: grid; grid-template-columns: 132px 1fr; gap: 0 28px; }
+.step-label { border-right: 2px solid var(--rule); padding-right: 18px; padding-block: 4px 32px; text-align: right; position: relative; }
+.step-label::after { content: ""; position: absolute; right: -7px; top: 12px; width: 12px; height: 12px; border-radius: 50%; background: var(--paper); border: 2px solid var(--teal); }
+.step.key-step .step-label::after { background: var(--amber); border-color: var(--amber); }
+.step-no { font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--teal); line-height: 1.2; display: block; }
+.step-when { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--ink-soft); }
+.step-body { display: grid; gap: 12px; padding-block: 0 36px; max-width: 40em; }
+.step-body ul { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; }
+.tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 3px; margin-right: 6px; vertical-align: 1px; }
+.tag.found { background: var(--teal-soft); color: var(--teal); }
+.tag.decided { background: var(--amber-soft); color: var(--amber); }
+.tag.miss { background: var(--grid); color: var(--ink-soft); }
+.tag.open { border: 1px solid var(--teal); color: var(--teal); }
+
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.table-wrap { overflow-x: auto; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 700; color: var(--ink-soft); font-size: 12px; letter-spacing: 0.04em; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+.stages { display: grid; gap: 10px; counter-reset: stage; list-style: none; padding: 0; margin: 0; }
+.stages li { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: baseline; }
+.stages li::before { counter-increment: stage; content: counter(stage); font-family: var(--mono); font-weight: 600; color: var(--teal); font-size: 18px; text-align: right; }
+.stages li.now::before { color: var(--amber); }
+.now-note { font-family: var(--mono); font-size: 11px; color: var(--amber); margin-left: 6px; }
+
+footer { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--rule); padding-top: 16px; }
+
+.gens { display: flex; flex-wrap: wrap; gap: 8px; }
+.gen-btn { font-family: var(--mono); font-size: 13px; padding: 6px 14px; border-radius: 4px; border: 1px solid var(--rule); background: var(--ground); color: var(--ink); cursor: pointer; }
+.gen-btn[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: var(--paper); }
+.gen-btn:disabled { cursor: not-allowed; color: var(--ink-soft); opacity: 0.7; }
+.gen-btn:focus-visible, .play:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.pieces { display: grid; gap: 22px; }
+.piece { display: grid; gap: 10px; }
+.piece-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+.piece-head h3 { font-size: 17px; }
+.play { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; padding: 3px 10px 3px 8px; border-radius: 999px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); cursor: pointer; white-space: nowrap; }
+.play::before { content: ""; width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 8px; border-color: transparent transparent transparent var(--teal); }
+.play[aria-pressed="true"] { border-color: var(--amber); background: var(--amber-soft); }
+.play[aria-pressed="true"]::before { width: 8px; height: 10px; border: 0; border-left: 3px solid var(--amber); border-right: 3px solid var(--amber); }
+.play.target::before { border-left-color: var(--amber); }
+.listen td { vertical-align: middle; }
+.listen td.model { font-size: 13px; }
+
+@media (max-width: 620px) {
+  .step { grid-template-columns: 1fr; }
+  .step-label { border-right: 0; border-left: 2px solid var(--rule); text-align: left; padding: 0 0 8px 16px; }
+  .step-label::after { left: -7px; right: auto; top: 6px; }
+  .step-body { border-left: 2px solid var(--rule); padding: 0 0 32px 16px; }
+  .step-no { display: inline; margin-right: 8px; }
+  .panel { padding: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Development log · Arduino Physical AI Challenge 2026</div>
+    <h1>ちくわ<span class="ring">笛</span>ロボット開発記</h1>
+    <p class="lede">口笛を聞いて、ちくわ(と 3D プリント笛)で真似するロボット。そのための強化学習を、シミュレーターの上で何を試し、何が分かり、何を決めてきたかの記録です。数値は音程のずれで、単位はセント(100 セント = 半音)です。</p>
+    <div class="meta">
+      <span>最終更新 2026-09-15</span>
+      <span>現在: 段階 1(PC 上の強化学習)の途中</span>
+      <a href="https://github.com/airpocket-soundman/chikuwa-flute-robot">github.com/airpocket-soundman/chikuwa-flute-robot</a>
+    </div>
+  </header>
+
+  <section class="panel" aria-labelledby="result-h">
+    <h2 id="result-h">ここまでの到達点</h2>
+    <p>学習にも調整にも使っていない 200 台の機体(管の長さやアクチュエーターの速さを乱数で変えたもの)で、同じお手本を 2 回吹いたときの音程のずれの平均です。</p>
+    <div class="chart-wrap">
+      <svg class="chart" viewBox="0 0 640 312" role="img" aria-label="方式ごとの1回目と2回目の音程のずれ。物理モデルのみ170と170、古典ILC 170と74、機体推定とILC 170と27、演奏中の補正(手作り)82と34、演奏中の補正と強化学習54と24セント">
+        <line class="gridline" x1="180" y1="30" x2="180" y2="276"/>
+        <line class="gridline" x1="302.2" y1="30" x2="302.2" y2="276"/>
+        <line class="gridline" x1="424.4" y1="30" x2="424.4" y2="276"/>
+        <line class="gridline" x1="546.7" y1="30" x2="546.7" y2="276"/>
+        <line class="axis" x1="180" y1="276" x2="620" y2="276"/>
+        <text class="tick" x="180" y="294" text-anchor="middle">0</text>
+        <text class="tick" x="302.2" y="294" text-anchor="middle">50</text>
+        <text class="tick" x="424.4" y="294" text-anchor="middle">100</text>
+        <text class="tick" x="546.7" y="294" text-anchor="middle">150</text>
+        <text class="tick" x="620" y="294" text-anchor="end">セント</text>
+
+        <text x="170" y="56" text-anchor="end">物理モデルのみ</text>
+        <rect class="t1" x="180" y="40" width="416.0" height="14"/>
+        <rect class="t2" x="180" y="57" width="416.0" height="14"/>
+        <text class="val" x="602" y="51">170</text>
+        <text class="val" x="602" y="68">170</text>
+
+        <text x="170" y="104" text-anchor="end">古典的な ILC</text>
+        <rect class="t1" x="180" y="88" width="416.0" height="14"/>
+        <rect class="t2" x="180" y="105" width="180.1" height="14"/>
+        <text class="val" x="602" y="99">170</text>
+        <text class="val" x="366" y="116">74</text>
+
+        <text x="170" y="152" text-anchor="end">機体推定 + ILC</text>
+        <rect class="t1" x="180" y="136" width="416.0" height="14"/>
+        <rect class="t2" x="180" y="153" width="66.2" height="14"/>
+        <text class="val" x="602" y="147">170</text>
+        <text class="val" x="252" y="164">27</text>
+
+        <text x="170" y="192" text-anchor="end">+ 演奏中の補正</text>
+        <text x="170" y="207" text-anchor="end" class="tick">手作り</text>
+        <rect class="t1" x="180" y="184" width="200.9" height="14"/>
+        <rect class="t2" x="180" y="201" width="84.1" height="14"/>
+        <text class="val" x="387" y="195">82</text>
+        <text class="val" x="270" y="212">34</text>
+
+        <text x="170" y="240" text-anchor="end">+ 演奏中の補正</text>
+        <text x="170" y="255" text-anchor="end" class="tick">強化学習</text>
+        <rect class="t1" x="180" y="232" width="131.7" height="14"/>
+        <rect class="t2" x="180" y="249" width="59.4" height="14"/>
+        <text class="val" x="318" y="243">54</text>
+        <text class="val" x="246" y="260">24</text>
+      </svg>
+    </div>
+    <div class="legend"><span><span class="key t1"></span>1 回目</span><span><span class="key t2"></span>2 回目</span></div>
+    <p class="caption">200 台 × 2 テイク、学習とは別の乱数で作ったお手本(このときは奏法の区別を入れる前のお手本)。「機体推定」は 1 回吹いた録音から機体のパラメーターを当てはめる手法で、強化学習ではない。強化学習の方策は 1 回目に音が出ている割合が約 95% に下がっており、難しい所で音を止めて点を稼いでいる可能性がある(未確認)。</p>
+  </section>
+
+  <section class="panel" aria-labelledby="listen-h">
+    <h2 id="listen-h">聞き比べ</h2>
+    <p>演奏中に聞いて直す方策を学習している途中の、世代ごとの演奏です。お手本(リコーダー風の音色)と、ロボットの笛の音(シミュレーターの結果から合成)を聞けます。どのモデルも同じ機体・同じ曲で吹いています。</p>
+    <div class="gens" role="group" aria-label="世代">
+      <button class="gen-btn" id="gen-050" type="button" data-gen="050" aria-pressed="true">50 世代目</button>
+      <button class="gen-btn" id="gen-100" type="button" data-gen="100" disabled>100 世代目(学習中)</button>
+      <button class="gen-btn" id="gen-150" type="button" data-gen="150" disabled>150 世代目(学習中)</button>
+    </div>
+    <div class="pieces" id="pieces"></div>
+    <p class="caption">数値は音程のずれの平均(セント)。「切れ目」は、音符の間の短い無音で音が鳴ってしまった割合。各世代のモデルは「その世代までで最も評価の良かったもの」。1 曲・1 台だけの結果なので、数値のばらつきは大きい(方式の良し悪しは上のグラフや README の多数条件の比較で判断する)。</p>
+  </section>
+
+  <section aria-labelledby="log-h" style="display:grid; gap:24px;">
+    <h2 id="log-h">経緯</h2>
+    <div class="timeline">
+
+      <div class="step">
+        <div class="step-label"><span class="step-no">1</span><span class="step-when">09-15 · 準備</span></div>
+        <div class="step-body">
+          <h3>リポジトリを分けた</h3>
+          <p>コンテスト情報のリポジトリ <code>maker_contest_2026</code> の中にあったちくわ笛の強化学習環境を、関係する 4 コミットの履歴ごと抜き出して、専用のリポジトリにした。README とアイデアページの中のパスとリンクも、新しい場所に合わせて直した。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-label"><span class="step-no">2</span><span class="step-when">09-15 · 出発点</span></div>
+        <div class="step-body">
+          <h3>強化学習が効かない状態から始まった</h3>
+          <p>最初の実験では、物理モデルに補正を足す方策(約 7,400 パラメーター)を進化戦略(ES)で学習させたが、1〜3 回目が <span class="num">333 / 175 / 298</span> セントと、物理モデルだけ(<span class="num">202</span>)より悪くなっていた。一方、手作りの古典的な反復学習制御(ILC)は、5 回で <span class="num">202 → 44</span> セントまで上達していた。</p>
+          <p><span class="tag decided">依頼</span>強化学習を、効果が見えるまで改良する。モデルが足りなければ、Arduino 前提はいったん無視して大きくしてよい。</p>
+        </div>
+      </div>
+
+      <div class="step key-step">
+        <div class="step-label"><span class="step-no">3</span><span class="step-when">09-15 · 診断</span></div>
+        <div class="step-body">
+          <h3>1 回目のずれの正体を調べた</h3>
+          <p>乱数で変えている機体のパラメーターを、1 つずつだけ変えて測った。すると、1 回目のずれのほとんどが 2 つから来ていた。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>その 1 つだけを乱数で変えたとき</th><th style="text-align:right">1 回目のずれ</th></tr></thead>
+              <tbody>
+                <tr><td>押し込む方向のアクチュエーターの速さ(±20%)</td><td class="n">177</td></tr>
+                <tr><td>管の長さ(±10mm)</td><td class="n">103</td></tr>
+                <tr><td>引き戻す方向の速さ・管の端の補正・気温</td><td class="n">34〜41</td></tr>
+                <tr><td>それ以外(不感帯・遅れ・角度の窓など)</td><td class="n">28〜29</td></tr>
+                <tr><td>何も変えない(公称の機体)</td><td class="n">33</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><span class="tag found">分かったこと</span>演奏中に音を聞かない方式では、方策は「この個体の速さ」を知る手段がない。どれだけ学習しても 1 回目は直せず、この個体差が評価のばらつきを支配して、学習の信号をかき消していた。真のパラメーターを知っている物理モデルなら、1 回目でも約 <span class="num">40</span> セントになる。残りのずれは主に音の切り替わり(切り替わり直後 <span class="num">46</span>、伸ばしている間 <span class="num">14</span>)だった。</p>
+        </div>
+      </div>
+
+      <div class="step key-step">
+        <div class="step-label"><span class="step-no">4</span><span class="step-when">09-15 · 機体推定</span></div>
+        <div class="step-body">
+          <h3>1 回吹いた録音から、機体を当てはめる</h3>
+          <p>吹き終わったあと、「自分が送った PWM」と「録音した音程」から、押し込み・引き戻しの速さ、管の長さ、音程のずれを当てはめ(ガウス・ニュートン法)、次のテイクをそのパラメーターで吹くようにした。推定した速さと真の速さの相関は約 <span class="num">0.96</span>。</p>
+          <p><span class="tag miss">つまずき</span>最初の版は 100 台中 3 台で当てはめ自体が動かず、2 回目が ILC より悪くなった(最悪 <span class="num">667</span> セント)。1 回目のずれが大きすぎて、全部の音が外れ値として捨てられていたのが原因。粗いグリッド探索から始め、外れ値の閾値を段階的に絞る形に直して解決した。</p>
+          <p><span class="tag found">結果</span>2 回目が古典的な ILC の <span class="num">69 → 23</span> セント(対応ありの差 −45.9、95% 信頼区間 −58〜−36)。5 回目まで、どのテイクでも有意に良い。計算は numpy だけで数十 ms なので、テイクの合間に UNO Q の Linux 側で動かせる。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-label"><span class="step-no">5</span><span class="step-when">09-15 · 強化学習 1</span></div>
+        <div class="step-body">
+          <h3>機体推定の上に、補正の方策を学習させた</h3>
+          <p>個体差を取り除いたので、学習の信号はきれいになった。96 候補 × 8 機体 × 200 世代を 18 並列で学習した。</p>
+          <p><span class="tag miss">結果</span>2 回目が <span class="num">−1.4</span> セント、1 回目は <span class="num">+2</span> セントで、効果はほぼなかった。音を聞かない方式では、機体推定の後に残るずれはアクチュエーターの速さの限界に近く、方策で詰められる余地が小さかった。</p>
+        </div>
+      </div>
+
+      <div class="step key-step">
+        <div class="step-label"><span class="step-no">6</span><span class="step-when">09-15 · 強化学習 2</span></div>
+        <div class="step-body">
+          <h3>演奏中に、遅れて届く自分の音を聞いて直す</h3>
+          <p>聞こえた音程のずれから、プランジャーの推定位置を直す手作りの補正を作った。ゲイン 0.05〜0.1 で 1 回目が <span class="num">165 → 75</span> セント前後まで下がったが、0.2 以上では遅れのせいで行き過ぎを繰り返し、崩れた。</p>
+          <p>そこで、行動への補正に加えて「聞こえた音をどれだけ信じるか(補正の強さ 0〜2 倍)」を毎ステップ出す方策を学習させた(約 2,300 パラメーター)。</p>
+          <p><span class="tag found">結果</span>1 回目が手作りの補正の <span class="num">82 → 54</span> セント。ここで初めて強化学習の効果がはっきり見えた。2 回目も <span class="num">34 → 24</span> セント。</p>
+          <p><span class="tag decided">議論</span>「聞く・聞かない」は演奏中のフィードバックのことで、演奏後の評価はどの方式でも使っている。学習のフィードバック(演奏後 → 次の世代)、テイク間のフィードバック(演奏後 → 次のテイク)、演奏中のフィードバックの 3 種類に分けて整理した。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-label"><span class="step-no">7</span><span class="step-when">09-15 · 記憶</span></div>
+        <div class="step-body">
+          <h3>耳を信じるタイミングを、記憶から学ばせる</h3>
+          <p>学習した方策を分析すると、信じる度合いを「どこでもおよそ 1.8 倍」にしていただけで、音の切り替わりと伸ばしている間を区別しておらず(<span class="num">1.83 / 1.87</span>)、遅れの長さ(1〜5 ステップ)にも合わせていなかった。</p>
+          <p><span class="tag decided">提案(ユーザー)</span>自分が音を変えてから、いつ聞こえる音が変わるかを学習できれば、フィードバックのタイミングを学習できるはず。リカレントな構造を入れたらよい。</p>
+          <p>記憶なし MLP、直近 10 ステップの履歴を渡す MLP(記憶の代わりに遅れの情報だけ与える対照)、GRU(リカレント、numpy で実装)の 3 つを同じ条件で学習中。50 世代目の途中経過では GRU が少し先行している(1 回目 <span class="num">79</span> / 2 回目 <span class="num">18</span> セント。MLP は 85 / 21)。</p>
+          <p><span class="tag open">進行中</span>最終結果と、GRU が場面や遅れに応じて信じ方を変えているかの分析は、学習の完了後に追記する。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-label"><span class="step-no">8</span><span class="step-when">09-15 · お手本</span></div>
+        <div class="step-body">
+          <h3>学習用のお手本を作り直した</h3>
+          <p><span class="tag decided">決定(ユーザー)</span>学習は複数の機体で並列に行う(ES の 96 候補 × 8 機体を並列に評価していることを確認)。お手本は 1,000 曲の固定セットを作って使い回す。演奏には、1 音ずつ切る奏法と、スラー・タイでつなげる奏法の両方がある。音を切るのは、角度を鳴る範囲の外に振って行う。演奏難易度の高いお手本は作らない。</p>
+          <ul>
+            <li>1 音 0.25 秒以上、隣の音との跳躍は 400 セント(長 3 度程度)まで</li>
+            <li>1 曲ごとに「つなげる」「切る(音の間に 50〜120ms の無音)」「混ぜる」のどれか</li>
+            <li>学習前の方策は、切れ目の <span class="num">19%</span> で音が鳴り続けていた。角度で音を止める動きも学習の対象にした</li>
+            <li>お手本は WAV と図で書き出して、耳と目で確認できるようにした</li>
+          </ul>
+          <p><span class="tag found">整理</span>お手本は曲全体が配列として保存されていて、方策は楽譜を先読みする奏者のように、毎ステップ少し先を読むだけ。メロディを覚える役割はモデルにはない。形式は既存の標準ではなく、10ms ごとの音程(セント)の並び。研究でよく使われる「時刻・周波数」の CSV とは、情報を落とさずに変換できる。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-label"><span class="step-no">9</span><span class="step-when">09-15 · 音から学ぶ</span></div>
+        <div class="step-body">
+          <h3>音のデータから E2E で学ぶ準備</h3>
+          <p><span class="tag decided">方針(ユーザー)</span>解像度を落としてよいので、音のデータから E2E で処理したい。本番では口笛・リコーダー・鼻歌・鳥のさえずりを真似させたいので、リコーダーの音で学習したあと、いろいろな音色で追加学習する。</p>
+          <p>今の方式は、決まった計算(YIN)で音を音程に直してから方策に渡すパイプラインで、厳密には E2E ではない。まず、シミュレーターで音を合成できるようにした(ロボット自身の笛は 8kHz、お手本は 16kHz。音色・部屋の響き・雑音を乱数で変える)。合成した音を YIN で測ると、次のようになった。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>音</th><th style="text-align:right">音程の誤差(中央値)</th><th style="text-align:right">オクターブの取り違え</th></tr></thead>
+              <tbody>
+                <tr><td>ロボット自身の笛</td><td class="n">5.9</td><td class="n">10%</td></tr>
+                <tr><td>リコーダー</td><td class="n">2.3</td><td class="n">0.2%</td></tr>
+                <tr><td>口笛</td><td class="n">2.0</td><td class="n">0.2%</td></tr>
+                <tr><td>鼻歌</td><td class="n">2.6</td><td class="n">0.9%</td></tr>
+                <tr><td>鳥風の音</td><td class="n">15.9</td><td class="n">25%</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>次は、音程を読む小さなネットワークを教師ありで作って YIN と比べ、それを「耳」の初期値にして、音から行動までをまとめて強化学習する(PyTorch・GPU)。音色は、前の音色も混ぜたまま増やしていく(破滅的忘却を避けるため)。</p>
+          <p><span class="tag decided">決定(ユーザー)</span>鳥はまずウグイスの「ホーホケキョ」を想定する。ウグイスを含む真似しやすいさえずり(カッコウ、シジュウカラの「ツツピー」など)でテストし、真似できないような複雑な鳴き声は対象にしない。</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="road-h">
+    <h2 id="road-h">これからの段階</h2>
+    <p>ユーザーが決めた 6 段階。前の段階ができてから次に進む。</p>
+    <ol class="stages">
+      <li class="now"><span>PC で強化学習して、シミュレーター上で真似できるようになる<span class="now-note">いまここ</span></span></li>
+      <li><span>Arduino で動くくらい小さなモデルで真似できるようになる</span></li>
+      <li><span>Arduino で実際に推論して、シミュレーターで真似する</span></li>
+      <li><span>Arduino で笛を制御して、実物で真似する</span></li>
+      <li><span>Arduino がスピーカーから流したリコーダーの音を聞いて、シミュレーターで真似する</span></li>
+      <li><span>Arduino がスピーカーから流したいろいろな音を聞いて、真似する</span></li>
+    </ol>
+  </section>
+
+  <footer>
+    このページはリポジトリの <code>docs/history.html</code> と同じ内容です。詳しい数値と実行方法は README と <code>docs/roadmap.md</code> にあります。
+  </footer>
+</div>
+
+<script>
+const PIECES = [
+  { id: "legato", name: "つなげる曲(スラー・タイ)", gaps: false },
+  { id: "detached", name: "切る曲(音の間に短い無音)", gaps: true },
+  { id: "uguisu", name: "ウグイス(ホーホケキョ)", gaps: true },
+];
+// [take1 cents, take1 gap leak, take2 cents, take2 gap leak] per piece, from manifest.json of each generation
+const GENS = {
+  "050": [
+    { label: "手作りの補正(学習なし)", slug: "classic", r: { legato: [48.8, null, 37.5, null], detached: [23.6, 0.167, 16.4, 0.167], uguisu: [44.0, 0.222, 24.3, 0.222] } },
+    { label: "記憶なし MLP", slug: "fb_mlp_gen050", r: { legato: [30.5, null, 14.1, null], detached: [16.6, 0.133, 12.0, 0.133], uguisu: [42.8, 0.111, 26.9, 0.111] } },
+    { label: "履歴つき MLP", slug: "fb_hist_gen050", r: { legato: [26.0, null, 9.6, null], detached: [18.3, 0.133, 13.7, 0.167], uguisu: [38.0, 0.111, 23.0, 0.111] } },
+    { label: "GRU(記憶あり)", slug: "fb_gru_gen050", r: { legato: [24.3, null, 14.2, null], detached: [16.7, 0.133, 12.9, 0.133], uguisu: [39.7, 0.222, 25.2, 0.222] } },
+  ],
+};
+
+const player = new Audio();
+let current = null;
+function stop() { player.pause(); if (current) current.setAttribute("aria-pressed", "false"); current = null; }
+player.addEventListener("ended", stop);
+function playButton(src, text, extraClass) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "play" + (extraClass ? " " + extraClass : "");
+  b.textContent = text;
+  b.setAttribute("aria-pressed", "false");
+  b.addEventListener("click", () => {
+    if (current === b) { stop(); return; }
+    stop();
+    player.src = src;
+    player.play().catch(() => {});
+    current = b;
+    b.setAttribute("aria-pressed", "true");
+  });
+  return b;
+}
+function fmtTake(cents, leak, showGap) {
+  return cents.toFixed(1) + " c" + (showGap && leak !== null ? " · 切れ目 " + Math.round(leak * 100) + "%" : "");
+}
+function render(gen) {
+  stop();
+  const root = document.getElementById("pieces");
+  root.textContent = "";
+  const models = GENS[gen];
+  for (const p of PIECES) {
+    const box = document.createElement("div");
+    box.className = "piece";
+    const head = document.createElement("div");
+    head.className = "piece-head";
+    const h = document.createElement("h3");
+    h.textContent = p.name;
+    head.append(h, playButton("audio/targets/target_" + p.id + ".wav", "お手本", "target"));
+    const wrap = document.createElement("div");
+    wrap.className = "table-wrap";
+    const t = document.createElement("table");
+    t.className = "listen";
+    t.innerHTML = "<thead><tr><th>方策</th><th>1 回目</th><th>2 回目</th></tr></thead>";
+    const tb = document.createElement("tbody");
+    for (const m of models) {
+      const [c1, g1, c2, g2] = m.r[p.id];
+      const tr = document.createElement("tr");
+      const td0 = document.createElement("td"); td0.className = "model"; td0.textContent = m.label;
+      const td1 = document.createElement("td");
+      td1.append(playButton("audio/gen" + gen + "/" + m.slug + "_" + p.id + "_take1.wav", fmtTake(c1, g1, p.gaps)));
+      const td2 = document.createElement("td");
+      td2.append(playButton("audio/gen" + gen + "/" + m.slug + "_" + p.id + "_take2.wav", fmtTake(c2, g2, p.gaps)));
+      tr.append(td0, td1, td2);
+      tb.append(tr);
+    }
+    t.append(tb);
+    wrap.append(t);
+    box.append(head, wrap);
+    root.append(box);
+  }
+}
+for (const b of document.querySelectorAll(".gen-btn")) {
+  b.addEventListener("click", () => {
+    if (!GENS[b.dataset.gen]) return;
+    for (const o of document.querySelectorAll(".gen-btn")) o.setAttribute("aria-pressed", String(o === b));
+    render(b.dataset.gen);
+  });
+}
+render("050");
+</script>
