@@ -180,12 +180,17 @@ def batch_fit(pwm: torch.Tensor, meas: torch.Tensor, iters: int = 6, reg: float 
     # coarse grid over the two speeds (same order and tie-breaking as the numpy version)
     g = torch.log(torch.linspace(0.7, 1.3, 13, dtype=torch.float64, device=pwm.device))
     grid = torch.stack(torch.meshgrid(g, g, indexing="ij"), -1).reshape(-1, 2)  # a outer, b inner
-    G = len(grid)
-    zg = torch.zeros(G * B, 4, dtype=torch.float64, device=pwm.device)
-    zg[:, :2] = grid.repeat_interleave(B, 0)
-    r = res(zg, pwm.repeat(G, 1)).reshape(G, B, T)
-    okg = ok[None].expand(G, B, T)
-    loss = torch.where(okg, torch.clamp(r.abs(), max=6.0) ** 2, torch.zeros_like(r)).sum(2) / ok.sum(1).clamp_min(1)
+    # evaluated in chunks of grid points: all 169 at once would need several GB for a large batch
+    losses = []
+    n_ok = ok.sum(1).clamp_min(1)
+    for chunk in torch.split(grid, 13):
+        G = len(chunk)
+        zg = torch.zeros(G * B, 4, dtype=torch.float64, device=pwm.device)
+        zg[:, :2] = chunk.repeat_interleave(B, 0)
+        r = res(zg, pwm.repeat(G, 1)).reshape(G, B, T)
+        losses.append(torch.where(ok[None], torch.clamp(r.abs(), max=6.0) ** 2, torch.zeros_like(r)).sum(2) / n_ok)
+        del r, zg
+    loss = torch.cat(losses)
     best = loss.argmin(0)
     z = torch.zeros(B, 4, dtype=torch.float64, device=pwm.device)
     has = ok.any(1)
