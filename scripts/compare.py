@@ -78,7 +78,8 @@ def _job(task):
     a = _A["args"]
     env = FluteEnv(progress=a.progress, takes=a.takes, feedback=a.feedback, target_fn=TARGET_SETS[a.targets], harsh=a.harsh)
     r = rollout(env, _A["ctrl"][name](), seed=seed)
-    return [[t["mean_abs_cents"], t["mean_reward"], t["sounding_rate"], t["gap_leak"]] for t in r["per_take"]]
+    return [[t["true_abs_cents"], t["mean_reward"], t["sounding_rate"], t["gap_leak"], t["mean_abs_cents"]]
+            for t in r["per_take"]]
 
 
 def boot_ci(x: np.ndarray, rng, n: int = 2000) -> tuple[float, float]:
@@ -112,7 +113,7 @@ def main() -> None:
     rng = np.random.default_rng(0)
     print(f"{args.episodes} randomised rigs x {args.takes} takes, targets: {args.targets}, harsh {args.harsh}, "
           f"curriculum progress {args.progress}")
-    print("mean |cents| per take [95% CI]")
+    print("mean |cents| of the pitch actually played, per take [95% CI]")
     for n in names:
         cells = []
         for k in range(args.takes):
@@ -140,6 +141,9 @@ def main() -> None:
     print("sounding inside the short gaps between detached notes (should be 0)")
     for n in names:
         print(f"  {n:26s}" + "  ".join(f"{np.nanmean(data[n][:, k, 3]):.3f}" for k in range(args.takes)))
+    print("mean |cents| of the measured pitch (includes the pitch estimator's errors) per take")
+    for n in names:
+        print(f"  {n:26s}" + "  ".join(f"{np.nanmean(data[n][:, k, 4]):6.1f}" for k in range(args.takes)))
 
     if args.plot:
         import matplotlib

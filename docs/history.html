@@ -404,7 +404,7 @@ footer { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--ru
           </ul>
           <p><span class="tag decided">決定(ユーザー)</span>学習は 100 世代で打ち切り、GPU での高速化を織り込んだうえで、厳しくシミュレーションする。</p>
           <p>GPU 版として、多数の機体をまとめて 1 ステップずつ進めるシミュレーターと制御を作った(雑音なしなら numpy 版と行動が完全に一致)。1 世代 768 回の演奏では CPU 20 コアの numpy 版とほぼ同じ速さ(約 6 秒)で、候補を 10 倍にすると 1 秒あたりの演奏数が約 2.3 倍になった。今は細かい計算の呼び出しが時間を決めていて、さらに速くするには計算をまとめる工夫が要る。</p>
-          <p>静止摩擦・非線形な速さ・演奏中の速さの変化・動きの雑音・遅れの揺らぎ、鳴り始めの遅れ・ヒステリシス・確率的な窓の端・動く窓の中心・息による音程の揺らぎ、オクターブの取り違えを、厳しさの度合い 1 つで入れられるようにした(値はすべて推測)。制御側のモデルは単純なまま、学習し直さずに評価すると、2 回目のずれが 3〜4 倍になり(機体推定 + ILC で <span class="num">19 → 79</span> セント)、テイクを重ねても良くならなくなった。これまでの結果は、シミュレーターの甘さに大きく助けられていた。</p>
+          <p>静止摩擦・非線形な速さ・演奏中の速さの変化・動きの雑音・遅れの揺らぎ、鳴り始めの遅れ・ヒステリシス・確率的な窓の端・動く窓の中心・息による音程の揺らぎ、オクターブの取り違えを、厳しさの度合い 1 つで入れられるようにした(値はすべて推測)。制御側のモデルは単純なまま、学習し直さずに評価すると、2 回目のずれが 1.5〜2.5 倍になり(機体推定 + ILC で <span class="num">19 → 48</span> セント、実際に鳴った音程で)、テイクを重ねても良くならなくなった。これまでの結果は、シミュレーターの甘さに助けられていた(最初は「3〜4 倍」と報告したが、測り間違いを含む数え方だった。段階 11 の訂正を参照)。</p>
         </div>
       </div>
 
@@ -415,15 +415,15 @@ footer { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--ru
           <p>3 つの方策を、厳しいシミュレーターで GPU を使って 100 世代学習し直した。あわせて E2E の方法 A として、シミュレーターの中で笛の音を鳴らし、学習済みの耳のネットワークで聞かせた。耳が聞き取った音程を演奏中の補正と機体推定に使い、耳の特徴(自信の度合いと 16 次元の要約)も方策に渡した。</p>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>厳しい機体、200 台</th><th style="text-align:right">1 回目</th><th style="text-align:right">2 回目</th><th style="text-align:right">3 回目</th><th style="text-align:right">音が出ている割合</th></tr></thead>
+              <thead><tr><th>厳しい機体、200 台(実際に鳴った音程)</th><th style="text-align:right">1 回目</th><th style="text-align:right">2 回目</th><th style="text-align:right">3 回目</th><th style="text-align:right">音が出ている割合</th></tr></thead>
               <tbody>
-                <tr><td>手作りの補正(測定値で聞く)</td><td class="n">104.0</td><td class="n">66.6</td><td class="n">64.9</td><td class="n">0.96</td></tr>
-                <tr><td>手作りの補正(耳で聞く)</td><td class="n">109.6</td><td class="n">65.4</td><td class="n">67.5</td><td class="n">0.96</td></tr>
-                <tr><td>GRU(甘い機体で学習)</td><td class="n">87.4</td><td class="n">57.0</td><td class="n">60.4</td><td class="n">0.92</td></tr>
-                <tr><td>履歴つき MLP(甘い機体で学習)</td><td class="n">87.8</td><td class="n">59.3</td><td class="n">62.4</td><td class="n">0.93</td></tr>
-                <tr><td>履歴つき MLP(学習し直した後)</td><td class="n">84.6</td><td class="n">56.5</td><td class="n">57.3</td><td class="n">0.96</td></tr>
-                <tr><td>GRU(学習し直した後)</td><td class="n">86.9</td><td class="n">58.0</td><td class="n">61.1</td><td class="n">0.96</td></tr>
-                <tr><td>GRU(学習し直した後、耳で聞く)</td><td class="n">91.0</td><td class="n">55.3</td><td class="n">61.2</td><td class="n">0.96</td></tr>
+                <tr><td>手作りの補正(測定値で聞く)</td><td class="n">73.7</td><td class="n">35.4</td><td class="n">34.5</td><td class="n">0.96</td></tr>
+                <tr><td>手作りの補正(耳で聞く)</td><td class="n">79.7</td><td class="n">36.4</td><td class="n">35.1</td><td class="n">0.96</td></tr>
+                <tr><td>GRU(甘い機体で学習)</td><td class="n">56.4</td><td class="n">25.2</td><td class="n">29.9</td><td class="n">0.92</td></tr>
+                <tr><td>履歴つき MLP(甘い機体で学習)</td><td class="n">56.9</td><td class="n">27.7</td><td class="n">31.6</td><td class="n">0.93</td></tr>
+                <tr><td>履歴つき MLP(学習し直した後)</td><td class="n">53.6</td><td class="n">24.9</td><td class="n">26.7</td><td class="n">0.96</td></tr>
+                <tr><td>GRU(学習し直した後)</td><td class="n">56.0</td><td class="n">26.4</td><td class="n">30.5</td><td class="n">0.96</td></tr>
+                <tr><td>GRU(学習し直した後、耳で聞く)</td><td class="n">62.3</td><td class="n">26.9</td><td class="n">28.0</td><td class="n">0.96</td></tr>
               </tbody>
             </table>
           </div>
@@ -432,8 +432,9 @@ footer { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--ru
             <li>学習し直しても伸びは約 3 セントと小さい。変わったのは、黙って点を稼ぐ癖が消えたこと(音が出ている割合 0.92〜0.93 → 0.96)</li>
             <li>耳の特徴を渡しても(方法 A)、はっきりした効果はなかった</li>
             <li>GRU は厳しい機体でも、耳を信じる度合いを場面や遅れによらず約 1.8 倍にしているだけで、「いつ信じるか」は学習できていない</li>
-            <li>学習した方策は、手作りの補正より 15〜20% 良いところで頭打ちになっている。一番の原因は、制御側の機体モデル(機体推定の式)が機体の形に合っていないことだと考えている</li>
+            <li>学習した方策は、手作りの補正より 1 回目で約 20、2 回目で約 10 セント良い。学習し直した履歴つき MLP が最も良い</li>
           </ul>
+          <p><span class="tag miss">訂正</span>最初は「測った音程」でずれを数えていたため、厳しい機体の結果を大きく見積もっていた(2 回目 58〜79 セント)。厳しい効果を 1 つずつ入れて調べると、最大の要因は音程推定のオクターブ誤りで、これは実際の音ではなく測り間違いだった。実際に鳴った音程で数え直すと、2 回目は 25〜36 セントで、甘い機体の約 1.5 倍にとどまる。また、乱数を使わない厳しい効果(不感帯・静止摩擦・非線形・差し込み量で変わる速さ)の真の値を制御側が知っていても、2 回目の改善は 8〜9 セントまでで、機体推定のモデルを広げる伸びしろは限られていた。</p>
           <p><span class="tag decided">並行して(ユーザー)</span>3D プリントで内径 10mm・長さ 60mm の笛を試作。はじめは鳴らなかったが、底を閉じると簡単に鳴るようになった(片側を閉じた管は計算上 約 1.4kHz)。録音を解析するスクリプト <code>scripts/analyze_recording.py</code> を用意した。</p>
           <p><span class="tag open">次</span>実物の測定(差し込み量ごとの音程、鳴る角度の範囲、アクチュエーターの速さ)でシミュレーターを合わせ込むこと、機体推定のモデルに厳しい効果の一部(不感帯や非線形)を加えること、方法 B(音から行動までを PPO でまとめて学習)。</p>
         </div>

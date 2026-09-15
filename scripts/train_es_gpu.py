@@ -26,7 +26,7 @@ from flute_rl.policy import GRU, MLP, load_net  # noqa: E402
 from flute_rl.targets import load_bank, make_bank, make_target, sample_level, save_bank  # noqa: E402
 from flute_rl.torch_env import BatchAgent, BatchFluteEnv, BatchGRU, BatchMLP, rig_from_seed, run_episodes  # noqa: E402
 
-KEYS = ("|cents|", "reward/step", "sounding", "gap leak")
+KEYS = ("|cents| measured", "reward/step", "sounding", "gap leak", "|cents| played")
 
 
 EAR = {}
@@ -48,8 +48,8 @@ def play(thetas: torch.Tensor, rigs, targets, args, gen: torch.Generator) -> tor
 
 def report(label: str, m: np.ndarray) -> None:
     for k, row in enumerate(m):
-        print(f"{label} take {k + 1}: " + "  ".join(f"{n} {v:.3f}" if n != "|cents|" else f"{n} {v:6.1f}" for n, v in zip(KEYS, row)),
-              flush=True)
+        print(f"{label} take {k + 1}: " + "  ".join(f"{n} {v:6.1f}" if n.startswith("|cents|") else f"{n} {v:.3f}"
+                                                   for n, v in zip(KEYS, row)), flush=True)
 
 
 def main() -> None:

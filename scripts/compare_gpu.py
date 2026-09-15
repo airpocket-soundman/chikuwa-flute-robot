@@ -83,9 +83,10 @@ def main() -> None:
 
     names = list(results)
     w = max(len(n) for n in names) + 2
-    print(f"\n{args.episodes} rigs x {args.takes} takes, harsh {args.harsh}\nmean |cents| per take [95% CI]")
+    C = 4  # the pitch actually played (column 0 is the measured pitch, which includes estimator errors)
+    print(f"\n{args.episodes} rigs x {args.takes} takes, harsh {args.harsh}\nmean |cents| of the pitch actually played, per take [95% CI]")
     for n in names:
-        cells = [f"{np.nanmean(results[n][:, k, 0]):6.1f} [{ci(results[n][:, k, 0])[0]:5.1f},{ci(results[n][:, k, 0])[1]:5.1f}]"
+        cells = [f"{np.nanmean(results[n][:, k, C]):6.1f} [{ci(results[n][:, k, C])[0]:5.1f},{ci(results[n][:, k, C])[1]:5.1f}]"
                  for k in range(args.takes)]
         print(f"  {n:{w}s}" + "  ".join(cells))
     ref = names[0]
@@ -93,11 +94,12 @@ def main() -> None:
     for n in names[1:]:
         cells = []
         for k in range(args.takes):
-            d = results[n][:, k, 0] - results[ref][:, k, 0]
+            d = results[n][:, k, C] - results[ref][:, k, C]
             lo, hi = ci(d)
             cells.append(f"{np.nanmean(d):+6.1f} [{lo:+5.1f},{hi:+5.1f}]")
         print(f"  {n:{w}s}" + "  ".join(cells))
-    for title, j in (("reward/step", 1), ("sounding rate in notes", 2), ("sounding inside short gaps", 3)):
+    for title, j in (("reward/step", 1), ("sounding rate in notes", 2), ("sounding inside short gaps", 3),
+                     ("mean |cents| of the measured pitch (includes estimator errors)", 0)):
         print(title)
         for n in names:
             print(f"  {n:{w}s}" + "  ".join(f"{np.nanmean(results[n][:, k, j]):.3f}" for k in range(args.takes)))

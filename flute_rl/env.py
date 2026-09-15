@@ -285,6 +285,10 @@ def episode_metrics(log: dict) -> dict:
     active = np.isfinite(target)
     valid = active & sounding & np.isfinite(measured)
     err = np.abs(measured[valid] - target[valid])
+    # the pitch the flute really played (the simulator knows it); the measured one above also
+    # contains the pitch estimator's own errors, e.g. octave mistakes
+    played = active & sounding
+    true_err = np.abs(log["cents"][played] - target[played]) if "cents" in log else np.zeros(0)
     # short silences between notes (detached playing), excluding the lead-in and the tail
     inner = np.zeros(len(target), bool)
     idx = np.flatnonzero(active)
@@ -296,6 +300,7 @@ def episode_metrics(log: dict) -> dict:
         "return": float(np.sum(log["rewards"])),
         "mean_reward": float(np.mean(log["rewards"])),
         "mean_abs_cents": float(np.mean(err)) if err.size else float("nan"),
+        "true_abs_cents": float(np.mean(true_err)) if true_err.size else float("nan"),
         "sounding_rate": float(np.mean(sounding[active])) if active.any() else float("nan"),
         "rest_leak": float(np.mean(sounding[~active])) if (~active).any() else 0.0,
         "overblow_rate": float(np.mean(log["overblown"][active])) if active.any() else 0.0,

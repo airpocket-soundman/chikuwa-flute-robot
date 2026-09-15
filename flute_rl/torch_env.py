@@ -84,7 +84,8 @@ class BatchFluteEnv:
             self.audio.reset()
             self.ear_feat = torch.zeros(self.B, self.ear.dim, device=self.dev, dtype=self.dtype)
         z = lambda dt=self.dtype: torch.zeros(self.B, self.T, device=self.dev, dtype=dt)  # noqa: E731
-        self.log = {"reward": z(), "measured": z(), "sounding": z(torch.bool), "overblown": z(torch.bool), "action": torch.zeros(self.B, self.T, 2, device=self.dev, dtype=self.dtype)}
+        self.log = {"reward": z(), "measured": z(), "cents": z(), "sounding": z(torch.bool), "overblown": z(torch.bool),
+                    "action": torch.zeros(self.B, self.T, 2, device=self.dev, dtype=self.dtype)}
 
     def window(self) -> torch.Tensor:
         return self.target_pad[:, self.t:self.t + LOOKAHEAD]
@@ -125,6 +126,7 @@ class BatchFluteEnv:
         L = self.log
         L["reward"][:, self.t] = pitch + octave + silence + rest + smooth
         L["measured"][:, self.t] = meas
+        L["cents"][:, self.t] = s["cents"]
         L["sounding"][:, self.t] = snd
         L["overblown"][:, self.t] = s["overblown"]
         L["action"][:, self.t] = a
@@ -141,7 +143,8 @@ class BatchFluteEnv:
         return True
 
     def metrics(self) -> torch.Tensor:
-        """(B, takes, 4): mean |cents|, mean reward per step, sounding rate in notes, sounding inside short gaps."""
+        """(B, takes, 5): mean |cents| of the measured pitch, mean reward per step, sounding rate in notes,
+        sounding inside short gaps, mean |cents| of the pitch actually played."""
         out = []
         active = torch.isfinite(self.target)
         n_in = self.inside.sum(1).clamp_min(1)
@@ -155,7 +158,11 @@ class BatchFluteEnv:
             gaps = self.inner_rest.sum(1)
             leak = (L["sounding"] & self.inner_rest).sum(1) / gaps.clamp_min(1)
             leak = torch.where(gaps > 0, leak.to(self.dtype), torch.full_like(cents, NAN))
-            out.append(torch.stack([cents, rew, snd.to(self.dtype), leak], 1))
+            played = active & L["sounding"] & self.inside
+            tdev = torch.where(played, (L["cents"] - self.target).abs(), torch.zeros_like(self.target))
+            true_c = tdev.sum(1) / played.sum(1).clamp_min(1)
+            true_c = torch.where(played.any(1), true_c, torch.full_like(true_c, NAN))
+            out.append(torch.stack([cents, rew, snd.to(self.dtype), leak, true_c], 1))
         return torch.stack(out, 1)
 
 

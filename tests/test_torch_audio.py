@@ -48,6 +48,6 @@ def test_hearing_environment_runs():
     rigs = [rig_from_seed(s, harsh=1.0) for s in (1, 2, 3)]
     env = BatchFluteEnv(rigs, targets, takes=2, device="cpu", hearing=ear)
     m = run_episodes(env, BatchAgent(env))
-    assert m.shape == (3, 2, 4)
+    assert m.shape == (3, 2, 5)
     assert torch.isfinite(m[:, :, 1]).all()  # reward per step
     assert env.ear_feat.shape == (3, ear.dim)

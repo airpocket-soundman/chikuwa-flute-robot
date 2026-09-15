@@ -85,6 +85,7 @@ def main() -> None:
                 write_wav(out / fname, y, SR)
                 pt = r["per_take"][k]
                 takes.append({"wav": fname, "mean_abs_cents": round(float(pt["mean_abs_cents"]), 1),
+                              "true_abs_cents": round(float(pt["true_abs_cents"]), 1),
                               "gap_leak": None if not np.isfinite(pt["gap_leak"]) else round(float(pt["gap_leak"]), 3),
                               "sounding_rate": round(float(pt["sounding_rate"]), 3)})
             entry["pieces"].append({"id": pid, "takes": takes})
