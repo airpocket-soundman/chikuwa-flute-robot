@@ -62,6 +62,48 @@ class ResidualPolicy:
         return np.clip(b + self.scale * r, -1.0, 1.0).astype(np.float32)
 
 
+class ModelResidualPolicy:
+    """base + scale * MLP(features), with features built from the base controller's own model.
+
+    The base must be a PhysicsPriorPolicy (or subclass): its dead-reckoned
+    plunger state gives the pitch it expects to be playing now, so the network
+    sees "how far each upcoming target note is from where I am" instead of raw
+    pitches. The PWM actually sent (base + residual) is fed back into the
+    base's dead reckoning (and, for AdaptivePolicy, into its identification log).
+
+    Features (2 * horizon + 4): expected error of the next `horizon` target
+    frames [100 cents, clipped], their note mask, the dead-reckoned velocity,
+    the servo read-back relative to the sounding angle, and the base action.
+    """
+
+    def __init__(self, base, net: MLP, scale: float = 0.3, horizon: int = 30):
+        self.base, self.net, self.scale, self.horizon = base, net, scale, horizon
+
+    @staticmethod
+    def feature_dim(horizon: int = 30) -> int:
+        return 2 * horizon + 4
+
+    def reset(self, env) -> None:
+        self.base.reset(env)
+        self.lay = env.obs_layout
+
+    def act(self, obs: np.ndarray) -> np.ndarray:
+        from .env import CENTER_CENTS, CENTS_SCALE
+
+        b = np.asarray(self.base.act(obs), dtype=float)
+        base = self.base
+        base.rewind()
+        h = self.horizon
+        tgt = obs[self.lay["target"]][:h] * CENTS_SCALE + CENTER_CENTS
+        mask = obs[self.lay["target_mask"]][:h] > 0.5
+        err = np.where(mask, np.clip((tgt - base.model_cents(base.x_hat)) / 100.0, -3.0, 3.0), 0.0)
+        angle_off = obs[self.lay["angle_readback"]][0] - obs[self.lay["angle_comp"]][0]
+        feats = np.concatenate([err, mask.astype(float), [base.v_hat / 0.15, angle_off], b])
+        a = np.clip(b + self.scale * self.net(feats), -1.0, 1.0)
+        base.commit(a[0])
+        return a.astype(np.float32)
+
+
 class MLPPolicy:
     """Pure learned policy (no prior)."""
 

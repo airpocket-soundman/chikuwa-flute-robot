@@ -16,7 +16,7 @@ from collections import deque
 import numpy as np
 
 from .env import CENTER_CENTS, CENTS_SCALE
-from .sim import DT, FluteParams, x_for_cents
+from .sim import DT, FluteParams, hz_to_cents, speed_of_sound, x_for_cents
 
 
 class PhysicsPriorPolicy:
@@ -54,6 +54,20 @@ class PhysicsPriorPolicy:
         self.v_hat += (v_cmd - self.v_hat) * min(1.0, DT / p.tau_v)
         self.x_hat = float(np.clip(self.x_hat + self.v_hat * DT, 0.0, p.stroke))
 
+    def model_cents(self, x: float) -> float:
+        """Pitch the controller's model expects at plunger position x (optimum angle)."""
+        p = self.p
+        length = max(p.tube_len - x + p.end_corr, 0.02)
+        return float(hz_to_cents(speed_of_sound(p.temp_c) / (4.0 * length)))
+
+    def rewind(self) -> None:
+        """Undo the dead reckoning of the last act() (before committing a modified PWM)."""
+        self.x_hat, self.v_hat, self.q = self._pre
+
+    def commit(self, pwm: float) -> None:
+        """Dead-reckon the PWM that was actually sent (after rewind())."""
+        self._dead_reckon(float(pwm))
+
     def act(self, obs: np.ndarray) -> np.ndarray:
         lay = self.layout
         if obs[lay["time"]][0] == 0.0:  # start of a take: the rig has been homed
@@ -74,6 +88,7 @@ class PhysicsPriorPolicy:
         else:
             x_des = x_for_cents(float(vals[idx]) * CENTS_SCALE + CENTER_CENTS, self.p)
         pwm = self._pwm_for(float(np.clip(x_des, 0.0, self.p.stroke)))
+        self._pre = (self.x_hat, self.v_hat, deque(self.q))
         self._dead_reckon(pwm)
 
         note_soon = bool(mask[min(self.angle_lead, self.lookahead - 1)] or mask[0])
