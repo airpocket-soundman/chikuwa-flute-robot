@@ -29,10 +29,17 @@ from flute_rl.torch_env import BatchAgent, BatchFluteEnv, BatchGRU, BatchMLP, ri
 KEYS = ("|cents|", "reward/step", "sounding", "gap leak")
 
 
+EAR = {}
+
+
+def input_dim(args) -> int:
+    return FeedbackResidualPolicy.feature_dim(args.horizon, args.history) + (EAR["ear"].dim if EAR else 0)
+
+
 def play(thetas: torch.Tensor, rigs, targets, args, gen: torch.Generator) -> torch.Tensor:
     """thetas (B, P), one row per episode -> metrics (B, takes, 4)."""
-    env = BatchFluteEnv(rigs, targets, takes=args.takes, device=args.device, generator=gen)
-    in_dim = FeedbackResidualPolicy.feature_dim(args.horizon, args.history)
+    env = BatchFluteEnv(rigs, targets, takes=args.takes, device=args.device, generator=gen, hearing=EAR.get("ear"))
+    in_dim = input_dim(args)
     net = (BatchGRU if args.arch == "gru" else BatchMLP)(thetas, in_dim, 3, args.hidden)
     agent = BatchAgent(env, fb_gain=args.fb_gain, ilc_gain=args.ilc_gain, net=net, scale=args.scale,
                        horizon=args.horizon, history=args.history)
@@ -68,6 +75,8 @@ def main() -> None:
     ap.add_argument("--eval-episodes", type=int, default=100)
     ap.add_argument("--eval-every", type=int, default=25)
     ap.add_argument("--keep-snapshots", action="store_true")
+    ap.add_argument("--hearing", default=None,
+                    help="self-ear network (runs/pitchnet_self.pt): the rig plays sound and the controller hears it (E2E method A)")
     ap.add_argument("--init", default=None)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -76,10 +85,19 @@ def main() -> None:
 
     rng = np.random.default_rng(args.seed)
     gen = torch.Generator(device=args.device).manual_seed(args.seed)
-    in_dim = FeedbackResidualPolicy.feature_dim(args.horizon, args.history)
+    if args.hearing:
+        from flute_rl.torch_audio import Ear, check_ear  # noqa: E402
+        EAR["ear"] = Ear(args.hearing, args.device)
+        print(f"hearing through {args.hearing}: {check_ear(EAR['ear'], device=args.device)}", flush=True)
+    in_dim = input_dim(args)
     net = (GRU if args.arch == "gru" else MLP)(in_dim, 3, hidden=args.hidden, rng=np.random.default_rng(args.seed))
     if args.init:
-        net.set_flat(load_net(args.init)[0].get_flat())
+        old, _ = load_net(args.init)
+        theta0 = old.get_flat()
+        if old.in_dim < in_dim:  # new inputs (the ear's features) start with zero weights
+            from flute_rl.torch_audio import pad_inputs  # noqa: E402
+            theta0 = pad_inputs(theta0, args.arch, old.in_dim, in_dim, 3, args.hidden)
+        net.set_flat(theta0)
     theta = net.get_flat()
     m, v = np.zeros_like(theta), np.zeros_like(theta)
 
@@ -107,7 +125,7 @@ def main() -> None:
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     meta = dict(scale=args.scale, horizon=args.horizon, ilc_gain=args.ilc_gain, feedback=True,
-                fb_gain=args.fb_gain, history=args.history)
+                fb_gain=args.fb_gain, history=args.history, hearing=args.hearing or "")
     print(f"params: {net.n_params}  arch: {args.arch}  pop {args.pop} x episodes {args.episodes} on {args.device}  "
           f"harsh {args.harsh}", flush=True)
     t0 = time.time()

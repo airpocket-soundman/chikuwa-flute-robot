@@ -40,8 +40,11 @@ def rig_from_seed(seed: int, spread: float = 1.0, params: FluteParams | None = N
 
 class BatchFluteEnv:
     def __init__(self, rigs: list[tuple[FluteParams, float]], targets: list[np.ndarray], takes: int = 2,
-                 device=None, dtype=torch.float32, generator: torch.Generator | None = None):
+                 device=None, dtype=torch.float32, generator: torch.Generator | None = None, hearing=None):
+        """`hearing`: a flute_rl.torch_audio.Ear. The rig then plays real sound and the controller
+        hears it through that network instead of the simulator's pitch measurement."""
         self.B, self.takes, self.dtype = len(rigs), takes, dtype
+        self.ear = hearing
         self.p = BatchParams([r[0] for r in rigs], device, dtype)
         self.dev = self.p.tube_len.device
         if int(self.p.obs_delay.max()) >= MAX_OBS_DELAY:
@@ -65,6 +68,9 @@ class BatchFluteEnv:
         self.take = 0
         self.prev_err = torch.full((self.B, self.T + LOOKAHEAD), NAN, device=self.dev, dtype=dtype)
         self.logs: list[dict] = []
+        if self.ear is not None:
+            from .torch_audio import BatchSelfAudio
+            self.audio = BatchSelfAudio(self.B, self.dev, generator)
         self._start_take()
 
     def _start_take(self) -> None:
@@ -74,6 +80,9 @@ class BatchFluteEnv:
         self.fb_hist = torch.full((self.B, MAX_OBS_DELAY), NAN, device=self.dev, dtype=self.dtype)
         self.fb_seen = torch.full((self.B,), NAN, device=self.dev, dtype=self.dtype)
         self.cur_err = torch.full((self.B, self.T + LOOKAHEAD), NAN, device=self.dev, dtype=self.dtype)
+        if self.ear is not None:
+            self.audio.reset()
+            self.ear_feat = torch.zeros(self.B, self.ear.dim, device=self.dev, dtype=self.dtype)
         z = lambda dt=self.dtype: torch.zeros(self.B, self.T, device=self.dev, dtype=dt)  # noqa: E731
         self.log = {"reward": z(), "measured": z(), "sounding": z(torch.bool), "overblown": z(torch.bool), "action": torch.zeros(self.B, self.T, 2, device=self.dev, dtype=self.dtype)}
 
@@ -94,11 +103,24 @@ class BatchFluteEnv:
         silence = torch.where(active & ~snd, zero - SILENCE_PENALTY, zero)
         rest = torch.where(~active & snd, zero - REST_PENALTY, zero)
         smooth = -SMOOTH_WEIGHT * ((a - self.last_a) ** 2).sum(1)
-        err = torch.where(heard & active, meas - tgt, torch.full_like(tgt, NAN))
-        buf = torch.cat([err[:, None], self.fb_hist], dim=1)
-        self.fb_seen = buf.gather(1, self.p.obs_delay[:, None]).squeeze(1)
-        self.fb_hist = buf[:, :MAX_OBS_DELAY]
-        self.cur_err[:, self.t] = err
+        if self.ear is None:
+            err = torch.where(heard & active, meas - tgt, torch.full_like(tgt, NAN))
+            buf = torch.cat([err[:, None], self.fb_hist], dim=1)
+            self.fb_seen = buf.gather(1, self.p.obs_delay[:, None]).squeeze(1)
+            self.fb_hist = buf[:, :MAX_OBS_DELAY]
+            self.cur_err[:, self.t] = err
+        else:
+            # the rig sounds; the ear hears the 32 ms that ended obs_delay steps ago
+            self.audio.push(s["cents"], s["sounding"])
+            cents_heard, feats = self.ear(self.audio.frames(self.p.obs_delay))
+            td = self.t - self.p.obs_delay
+            tgt_d = self.target_pad.gather(1, td.clamp(min=0)[:, None]).squeeze(1)
+            tgt_d = torch.where(td >= 0, tgt_d, torch.full_like(tgt_d, NAN))
+            fb = cents_heard.to(self.dtype) - tgt_d
+            self.fb_seen = torch.where(torch.isfinite(fb), fb, torch.full_like(fb, NAN))
+            # the take's recording (for rig identification and ILC) is what the ear heard
+            self.cur_err.scatter_(1, td.clamp(min=0)[:, None], torch.where(td >= 0, self.fb_seen, self.cur_err.gather(1, td.clamp(min=0)[:, None]).squeeze(1))[:, None])
+            self.ear_feat = feats.to(self.dtype)
         self.last_a = a
         L = self.log
         L["reward"][:, self.t] = pitch + octave + silence + rest + smooth
@@ -350,6 +372,8 @@ class BatchAgent:
                 self.last, torch.ones_like(fb)[:, None]]
         if self.history:
             cols.append(self.hist.reshape(env.B, -1))
+        if env.ear is not None:  # what the ear network hears (confidence, voiced, feature summary), last
+            cols.append(env.ear_feat)
         return torch.cat(cols, 1)
 
     def act(self) -> torch.Tensor:
