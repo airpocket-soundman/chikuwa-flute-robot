@@ -28,8 +28,22 @@ def scale_notes(key: int = 0, f_lo: float = F_LO, f_hi: float = F_HI) -> np.ndar
     return np.array([(m - 69) * 100.0 for m in range(m_lo, m_hi + 1) if (m - key) % 12 in MAJOR])
 
 
-def make_target(rng: np.random.Generator, level: int, dt: float = DT) -> np.ndarray:
+MIN_NOTE = 0.25          # shortest note [s]: no pieces that change pitch every few frames
+NOTE_DURS = (0.25, 0.3, 0.4, 0.6, 0.8)
+GAP_RANGE = (0.05, 0.12)  # detached notes: silence made by swinging the angle out of the sounding window [s]
+ARTICULATIONS = ("legato", "detached", "mixed")
+MAX_JUMP = 400.0  # cents between consecutive notes (~20 mm of plunger travel): no leaps that are hard to play
+
+
+def make_target(rng: np.random.Generator, level: int, dt: float = DT, articulation: str | None = None) -> np.ndarray:
+    """One target piece. `articulation` (random if None):
+
+    * "legato": notes are joined (slur); a repeated pitch becomes one long note (tie)
+    * "detached": a short silence between every two notes; a repeated pitch is re-attacked
+    * "mixed": each note boundary is joined or detached at random
+    """
     segs: list[np.ndarray] = []
+    art = articulation or str(rng.choice(ARTICULATIONS))
 
     def n_steps(sec: float) -> int:
         return max(1, int(round(sec / dt)))
@@ -40,6 +54,15 @@ def make_target(rng: np.random.Generator, level: int, dt: float = DT) -> np.ndar
     def hold(c: float, sec: float) -> None:
         segs.append(np.full(n_steps(sec), float(c)))
 
+    def boundary() -> None:
+        if art == "detached" or (art == "mixed" and rng.random() < 0.5):
+            rest(rng.uniform(*GAP_RANGE))
+
+    def two_notes() -> tuple[float, float]:
+        a = float(rng.choice(notes))
+        near = [n for n in notes if 0 < abs(n - a) <= MAX_JUMP]
+        return a, float(rng.choice(near))
+
     notes = scale_notes(key=int(rng.integers(12)))
     # lead-in: every take starts from the home position, and the full stroke takes ~0.7 s
     rest(rng.uniform(0.8, 1.0))
@@ -47,30 +70,32 @@ def make_target(rng: np.random.Generator, level: int, dt: float = DT) -> np.ndar
     if level <= 0:
         hold(rng.choice(notes), rng.uniform(0.8, 1.5))
     elif level == 1:
-        a, b = rng.choice(notes, 2, replace=False)
+        a, b = two_notes()
         hold(a, rng.uniform(0.4, 0.8))
-        if rng.random() < 0.5:
-            rest(rng.uniform(0.05, 0.15))
+        boundary()
         hold(b, rng.uniform(0.4, 0.8))
     elif level == 2:
-        a, b = rng.choice(notes, 2, replace=False)
+        a, b = two_notes()
         hold(a, rng.uniform(0.3, 0.6))
-        segs.append(np.linspace(a, b, n_steps(rng.uniform(0.15, 0.4)), endpoint=False))
+        segs.append(np.linspace(a, b, n_steps(rng.uniform(0.15, 0.4)), endpoint=False))  # glide: always joined
         hold(b, rng.uniform(0.3, 0.6))
     else:
         count = int(rng.integers(4, 9))
         idx = int(rng.integers(len(notes)))
         for i in range(count):
-            dur = float(rng.choice([0.2, 0.3, 0.4, 0.6]))
+            dur = float(rng.choice(NOTE_DURS))
             seg = np.full(n_steps(dur), notes[idx])
             if level >= 4 and dur >= 0.4:
                 t = np.arange(len(seg)) * dt
                 onset, rate, depth = 0.15, rng.uniform(5.0, 7.0), rng.uniform(15.0, 40.0)
                 seg = seg + np.where(t > onset, depth * np.sin(2 * np.pi * rate * (t - onset)), 0.0)
             segs.append(seg)
-            if i < count - 1 and rng.random() < 0.3:
-                rest(rng.uniform(0.05, 0.1))
-            idx = int(np.clip(idx + rng.integers(-2, 3), 0, len(notes) - 1))
+            if i < count - 1:
+                boundary()
+                # next note: a step of up to two scale degrees, never more than MAX_JUMP
+                choices = [j for j in range(idx - 2, idx + 3)
+                           if 0 <= j < len(notes) and abs(notes[j] - notes[idx]) <= MAX_JUMP]
+                idx = int(rng.choice(choices))
 
     rest(0.2)
     return np.concatenate(segs)
@@ -82,6 +107,22 @@ def sample_level(rng: np.random.Generator, progress: float) -> int:
     weights = np.ones(top + 1)
     weights[-1] = 2.0
     return int(rng.choice(top + 1, p=weights / weights.sum()))
+
+
+def make_bank(n: int, seed: int = 12345, progress: float = 0.8) -> list[np.ndarray]:
+    """A fixed set of `n` curriculum targets, so training reuses the same pieces (and they can be saved)."""
+    rng = np.random.default_rng(seed)
+    return [make_target(rng, sample_level(rng, progress)) for _ in range(n)]
+
+
+def save_bank(path, bank: list[np.ndarray]) -> None:
+    lengths = np.array([len(t) for t in bank])
+    np.savez(path, values=np.concatenate(bank), lengths=lengths)
+
+
+def load_bank(path) -> list[np.ndarray]:
+    d = np.load(path)
+    return np.split(d["values"], np.cumsum(d["lengths"])[:-1])
 
 
 def from_pitch_track(hz, dt_in: float, dt: float = DT, f_lo: float = F_LO, f_hi: float = F_HI) -> np.ndarray:

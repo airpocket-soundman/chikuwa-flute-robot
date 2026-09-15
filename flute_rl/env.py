@@ -283,7 +283,14 @@ def episode_metrics(log: dict) -> dict:
     active = np.isfinite(target)
     valid = active & sounding & np.isfinite(measured)
     err = np.abs(measured[valid] - target[valid])
+    # short silences between notes (detached playing), excluding the lead-in and the tail
+    inner = np.zeros(len(target), bool)
+    idx = np.flatnonzero(active)
+    if idx.size:
+        inner[idx[0]:idx[-1]] = True
+    inner &= ~active
     return {
+        "gap_leak": float(np.mean(sounding[inner])) if inner.any() else float("nan"),
         "return": float(np.sum(log["rewards"])),
         "mean_reward": float(np.mean(log["rewards"])),
         "mean_abs_cents": float(np.mean(err)) if err.size else float("nan"),

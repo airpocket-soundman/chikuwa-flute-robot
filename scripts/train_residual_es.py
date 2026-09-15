@@ -24,6 +24,8 @@ import numpy as np
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from flute_rl import MLP, FluteEnv, ModelResidualPolicy, rollout  # noqa: E402
+from flute_rl.policy import GRU, load_net  # noqa: E402
+from flute_rl.targets import load_bank, make_bank, save_bank  # noqa: E402
 from flute_rl.adapt import AdaptivePolicy  # noqa: E402
 from flute_rl.feedback import FeedbackPolicy, FeedbackResidualPolicy  # noqa: E402
 
@@ -35,9 +37,10 @@ def build(args):
     env = FluteEnv(progress=args.progress, spread=args.spread, takes=args.takes, feedback=args.feedback)
     rng = np.random.default_rng(args.seed)
     if args.feedback:
-        net = MLP(FeedbackResidualPolicy.feature_dim(args.horizon), 3, hidden=args.hidden, rng=rng)
+        cls = GRU if args.arch == "gru" else MLP
+        net = cls(FeedbackResidualPolicy.feature_dim(args.horizon, args.history), 3, hidden=args.hidden, rng=rng)
         base = FeedbackPolicy(fb_gain=args.fb_gain, ilc_gain=args.ilc_gain)
-        policy = FeedbackResidualPolicy(base, net, scale=args.scale, horizon=args.horizon)
+        policy = FeedbackResidualPolicy(base, net, scale=args.scale, horizon=args.horizon, history=args.history)
     else:
         net = MLP(ModelResidualPolicy.feature_dim(args.horizon), 2, hidden=args.hidden, rng=rng)
         policy = ModelResidualPolicy(AdaptivePolicy(ilc_gain=args.ilc_gain), net, scale=args.scale, horizon=args.horizon)
@@ -52,12 +55,14 @@ def scored_takes(args) -> slice:
 def _init(args):
     _W["env"], _W["net"], _W["policy"] = build(args)
     _W["takes"] = scored_takes(args)
+    _W["bank"] = load_bank(args.bank_file) if args.bank else None
 
 
 def _fitness(task):
-    theta, seed = task
+    theta, seed, idx = task
     _W["net"].set_flat(theta)
-    r = rollout(_W["env"], _W["policy"], seed=int(seed))
+    opts = {"target": _W["bank"][idx]} if _W["bank"] is not None else None
+    r = rollout(_W["env"], _W["policy"], seed=int(seed), options=opts)
     return float(np.mean([t["mean_reward"] for t in r["per_take"][_W["takes"]]]))
 
 
@@ -95,8 +100,15 @@ def main() -> None:
     ap.add_argument("--feedback", action="store_true",
                     help="listen while playing: FeedbackPolicy base, network also scales the feedback gain")
     ap.add_argument("--fb-gain", type=float, default=0.05)
+    ap.add_argument("--arch", choices=("mlp", "gru"), default="mlp", help="network type (gru: recurrent memory)")
+    ap.add_argument("--history", type=int, default=0,
+                    help="feedback mode: append the last N steps of (heard error, PWM, angle) to the features")
     ap.add_argument("--progress", type=float, default=0.8)
     ap.add_argument("--spread", type=float, default=1.0)
+    ap.add_argument("--bank", type=int, default=1000,
+                    help="train on a fixed set of this many targets (0: a new random target every episode)")
+    ap.add_argument("--bank-file", type=str, default="runs/target_bank.npz",
+                    help="target set file; created if missing (evaluation targets are generated separately)")
     ap.add_argument("--eval-episodes", type=int, default=100)
     ap.add_argument("--eval-every", type=int, default=25)
     ap.add_argument("--workers", type=int, default=8)
@@ -108,12 +120,18 @@ def main() -> None:
     rng = np.random.default_rng(args.seed)
     _, net, _ = build(args)
     if args.init:
-        net.set_flat(MLP.load(args.init)[0].get_flat())
+        net.set_flat(load_net(args.init)[0].get_flat())
     theta = net.get_flat()
     m, v = np.zeros_like(theta), np.zeros_like(theta)
     eval_seeds = np.arange(1_000_000, 1_000_000 + args.eval_episodes)
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    if args.bank:
+        bank_path = pathlib.Path(args.bank_file)
+        if not bank_path.exists() or len(load_bank(bank_path)) != args.bank:
+            bank_path.parent.mkdir(parents=True, exist_ok=True)
+            save_bank(bank_path, make_bank(args.bank, progress=args.progress))
+        print(f"target bank: {args.bank} pieces in {bank_path}", flush=True)
     print(f"params: {net.n_params}  features: {net.in_dim}  takes: {args.takes}  workers: {args.workers}", flush=True)
 
     with Pool(args.workers, initializer=_init, initargs=(args,)) as pool:
@@ -124,10 +142,11 @@ def main() -> None:
         half = args.pop // 2
         for g in range(1, args.gens + 1):
             t0 = time.time()
-            seeds = rng.integers(0, 2**31 - 1, size=args.episodes)
+            seeds = rng.integers(0, 2**31 - 1, size=args.episodes)  # rigs (and targets when no bank)
+            idxs = rng.integers(0, max(args.bank, 1), size=args.episodes) if args.bank else [-1] * args.episodes
             eps = rng.standard_normal((half, theta.size))
             cands = [theta + s * args.sigma * e for e in eps for s in (1.0, -1.0)]
-            f = np.array(pool.map(_fitness, [(c, sd) for c in cands for sd in seeds]))
+            f = np.array(pool.map(_fitness, [(c, sd, int(ix)) for c in cands for sd, ix in zip(seeds, idxs)]))
             scores = f.reshape(half, 2, args.episodes).mean(axis=2)
             ranks = scores.ravel().argsort().argsort().reshape(scores.shape) / (scores.size - 1) - 0.5
             grad = ((ranks[:, 0] - ranks[:, 1])[:, None] * eps).sum(axis=0) / (half * args.sigma)
@@ -143,7 +162,7 @@ def main() -> None:
                     best = (cur[sl, 0].mean(), theta.copy())
                     net.set_flat(theta)
                     net.save(out, scale=args.scale, horizon=args.horizon, ilc_gain=args.ilc_gain,
-                             feedback=args.feedback, fb_gain=args.fb_gain)
+                             feedback=args.feedback, fb_gain=args.fb_gain, history=args.history)
                     print(f"saved {out} (best so far)", flush=True)
     print(f"best eval reward/step (scored takes): {best[0]:+.4f}")
 

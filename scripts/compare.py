@@ -20,6 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from flute_rl import MLP, AdaptivePolicy, FluteEnv, ILCPolicy, ModelResidualPolicy, PhysicsPriorPolicy, rollout  # noqa: E402
 from flute_rl.feedback import FeedbackPolicy, FeedbackResidualPolicy  # noqa: E402
+from flute_rl.policy import load_net  # noqa: E402
 
 _A: dict = {}
 
@@ -33,12 +34,14 @@ def controllers(residuals: list[str], feedback: bool) -> dict:
     if feedback:
         out["adaptive + feedback (classic)"] = lambda: FeedbackPolicy()
     for path in residuals:
-        net, meta = MLP.load(path)
+        net, meta = load_net(path)
         kw = dict(scale=float(meta["scale"]), horizon=int(meta["horizon"]))
         if bool(meta.get("feedback", False)):
             fb_gain = float(meta["fb_gain"])
-            out["adaptive + feedback + RL"] = lambda net=net, kw=kw, g=fb_gain, ilc=float(meta["ilc_gain"]): (
-                FeedbackResidualPolicy(FeedbackPolicy(fb_gain=g, ilc_gain=ilc), net, **kw))
+            history = int(meta.get("history", 0))
+            label = "feedback + RL " + (f"{net.arch.upper()}" if net.arch == "gru" else f"MLP hist {history}")
+            out[label] = lambda net=net, kw=kw, g=fb_gain, ilc=float(meta["ilc_gain"]), hs=history: (
+                FeedbackResidualPolicy(FeedbackPolicy(fb_gain=g, ilc_gain=ilc), net, history=hs, **kw))
         else:
             out["adaptive + RL residual"] = lambda net=net, kw=kw, ilc=float(meta["ilc_gain"]): (
                 ModelResidualPolicy(AdaptivePolicy(ilc_gain=ilc), net, **kw))
@@ -55,7 +58,7 @@ def _job(task):
     a = _A["args"]
     env = FluteEnv(progress=a.progress, takes=a.takes, feedback=a.feedback)
     r = rollout(env, _A["ctrl"][name](), seed=seed)
-    return [[t["mean_abs_cents"], t["mean_reward"], t["sounding_rate"]] for t in r["per_take"]]
+    return [[t["mean_abs_cents"], t["mean_reward"], t["sounding_rate"], t["gap_leak"]] for t in r["per_take"]]
 
 
 def boot_ci(x: np.ndarray, rng, n: int = 2000) -> tuple[float, float]:
@@ -106,6 +109,12 @@ def main() -> None:
     print("reward/step per take")
     for n in names:
         print(f"  {n:26s}" + "  ".join(f"{np.nanmean(data[n][:, k, 1]):+.3f}" for k in range(args.takes)))
+    print("sounding rate during notes per take (lower = it went silent to avoid pitch errors)")
+    for n in names:
+        print(f"  {n:26s}" + "  ".join(f"{np.nanmean(data[n][:, k, 2]):.3f}" for k in range(args.takes)))
+    print("sounding inside the short gaps between detached notes (should be 0)")
+    for n in names:
+        print(f"  {n:26s}" + "  ".join(f"{np.nanmean(data[n][:, k, 3]):.3f}" for k in range(args.takes)))
 
     if args.plot:
         import matplotlib

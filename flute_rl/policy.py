@@ -37,14 +37,73 @@ class MLP:
         return np.tanh(h @ self.w2 + self.b2)
 
     def save(self, path, **extra) -> None:
-        np.savez(path, theta=self.get_flat(), in_dim=self.in_dim, out_dim=self.out_dim, hidden=self.hidden, **extra)
+        np.savez(path, theta=self.get_flat(), in_dim=self.in_dim, out_dim=self.out_dim, hidden=self.hidden,
+                 arch=self.arch, **extra)
 
     @classmethod
     def load(cls, path) -> tuple["MLP", dict]:
         d = dict(np.load(path))
+        d.pop("arch", None)
         net = cls(int(d.pop("in_dim")), int(d.pop("out_dim")), int(d.pop("hidden")))
         net.set_flat(d.pop("theta"))
         return net, d
+
+    arch = "mlp"
+
+
+class GRU(MLP):
+    """One GRU layer + a linear-tanh read-out of [h, x] (flat parameters, for ES).
+
+    Stateful: call reset_state() at the start of an episode. The memory lets
+    the policy relate what it commanded a few steps ago to what it hears now,
+    i.e. learn the (rig-dependent) listening delay. The read-out starts at
+    zero, so a fresh network adds nothing to the base policy.
+    """
+
+    arch = "gru"
+
+    def __init__(self, in_dim: int, out_dim: int, hidden: int = 16, rng: np.random.Generator | None = None):
+        rng = rng if rng is not None else np.random.default_rng(0)
+        self.in_dim, self.out_dim, self.hidden = in_dim, out_dim, hidden
+        H = hidden
+        self.shapes = [(in_dim, 3 * H), (H, 3 * H), (3 * H,), (H + in_dim, out_dim), (out_dim,)]
+        W = rng.standard_normal((in_dim, 3 * H)) / np.sqrt(in_dim)
+        U = rng.standard_normal((H, 3 * H)) / np.sqrt(H)
+        b = np.zeros(3 * H)
+        b[:H] = 1.0  # update gate biased toward keeping the memory
+        self.set_flat(np.concatenate([W.ravel(), U.ravel(), b, np.zeros((H + in_dim) * out_dim), np.zeros(out_dim)]))
+        self.reset_state()
+
+    def get_flat(self) -> np.ndarray:
+        return np.concatenate([self.W.ravel(), self.U.ravel(), self.b, self.Wo.ravel(), self.bo])
+
+    def set_flat(self, theta: np.ndarray) -> None:
+        theta = np.asarray(theta, dtype=float)
+        parts, i = [], 0
+        for s in self.shapes:
+            n = int(np.prod(s))
+            parts.append(theta[i:i + n].reshape(s))
+            i += n
+        self.W, self.U, self.b, self.Wo, self.bo = parts
+
+    def reset_state(self) -> None:
+        self.h = np.zeros(self.hidden)
+
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        H, h = self.hidden, self.h
+        gx = x @ self.W + self.b
+        gh = h @ self.U
+        z = 1.0 / (1.0 + np.exp(-(gx[:H] + gh[:H])))
+        r = 1.0 / (1.0 + np.exp(-(gx[H:2 * H] + gh[H:2 * H])))
+        n = np.tanh(gx[2 * H:] + r * gh[2 * H:])
+        self.h = z * h + (1.0 - z) * n
+        return np.tanh(np.concatenate([self.h, x]) @ self.Wo + self.bo)
+
+
+def load_net(path) -> tuple[MLP, dict]:
+    """Load a network saved by MLP.save / GRU.save (picks the class from the saved arch)."""
+    arch = str(np.load(path).get("arch", "mlp"))
+    return (GRU if arch == "gru" else MLP).load(path)
 
 
 class ResidualPolicy:

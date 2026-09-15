@@ -46,20 +46,27 @@ class FeedbackResidualPolicy:
     frames under the current plunger belief [100 cents], their note mask, the
     believed velocity, servo offset from the sounding angle, the delayed pitch
     error [100 cents] and its validity, the take index, and the last action.
+    With `history` > 0, the last `history` steps of (delayed pitch error,
+    PWM, angle) are appended, so a memoryless network can still relate what
+    it did to what it hears. A GRU net keeps its own memory instead (its state
+    is reset once per episode, so it carries over between takes of one rig).
     """
 
-    def __init__(self, base: FeedbackPolicy, net, scale: float = 0.3, horizon: int = 30):
-        self.base, self.net, self.scale, self.horizon = base, net, scale, horizon
+    def __init__(self, base: FeedbackPolicy, net, scale: float = 0.3, horizon: int = 30, history: int = 0):
+        self.base, self.net, self.scale, self.horizon, self.history = base, net, scale, horizon, history
 
     @staticmethod
-    def feature_dim(horizon: int = 30) -> int:
-        return 2 * horizon + 8
+    def feature_dim(horizon: int = 30, history: int = 0) -> int:
+        return 2 * horizon + 8 + 3 * history
 
     def reset(self, env) -> None:
         self.base.reset(env)
         self.lay = env.obs_layout
         self.takes = env.takes
         self.last = np.zeros(2)
+        self.hist = np.zeros((self.history, 3))
+        if hasattr(self.net, "reset_state"):
+            self.net.reset_state()
 
     def act(self, obs: np.ndarray) -> np.ndarray:
         from .env import CENTER_CENTS
@@ -74,8 +81,11 @@ class FeedbackResidualPolicy:
         fb_err = np.clip(obs[lay["fb_err"]][0] * CENTS_SCALE / 100.0, -3.0, 3.0) * fb_valid
         take = obs[lay["take"]][0] if "take" in lay else 0.0
         angle_off = obs[lay["angle_readback"]][0] - obs[lay["angle_comp"]][0]
+        if self.history:
+            self.hist = np.roll(self.hist, -1, axis=0)
+            self.hist[-1] = (fb_err, self.last[0], self.last[1])
         feats = np.concatenate([err, mask.astype(float), [base.v_hat / 0.15, angle_off, fb_err, fb_valid, take],
-                                self.last, [1.0]])
+                                self.last, [1.0], self.hist.ravel()])
         out = self.net(feats)
         base.gain_scale = 1.0 + float(out[2])
         b = np.asarray(base.act(obs), dtype=float)
