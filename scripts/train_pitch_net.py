@@ -10,6 +10,7 @@ same test frames with the same metrics.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import pathlib
 import sys
 import time
@@ -66,10 +67,14 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--yin-frames", type=int, default=20000)
     ap.add_argument("--init", default=None, help="continue from a saved network (adding timbres step by step)")
+    ap.add_argument("--pool", type=int, default=8, help="length the features are pooled to before the output layer")
+    ap.add_argument("--bin-cents", type=float, default=None, help="pitch bin width (default 10 cents)")
     ap.add_argument("--out", default="runs/pitchnet.pt")
     args = ap.parse_args()
 
     ear = SELF_EAR if args.ear == "self" else SOURCE_EAR
+    if args.bin_cents:
+        ear = dataclasses.replace(ear, bin_cents=args.bin_cents)
     kinds = ("self",) if args.ear == "self" else tuple(args.kinds.split(","))
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     t0 = time.time()
@@ -78,7 +83,7 @@ def main() -> None:
     print(f"ear {args.ear} {kinds}: {len(xtr)} train / {len(xte)} test frames of {ear.frame} samples @ {ear.sr} Hz "
           f"({time.time() - t0:.0f}s to synthesise), device {dev}", flush=True)
 
-    net = PitchNet(ear, args.width).to(dev)
+    net = PitchNet(ear, args.width, args.pool).to(dev)
     if args.init:
         net.load_state_dict(torch.load(args.init, map_location=dev)["state"])
         print(f"continuing from {args.init}", flush=True)
@@ -122,7 +127,8 @@ def main() -> None:
     report("YIN", pitch_metrics(yin_track(xte, ear, n), yte[:n]))
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"state": net.state_dict(), "ear": args.ear, "width": args.width, "kinds": kinds}, out)
+    torch.save({"state": net.state_dict(), "ear": args.ear, "width": args.width, "pool": args.pool,
+                "bin_cents": ear.bin_cents, "kinds": kinds}, out)
     print(f"saved {out}")
 
 

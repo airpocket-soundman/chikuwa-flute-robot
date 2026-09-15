@@ -38,7 +38,8 @@ def input_dim(args) -> int:
 
 def play(thetas: torch.Tensor, rigs, targets, args, gen: torch.Generator) -> torch.Tensor:
     """thetas (B, P), one row per episode -> metrics (B, takes, 4)."""
-    env = BatchFluteEnv(rigs, targets, takes=args.takes, device=args.device, generator=gen, hearing=EAR.get("ear"))
+    env = BatchFluteEnv(rigs, targets, takes=args.takes, device=args.device, generator=gen, hearing=EAR.get("ear"),
+                        reward_on=args.reward_on)
     in_dim = input_dim(args)
     net = (BatchGRU if args.arch == "gru" else BatchMLP)(thetas, in_dim, 3, args.hidden)
     agent = BatchAgent(env, fb_gain=args.fb_gain, ilc_gain=args.ilc_gain, net=net, scale=args.scale,
@@ -75,6 +76,8 @@ def main() -> None:
     ap.add_argument("--eval-episodes", type=int, default=100)
     ap.add_argument("--eval-every", type=int, default=25)
     ap.add_argument("--keep-snapshots", action="store_true")
+    ap.add_argument("--reward-on", choices=("measured", "true"), default="measured",
+                    help="score the measured pitch (as a real rig would) or the pitch actually played (simulation only)")
     ap.add_argument("--hearing", default=None,
                     help="self-ear network (runs/pitchnet_self.pt): the rig plays sound and the controller hears it (E2E method A)")
     ap.add_argument("--init", default=None)

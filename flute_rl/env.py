@@ -99,8 +99,12 @@ class FluteEnv(_EnvBase):
         spread: float = 1.0,
         params: FluteParams | None = None,
         harsh: float = 0.0,
+        reward_on: str = "measured",
     ):
+        """reward_on: "measured" scores the pitch estimate (what a real rig can do); "true" scores the
+        pitch actually played (simulation only; not disturbed by the estimator's octave errors)."""
         self.harsh = harsh
+        self.reward_on = reward_on
         self.level = level
         self.progress = progress
         self.target_fn = target_fn
@@ -208,11 +212,12 @@ class FluteEnv(_EnvBase):
         # Silence is judged from the true state for simplicity; on the rig the
         # detector (with its drop-outs) plays this role.
         terms = {"pitch": 0.0, "silence": 0.0, "rest": 0.0, "octave": 0.0, "smooth": 0.0}
+        pitch = s.cents if self.reward_on == "true" else s.measured
         if np.isfinite(tgt):
             if not s.sounding:
                 terms["silence"] = -SILENCE_PENALTY
-            elif np.isfinite(s.measured):
-                terms["pitch"] = -min(abs(s.measured - tgt), PITCH_CLIP) / 100.0
+            elif np.isfinite(pitch):
+                terms["pitch"] = -min(abs(pitch - tgt), PITCH_CLIP) / 100.0
                 if s.overblown:
                     terms["octave"] = -OCTAVE_PENALTY
         elif s.sounding:

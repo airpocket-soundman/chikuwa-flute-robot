@@ -13,6 +13,7 @@ The numpy-only core of flute_rl does not import this module.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 
 import numpy as np
@@ -85,9 +86,12 @@ def make_dataset(n_clips: int, kinds: tuple[str, ...], seed: int) -> tuple[np.nd
 
 
 class PitchNet(nn.Module):
-    """Frame (normalised) -> strided 1-D convolutions -> pitch-bin logits."""
+    """Frame (normalised) -> strided 1-D convolutions -> pitch-bin logits.
 
-    def __init__(self, ear: Ear, width: int = 32):
+    width / pool set the size: the default (32, 8) has ~250k parameters; (8, 4) with
+    20-cent bins has ~16k, small enough to consider for the microcontroller."""
+
+    def __init__(self, ear: Ear, width: int = 32, pool: int = 8):
         super().__init__()
         self.ear = ear
         w = width
@@ -96,13 +100,20 @@ class PitchNet(nn.Module):
             nn.Conv1d(w, w, 16, stride=2, padding=7), nn.BatchNorm1d(w), nn.ReLU(),
             nn.Conv1d(w, 2 * w, 8, stride=2, padding=3), nn.BatchNorm1d(2 * w), nn.ReLU(),
             nn.Conv1d(2 * w, 2 * w, 8, stride=2, padding=3), nn.BatchNorm1d(2 * w), nn.ReLU(),
-            nn.AdaptiveAvgPool1d(8),
+            nn.AdaptiveAvgPool1d(pool),
         )
-        self.head = nn.Linear(2 * w * 8, ear.n_bins)
+        self.head = nn.Linear(2 * w * pool, ear.n_bins)
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x / (x.pow(2).mean(dim=1, keepdim=True).sqrt() + 1e-4)  # loudness-invariant
         return self.head(self.body(x.unsqueeze(1)).flatten(1))
+
+
+def ear_from_checkpoint(ck: dict) -> Ear:
+    """The Ear (input format and pitch bins) a saved network was trained with."""
+    base = SELF_EAR if ck["ear"] == "self" else SOURCE_EAR
+    return dataclasses.replace(base, bin_cents=float(ck.get("bin_cents", base.bin_cents)))
 
 
 def soft_targets(cents: torch.Tensor, ear: Ear, sigma_cents: float = 25.0) -> torch.Tensor:

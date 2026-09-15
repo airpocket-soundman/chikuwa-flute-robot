@@ -40,10 +40,13 @@ def rig_from_seed(seed: int, spread: float = 1.0, params: FluteParams | None = N
 
 class BatchFluteEnv:
     def __init__(self, rigs: list[tuple[FluteParams, float]], targets: list[np.ndarray], takes: int = 2,
-                 device=None, dtype=torch.float32, generator: torch.Generator | None = None, hearing=None):
+                 device=None, dtype=torch.float32, generator: torch.Generator | None = None, hearing=None,
+                 reward_on: str = "measured"):
         """`hearing`: a flute_rl.torch_audio.Ear. The rig then plays real sound and the controller
-        hears it through that network instead of the simulator's pitch measurement."""
+        hears it through that network instead of the simulator's pitch measurement.
+        `reward_on`: "measured" (as FluteEnv) or "true" (the pitch actually played)."""
         self.B, self.takes, self.dtype = len(rigs), takes, dtype
+        self.reward_on = reward_on
         self.ear = hearing
         self.p = BatchParams([r[0] for r in rigs], device, dtype)
         self.dev = self.p.tube_len.device
@@ -99,8 +102,9 @@ class BatchFluteEnv:
         heard = torch.isfinite(meas)
         snd = s["sounding"]
         zero = torch.zeros_like(tgt)
-        pitch = torch.where(active & snd & heard, -torch.clamp((meas - tgt).abs(), max=PITCH_CLIP) / 100.0, zero)
-        octave = torch.where(active & snd & heard & s["overblown"], zero - OCTAVE_PENALTY, zero)
+        scored, ok = (s["cents"], snd) if self.reward_on == "true" else (meas, heard)
+        pitch = torch.where(active & snd & ok, -torch.clamp((scored - tgt).abs(), max=PITCH_CLIP) / 100.0, zero)
+        octave = torch.where(active & snd & ok & s["overblown"], zero - OCTAVE_PENALTY, zero)
         silence = torch.where(active & ~snd, zero - SILENCE_PENALTY, zero)
         rest = torch.where(~active & snd, zero - REST_PENALTY, zero)
         smooth = -SMOOTH_WEIGHT * ((a - self.last_a) ** 2).sum(1)

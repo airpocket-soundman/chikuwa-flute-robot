@@ -19,7 +19,7 @@ import math
 import numpy as np
 import torch
 
-from .pitchnet import SELF_EAR, PitchNet, decode, make_dataset
+from .pitchnet import SELF_EAR, PitchNet, decode, ear_from_checkpoint, make_dataset
 
 SR = SELF_EAR.sr
 HOP = int(round(SR * 0.01))
@@ -82,7 +82,8 @@ class Ear:
 
     def __init__(self, path: str, device, n_pca: int = 16, fit_clips: int = 40):
         ck = torch.load(path, map_location=device)
-        self.net = PitchNet(SELF_EAR, ck["width"]).to(device).eval()
+        self.ear_spec = ear_from_checkpoint(ck)
+        self.net = PitchNet(self.ear_spec, ck["width"], ck.get("pool", 8)).to(device).eval()
         self.net.load_state_dict(ck["state"])
         self.dev, self.n_pca = device, n_pca
         # PCA of the layer before the output, fitted on synthetic clips (fixed for the whole run)
@@ -107,7 +108,7 @@ class Ear:
         """-> (heard cents (B,), NaN = no tone; features (B, 2 + n_pca): confidence, voiced, PCA)."""
         emb = self._embed(frames)
         logits = self.net.head(emb)
-        cents = decode(logits, SELF_EAR)
+        cents = decode(logits, self.ear_spec)
         conf = torch.sigmoid(logits).max(1).values
         pca = ((emb - self.mean) @ self.basis) / self.scale
         feats = torch.cat([conf[:, None], torch.isfinite(cents).float()[:, None], pca.clamp(-5.0, 5.0)], 1)
