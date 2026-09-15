@@ -28,8 +28,10 @@ typedef struct {
   const float *b2;   // out
 } mlp_int8_t;
 
-#define MLP_INT8_FROM(P) \
+// two levels so that P may itself be a macro (e.g. -DHIL_NET=HARSH_HIST_INT8)
+#define MLP_INT8_FROM_(P) \
   { P##_IN, P##_HIDDEN, P##_OUT, P##_W1, P##_W1_SCALE, P##_B1, P##_W2, P##_W2_SCALE, P##_B2 }
+#define MLP_INT8_FROM(P) MLP_INT8_FROM_(P)
 
 // x: in values; hidden: scratch of `hidden` floats; y: out values in [-1, 1].
 void mlp_int8_forward(const mlp_int8_t *m, const float *x, float *hidden, float *y);
