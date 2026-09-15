@@ -98,7 +98,9 @@ class FluteEnv(_EnvBase):
         randomize: bool = True,
         spread: float = 1.0,
         params: FluteParams | None = None,
+        harsh: float = 0.0,
     ):
+        self.harsh = harsh
         self.level = level
         self.progress = progress
         self.target_fn = target_fn
@@ -137,7 +139,7 @@ class FluteEnv(_EnvBase):
         super().reset(seed=seed)
         rng = self.np_random
         if self.randomize:
-            self.params = FluteParams.sample(rng, self.spread)
+            self.params = FluteParams.sample(rng, self.spread, self.harsh)
         else:
             self.params = self.fixed_params or FluteParams()
         self.sim = FluteSim(self.params, rng)

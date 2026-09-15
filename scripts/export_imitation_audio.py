@@ -23,7 +23,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from export_targets import write_wav  # noqa: E402
 
-from flute_rl import FluteEnv, rollout  # noqa: E402
+from flute_rl import FluteEnv, PhysicsPriorPolicy, rollout  # noqa: E402
 from flute_rl.audio import synth_self, synth_source  # noqa: E402
 from flute_rl.feedback import FeedbackPolicy, FeedbackResidualPolicy  # noqa: E402
 from flute_rl.policy import load_net  # noqa: E402
@@ -39,6 +39,8 @@ RIG_SEED = 4_000_000
 
 
 def policy_for(path: str | None):
+    if path == "prior":  # physics model only: no rig identification, no ILC, no listening
+        return PhysicsPriorPolicy()
     if path is None:
         return FeedbackPolicy()
     net, meta = load_net(path)
@@ -49,7 +51,8 @@ def policy_for(path: str | None):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", action="append", default=[], help='"label=path.npz" (repeatable); "label=classic" for the hand-made feedback')
+    ap.add_argument("--model", action="append", default=[],
+                    help='"label=path.npz" (repeatable); "label=classic" for the hand-made feedback, "label=prior" for the physics model only')
     ap.add_argument("--out", required=True)
     ap.add_argument("--takes", type=int, default=2)
     args = ap.parse_args()

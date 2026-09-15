@@ -19,6 +19,7 @@ Model summary
 """
 from __future__ import annotations
 
+import dataclasses
 from collections import deque
 from dataclasses import dataclass
 
@@ -70,10 +71,59 @@ class FluteParams:
     pitch_noise: float = 3.0       # [cents]
     dropout: float = 0.02          # probability that a frame has no pitch estimate
     obs_delay: int = 3             # latency until a feedback controller hears the pitch [steps]
+    # "harsh" effects (all off by default; FluteParams.sample(harsh=...) turns them on).
+    # The controllers do not model any of these: they make the rig differ from the
+    # controller's model in form, not only in parameter values. Ranges are guesses
+    # until the real actuator, servo and flute are measured.
+    stiction: float = 0.0          # extra PWM needed to break away from standstill (stick-slip)
+    pwm_curve: float = 1.0         # speed ~ drive ** pwm_curve (nonlinear PWM-to-speed)
+    load_slope: float = 0.0        # pushing in gets slower by this fraction at full stroke
+    speed_drift: float = 0.0       # slow random walk of the speed during a take [fraction / sqrt(s)]
+    motion_noise: float = 0.0      # per-step multiplicative noise on the motion
+    delay_jitter: float = 0.0      # probability that a PWM command is applied one step late
+    onset_s: float = 0.0           # the edge tone needs this long inside the start window before it sounds [s]
+    hysteresis_deg: float = 0.0    # the start window is this much narrower on each side than the sustain window
+    edge_soft_deg: float = 0.0     # near the window edges the tone breaks off at random
+    opt_slope_deg: float = 0.0     # the best angle moves by this much across the stroke
+    pitch_jitter: float = 0.0      # breath: slow random pitch wobble [cents std]
+    overblow_margin: float = 0.0   # overblowing starts this fraction earlier in the window
+    octave_err: float = 0.0        # probability that the pitch estimate is off by an octave
 
     @classmethod
-    def sample(cls, rng: np.random.Generator, spread: float = 1.0) -> "FluteParams":
-        """Domain randomisation around the nominal values (spread = 0 gives nominal)."""
+    def sample(cls, rng: np.random.Generator, spread: float = 1.0, harsh: float = 0.0) -> "FluteParams":
+        """Domain randomisation around the nominal values (spread = 0 gives nominal).
+
+        `harsh` in [0, 1] scales the effects the controllers do not model. They are
+        drawn after the usual parameters, so a seed gives the same basic rig at any
+        harshness (paired comparisons)."""
+        base = cls._sample_basic(rng, spread)
+        if harsh <= 0.0:
+            return base
+        h = float(harsh)
+
+        def g(lo: float, hi: float) -> float:
+            return float(h * rng.uniform(lo, hi))
+
+        return dataclasses.replace(
+            base,
+            backlash=base.backlash + g(0.0, 0.0007),
+            stiction=g(0.0, 0.15),
+            pwm_curve=1.0 + g(-0.3, 0.5),
+            load_slope=g(0.0, 0.3),
+            speed_drift=g(0.0, 0.05),
+            motion_noise=g(0.0, 0.1),
+            delay_jitter=g(0.0, 0.15),
+            onset_s=g(0.02, 0.08),
+            hysteresis_deg=g(0.0, 1.5),
+            edge_soft_deg=g(0.0, 1.0),
+            opt_slope_deg=g(-3.0, 3.0),
+            pitch_jitter=g(0.0, 8.0),
+            overblow_margin=g(0.0, 0.3),
+            octave_err=g(0.0, 0.05),
+        )
+
+    @classmethod
+    def _sample_basic(cls, rng: np.random.Generator, spread: float) -> "FluteParams":
         n = cls()
 
         def u(center: float, half: float) -> float:
@@ -139,34 +189,72 @@ class FluteSim:
         self.theta = 0.0
         self.t = 0
         self._pwm_q = deque([0.0] * self.p.cmd_delay)
+        self._u_last = 0.0
+        self._speed = 1.0
+        self._jit = 0.0
+        self._snd = self.pitch_at(self.x, self.theta)[1]  # tone state (onset / hysteresis)
+        self._cnt = 1 if self._snd else 0
         return self.observe()
 
+    def _window(self, x: float, theta: float) -> tuple[float, float, float]:
+        """(angle from the best angle, lower and upper half-widths of the sounding window) [deg]."""
+        p = self.p
+        frac = float(np.clip(x / p.stroke, 0.0, 1.0))
+        d = theta - (p.theta_opt_deg + p.opt_slope_deg * (frac - 0.5))
+        shrink = 1.0 - p.win_narrowing * frac
+        return d, p.win_lo_deg * shrink, p.win_hi_deg * shrink
+
     def pitch_at(self, x: float, theta: float) -> tuple[float, bool, bool]:
-        """(cents, sounding, overblown) for a plunger position and angle."""
+        """(cents, sounding, overblown) for a plunger position and a steady angle."""
         p = self.p
         length = max(p.tube_len - x + p.end_corr, 0.02)
         f = speed_of_sound(p.temp_c) / (4.0 * length)
-        d = theta - p.theta_opt_deg
-        shrink = 1.0 - p.win_narrowing * float(np.clip(x / p.stroke, 0.0, 1.0))
-        lo, hi = p.win_lo_deg * shrink, p.win_hi_deg * shrink
+        d, lo, hi = self._window(x, theta)
         sounding = -lo < d < hi
         cents = float(hz_to_cents(f)) + p.k_theta * d
-        overblown = sounding and x > p.overblow_x and d > 0.5 * hi
+        overblown = sounding and x > p.overblow_x and d > (0.5 - p.overblow_margin) * hi
         if overblown:
             cents += 1200.0
         return cents, sounding, overblown
 
+    def _update_tone(self) -> None:
+        """Edge-tone state: it starts only inside the (narrower) start window after onset_s,
+        then keeps sounding anywhere in the sustain window; near the edges it may break off."""
+        p = self.p
+        d, lo, hi = self._window(self.x, self.theta)
+        in_win = -lo < d < hi
+        if self._snd:
+            self._snd = in_win
+        else:
+            h = p.hysteresis_deg
+            self._cnt = self._cnt + 1 if (-lo + h < d < hi - h) else 0
+            self._snd = self._cnt > 0 and self._cnt * DT >= p.onset_s - 1e-12
+        if self._snd and p.edge_soft_deg > 0.0:
+            dist = min(d + lo, hi - d)
+            if dist < p.edge_soft_deg and self.rng.random() < 0.5 * (1.0 - dist / p.edge_soft_deg):
+                self._snd, self._cnt = False, 0
+
     def step(self, pwm: float, angle_cmd: float) -> SimState:
         p = self.p
 
-        # plunger: delayed PWM -> dead band -> velocity lag -> end stops -> backlash
+        # plunger: delayed PWM -> dead band / stiction -> nonlinear speed -> velocity lag -> end stops -> backlash
         self._pwm_q.append(float(np.clip(pwm, -1.0, 1.0)))
         u = self._pwm_q.popleft()
+        if p.delay_jitter > 0.0 and self.rng.random() < p.delay_jitter:
+            u = self._u_last  # this command arrives a step late
+        self._u_last = u
         mag = abs(u)
-        drive = 0.0 if mag < p.deadband else float(np.sign(u)) * (mag - p.deadband) / (1.0 - p.deadband)
-        v_cmd = drive * (p.v_max_in if drive > 0 else p.v_max_out)
+        threshold = p.deadband + (p.stiction if abs(self.v) < 0.005 else 0.0)
+        drive = 0.0 if mag < threshold else float(np.sign(u)) * (mag - p.deadband) / (1.0 - p.deadband)
+        if p.pwm_curve != 1.0:
+            drive = float(np.sign(drive)) * abs(drive) ** p.pwm_curve
+        v_max = p.v_max_in * (1.0 - p.load_slope * float(np.clip(self.x_motor / p.stroke, 0.0, 1.0))) if drive > 0 else p.v_max_out
+        if p.speed_drift > 0.0:
+            self._speed = float(np.clip(self._speed + self.rng.normal(0.0, p.speed_drift * np.sqrt(DT)), 0.8, 1.2))
+        v_cmd = drive * v_max * self._speed
         self.v += (v_cmd - self.v) * min(1.0, DT / p.tau_v)
-        self.x_motor += self.v * DT
+        moved = self.v * (1.0 + self.rng.normal(0.0, p.motion_noise)) if p.motion_noise > 0.0 else self.v
+        self.x_motor += moved * DT
         if self.x_motor <= 0.0:
             self.x_motor, self.v = 0.0, max(self.v, 0.0)
         elif self.x_motor >= p.stroke:
@@ -184,16 +272,24 @@ class FluteSim:
         lim = p.servo_rate_dps * DT
         self.theta += float(np.clip(d_theta, -lim, lim))
 
+        self._update_tone()
+        if p.pitch_jitter > 0.0:  # breath: Ornstein-Uhlenbeck wobble with a 50 ms time constant
+            self._jit += -self._jit * DT / 0.05 + p.pitch_jitter * np.sqrt(2.0 * DT / 0.05) * self.rng.normal()
         self.t += 1
         return self.observe()
 
     def observe(self) -> SimState:
         p = self.p
-        cents, sounding, overblown = self.pitch_at(self.x, self.theta)
+        cents, _, overblown = self.pitch_at(self.x, self.theta)
+        sounding = self._snd
+        overblown = overblown and sounding
+        cents += self._jit
         readback = round(self.theta / p.servo_step_deg) * p.servo_step_deg
         measured = float("nan")
         if sounding and self.rng.random() >= p.dropout:
             measured = cents + float(self.rng.normal(0.0, p.pitch_noise))
+            if p.octave_err > 0.0 and self.rng.random() < p.octave_err:
+                measured += 1200.0 if self.rng.random() < 0.5 else -1200.0
         return SimState(self.t, self.x, self.v, self.theta, readback, cents, sounding, overblown, measured)
 
     def find_sounding_angle(self, x_ref: float, step_deg: float = 0.5, repeats: int = 3) -> float:

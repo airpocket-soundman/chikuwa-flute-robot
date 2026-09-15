@@ -76,7 +76,7 @@ TARGET_SETS = {"curriculum": None, "long": long_piece, "birds": bird_piece}
 def _job(task):
     name, seed = task
     a = _A["args"]
-    env = FluteEnv(progress=a.progress, takes=a.takes, feedback=a.feedback, target_fn=TARGET_SETS[a.targets])
+    env = FluteEnv(progress=a.progress, takes=a.takes, feedback=a.feedback, target_fn=TARGET_SETS[a.targets], harsh=a.harsh)
     r = rollout(env, _A["ctrl"][name](), seed=seed)
     return [[t["mean_abs_cents"], t["mean_reward"], t["sounding_rate"], t["gap_leak"]] for t in r["per_take"]]
 
@@ -94,6 +94,8 @@ def main() -> None:
     ap.add_argument("--progress", type=float, default=0.8)
     ap.add_argument("--residual", action="append", default=[], help="saved residual network (repeatable)")
     ap.add_argument("--feedback", action="store_true", help="env delivers the delayed live pitch; adds the feedback controllers")
+    ap.add_argument("--harsh", type=float, default=0.0,
+                    help="0..1: turn on the rig effects the controllers do not model (stiction, onset delay, ...)")
     ap.add_argument("--targets", choices=sorted(TARGET_SETS), default="curriculum",
                     help="curriculum: like training; long: 10 s+ pieces with 2-4 s notes; birds: uguisu / cuckoo / great tit")
     ap.add_argument("--workers", type=int, default=8)
@@ -108,7 +110,8 @@ def main() -> None:
     data = {n: np.array(res[i * len(seeds):(i + 1) * len(seeds)]) for i, n in enumerate(names)}  # (episodes, takes, 3)
 
     rng = np.random.default_rng(0)
-    print(f"{args.episodes} randomised rigs x {args.takes} takes, targets: {args.targets}, curriculum progress {args.progress}")
+    print(f"{args.episodes} randomised rigs x {args.takes} takes, targets: {args.targets}, harsh {args.harsh}, "
+          f"curriculum progress {args.progress}")
     print("mean |cents| per take [95% CI]")
     for n in names:
         cells = []

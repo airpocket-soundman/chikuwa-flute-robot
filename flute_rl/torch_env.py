@@ -30,10 +30,11 @@ MAX_OBS_DELAY = 8
 NAN = float("nan")
 
 
-def rig_from_seed(seed: int, spread: float = 1.0, params: FluteParams | None = None) -> tuple[FluteParams, float]:
-    """(params, sounding-compensation angle) exactly as FluteEnv.reset(seed=seed) builds them."""
+def rig_from_seed(seed: int, spread: float = 1.0, params: FluteParams | None = None,
+                  harsh: float = 0.0) -> tuple[FluteParams, float]:
+    """(params, sounding-compensation angle) exactly as FluteEnv(harsh=...).reset(seed=seed) builds them."""
     rng = np.random.default_rng(int(seed))
-    p = FluteParams.sample(rng, spread) if params is None else params
+    p = FluteParams.sample(rng, spread, harsh) if params is None else params
     return p, FluteSim(p, rng).find_sounding_angle(X_REF)
 
 
