@@ -25,27 +25,40 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from flute_rl import MLP, FluteEnv, ModelResidualPolicy, rollout  # noqa: E402
 from flute_rl.adapt import AdaptivePolicy  # noqa: E402
+from flute_rl.feedback import FeedbackPolicy, FeedbackResidualPolicy  # noqa: E402
 
 KEYS = ("mean_reward", "mean_abs_cents", "sounding_rate", "rest_leak", "overblow_rate")
 _W: dict = {}
 
 
 def build(args):
-    env = FluteEnv(progress=args.progress, spread=args.spread, takes=args.takes)
-    net = MLP(ModelResidualPolicy.feature_dim(args.horizon), 2, hidden=args.hidden, rng=np.random.default_rng(args.seed))
-    policy = ModelResidualPolicy(AdaptivePolicy(ilc_gain=args.ilc_gain), net, scale=args.scale, horizon=args.horizon)
+    env = FluteEnv(progress=args.progress, spread=args.spread, takes=args.takes, feedback=args.feedback)
+    rng = np.random.default_rng(args.seed)
+    if args.feedback:
+        net = MLP(FeedbackResidualPolicy.feature_dim(args.horizon), 3, hidden=args.hidden, rng=rng)
+        base = FeedbackPolicy(fb_gain=args.fb_gain, ilc_gain=args.ilc_gain)
+        policy = FeedbackResidualPolicy(base, net, scale=args.scale, horizon=args.horizon)
+    else:
+        net = MLP(ModelResidualPolicy.feature_dim(args.horizon), 2, hidden=args.hidden, rng=rng)
+        policy = ModelResidualPolicy(AdaptivePolicy(ilc_gain=args.ilc_gain), net, scale=args.scale, horizon=args.horizon)
     return env, net, policy
+
+
+def scored_takes(args) -> slice:
+    """Takes that count toward the fitness: with live feedback take 1 can be improved too."""
+    return slice(0, None) if args.feedback else slice(1, None)
 
 
 def _init(args):
     _W["env"], _W["net"], _W["policy"] = build(args)
+    _W["takes"] = scored_takes(args)
 
 
 def _fitness(task):
     theta, seed = task
     _W["net"].set_flat(theta)
     r = rollout(_W["env"], _W["policy"], seed=int(seed))
-    return float(np.mean([t["mean_reward"] for t in r["per_take"][1:]]))
+    return float(np.mean([t["mean_reward"] for t in r["per_take"][_W["takes"]]]))
 
 
 def _metrics(task):
@@ -79,6 +92,9 @@ def main() -> None:
     ap.add_argument("--scale", type=float, default=0.3, help="residual action scale")
     ap.add_argument("--takes", type=int, default=2)
     ap.add_argument("--ilc-gain", type=float, default=0.5)
+    ap.add_argument("--feedback", action="store_true",
+                    help="listen while playing: FeedbackPolicy base, network also scales the feedback gain")
+    ap.add_argument("--fb-gain", type=float, default=0.05)
     ap.add_argument("--progress", type=float, default=0.8)
     ap.add_argument("--spread", type=float, default=1.0)
     ap.add_argument("--eval-episodes", type=int, default=100)
@@ -101,9 +117,10 @@ def main() -> None:
     print(f"params: {net.n_params}  features: {net.in_dim}  takes: {args.takes}  workers: {args.workers}", flush=True)
 
     with Pool(args.workers, initializer=_init, initargs=(args,)) as pool:
+        sl = scored_takes(args)
         base = evaluate(pool, theta, eval_seeds)
         report("start  ", base)
-        best = (base[1:, 0].mean(), theta.copy())
+        best = (base[sl, 0].mean(), theta.copy())
         half = args.pop // 2
         for g in range(1, args.gens + 1):
             t0 = time.time()
@@ -122,12 +139,13 @@ def main() -> None:
             if g % args.eval_every == 0 or g == args.gens:
                 cur = evaluate(pool, theta, eval_seeds)
                 report(f"gen {g:3d}", cur)
-                if cur[1:, 0].mean() > best[0]:
-                    best = (cur[1:, 0].mean(), theta.copy())
+                if cur[sl, 0].mean() > best[0]:
+                    best = (cur[sl, 0].mean(), theta.copy())
                     net.set_flat(theta)
-                    net.save(out, scale=args.scale, horizon=args.horizon, ilc_gain=args.ilc_gain)
+                    net.save(out, scale=args.scale, horizon=args.horizon, ilc_gain=args.ilc_gain,
+                             feedback=args.feedback, fb_gain=args.fb_gain)
                     print(f"saved {out} (best so far)", flush=True)
-    print(f"best eval reward/step (takes 2..): {best[0]:+.4f}")
+    print(f"best eval reward/step (scored takes): {best[0]:+.4f}")
 
 
 if __name__ == "__main__":
