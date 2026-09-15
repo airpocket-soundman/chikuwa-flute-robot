@@ -75,6 +75,53 @@ def fit_tube(depths_m: np.ndarray, hz: np.ndarray) -> TubeFit:
     return TubeFit(float(S), float(c), float((c - 331.3) / 0.606), 1200 * np.log2(f[ok] / pred))
 
 
+def speed_from_recording(x: np.ndarray, sr: int, acoustic_len_m: float, speed_of_sound: float,
+                         trim: float = 0.2) -> float:
+    """Plunger speed [m/s] while it moves at a constant PWM with the flute sounding.
+
+    Each pitch frame gives the plunger depth through the tube fit (x = S - c / 4f); the
+    speed is the slope of depth over time, fitted on the middle part of the move
+    (`trim` of the sounding stretch is dropped at each end: start-up and stop)."""
+    x = x / (np.max(np.abs(x)) + 1e-12)
+    frame = int(2 ** np.ceil(np.log2(sr * 0.04)))
+    t, f0, _ = pitch_track(x, sr, frame=frame, fmin=200.0, fmax=min(5000.0, 0.45 * sr), rms_gate=0.02)
+    ok = np.isfinite(f0)
+    if ok.sum() < 10:
+        return float("nan")
+    t, depth = t[ok], acoustic_len_m - speed_of_sound / (4.0 * f0[ok])
+    n = len(t)
+    a, b = int(trim * n), max(int((1 - trim) * n), int(trim * n) + 5)
+    return float(np.polyfit(t[a:b], depth[a:b], 1)[0])
+
+
+@dataclass
+class ActuatorFit:
+    v_max: float        # speed at full PWM [m/s]
+    deadband: float     # |PWM| below which it does not move
+    pwm_curve: float    # speed ~ ((|pwm| - deadband) / (1 - deadband)) ** pwm_curve
+    residual: np.ndarray
+
+
+def fit_actuator(pwm: np.ndarray, speed: np.ndarray) -> ActuatorFit:
+    """Fit speed(|pwm|) = v_max * drive ** curve, drive = (|pwm| - db) / (1 - db), by a grid over
+    (db, curve) and least squares for v_max. Use one direction per fit (pushing in or pulling out)."""
+    p, v = np.abs(np.asarray(pwm, float)), np.abs(np.asarray(speed, float))
+    ok = np.isfinite(v)
+    p, v = p[ok], v[ok]
+    best = (np.inf, 0.0, 0.2, 1.0)
+    for db in np.arange(0.0, min(p.min(), 0.6) + 1e-9, 0.005):
+        drive = np.clip((p - db) / (1.0 - db), 0.0, None)
+        for curve in np.arange(0.5, 2.01, 0.02):
+            g = drive ** curve
+            vmax = float(g @ v / max(g @ g, 1e-12))
+            err = float(np.sum((vmax * g - v) ** 2))
+            if err < best[0]:
+                best = (err, vmax, db, curve)
+    _, vmax, db, curve = best
+    pred = vmax * np.clip((p - db) / (1.0 - db), 0.0, None) ** curve
+    return ActuatorFit(vmax, float(db), float(curve), v - pred)
+
+
 @dataclass
 class WindowFit:
     lo_deg: float        # lowest angle that sounds

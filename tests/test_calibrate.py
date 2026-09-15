@@ -29,6 +29,34 @@ def test_tube_fit_recovers_length_and_temperature():
     assert np.max(np.abs(fit.residual_cents)) < 5.0
 
 
+def test_actuator_fit_recovers_speed_dead_band_and_curve():
+    import dataclasses
+
+    from flute_rl.calibrate import fit_actuator, speed_from_recording
+
+    p = FluteParams(v_max_in=0.09, deadband=0.25, pwm_curve=1.3, tau_v=0.02, cmd_delay=0, backlash=0.0)
+    S = p.tube_len + p.end_corr
+    c = speed_of_sound(p.temp_c)
+    pwms = np.array([0.4, 0.55, 0.7, 0.85, 1.0])
+    speeds = []
+    for i, u in enumerate(pwms):
+        sim = FluteSim(dataclasses.replace(p, pitch_noise=0.0, dropout=0.0), np.random.default_rng(i))
+        sim.reset(x0=0.01)
+        cents, snd = [], []
+        steps = int(0.06 / (p.v_max_in * ((u - p.deadband) / (1 - p.deadband)) ** p.pwm_curve) / 0.01)
+        for _ in range(min(max(steps, 20), 300)):
+            s = sim.step(u, p.theta_opt_deg / p.angle_range_deg)
+            cents.append(s.cents)
+            snd.append(s.sounding)
+        rng = np.random.default_rng(50 + i)
+        y = room(synth_self(np.array(cents), np.array(snd), rng, sr=SR), SR, rng, snr_db=(35.0, 35.0))
+        speeds.append(speed_from_recording(y, SR, S, c))
+    fit = fit_actuator(pwms, np.array(speeds))
+    assert abs(fit.v_max - p.v_max_in) / p.v_max_in < 0.08
+    assert abs(fit.deadband - p.deadband) < 0.06
+    assert abs(fit.pwm_curve - p.pwm_curve) < 0.3
+
+
 def test_window_fit_finds_edges_and_bend():
     p = FluteParams(theta_opt_deg=1.5, win_lo_deg=4.0, win_hi_deg=3.0, win_narrowing=0.0, k_theta=12.0)
     sim = FluteSim(p, np.random.default_rng(0))

@@ -6,6 +6,10 @@ Depth sweep (a CSV with lines "depth_mm,file.wav"; depth measured from the start
 Angle sweep at one depth (lines "angle_deg,file.wav"):
     python scripts/calibrate.py window sweep_angle.csv
 
+Actuator speed (lines "pwm,file.wav", each a move at constant PWM with the flute sounding;
+needs the tube fit's acoustic length and speed of sound):
+    python scripts/calibrate.py actuator sweep_pwm.csv --acoustic-mm 150.5 --sound-speed 346.4
+
 Prints each recording's pitch and the fitted values, and the FluteParams values to use.
 """
 from __future__ import annotations
@@ -19,7 +23,7 @@ import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from flute_rl.calibrate import analyse, fit_tube, fit_window, read_wav  # noqa: E402
+from flute_rl.calibrate import analyse, fit_actuator, fit_tube, fit_window, read_wav, speed_from_recording  # noqa: E402
 
 
 def load(csv_path: str) -> list[tuple[float, str]]:
@@ -36,12 +40,28 @@ def load(csv_path: str) -> list[tuple[float, str]]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("kind", choices=("tube", "window"))
+    ap.add_argument("kind", choices=("tube", "window", "actuator"))
     ap.add_argument("csv")
     ap.add_argument("--bore-mm", type=float, default=10.0, help="inner diameter, to split the acoustic length")
+    ap.add_argument("--acoustic-mm", type=float, default=None, help="actuator: acoustic length from the tube fit")
+    ap.add_argument("--sound-speed", type=float, default=None, help="actuator: speed of sound from the tube fit")
     args = ap.parse_args()
 
     rows = load(args.csv)
+    if args.kind == "actuator":
+        if args.acoustic_mm is None or args.sound_speed is None:
+            ap.error("actuator needs --acoustic-mm and --sound-speed (run the tube fit first)")
+        speeds = []
+        for v, path in rows:
+            x, sr = read_wav(path)
+            sp = speed_from_recording(x, sr, args.acoustic_mm / 1000.0, args.sound_speed)
+            speeds.append(sp)
+            print(f"  pwm {v:5.2f}  {pathlib.Path(path).name:24s}  speed {1000 * sp:7.1f} mm/s")
+        fit = fit_actuator(np.array([v for v, _ in rows]), np.array(speeds))
+        print(f"v_max {1000 * fit.v_max:.1f} mm/s, dead band {fit.deadband:.2f}, PWM curve {fit.pwm_curve:.2f}, "
+              f"residuals {np.round(1000 * fit.residual, 1)} mm/s")
+        print(f"FluteParams: v_max_in (or v_max_out)={fit.v_max:.4f}, deadband={fit.deadband:.3f}, pwm_curve={fit.pwm_curve:.2f}")
+        return
     tones = []
     for v, path in rows:
         x, sr = read_wav(path)
