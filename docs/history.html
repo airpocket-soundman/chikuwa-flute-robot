@@ -219,9 +219,11 @@ footer { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--ru
     <div class="gens" role="group" aria-label="世代">
       <button class="gen-btn" id="gen-050" type="button" data-gen="050" aria-pressed="true">50 世代目</button>
       <button class="gen-btn" id="gen-100" type="button" data-gen="100" aria-pressed="false">100 世代目</button>
+      <button class="gen-btn" id="gen-hb" type="button" data-gen="hb" aria-pressed="false">厳しい機体: 学習し直す前</button>
+      <button class="gen-btn" id="gen-ha" type="button" data-gen="ha" aria-pressed="false">厳しい機体: 学習し直した後</button>
     </div>
     <div class="pieces" id="pieces"></div>
-    <p class="caption">数値は音程のずれの平均(セント)。「切れ目」は、音符の間の短い無音で音が鳴ってしまった割合。「物理モデルのみ」は機体推定も耳も使わない、うまくいかない例(耳の基準用)。各世代のモデルは「その世代までで最も評価の良かったもの」で、記憶なし MLP の 100 世代目は 75 世代目のモデル(100 世代目の評価が改善しなかったため)。学習は 100 世代で打ち切った。1 曲・1 台だけの結果なので、数値のばらつきは大きい(方式の良し悪しは多数条件の比較で判断する)。音はシミュレーターの結果から合成したもので、実物の笛のかすれや鳴り損ないは入っていない。</p>
+    <p class="caption">数値は音程のずれの平均(セント)。「切れ目」は、音符の間の短い無音で音が鳴ってしまった割合。「物理モデルのみ」は機体推定も耳も使わない、うまくいかない例(耳の基準用)。各世代のモデルは「その世代までで最も評価の良かったもの」で、記憶なし MLP の 100 世代目は 75 世代目のモデル(100 世代目の評価が改善しなかったため)。学習は 100 世代で打ち切った。「厳しい機体」は、制御側が知らない効果(静止摩擦、鳴り始めの遅れ、ヒステリシスなど)を入れたシミュレーターでの演奏(段階 10・11)。1 曲・1 台だけの結果なので、数値のばらつきは大きい(方式の良し悪しは多数条件の比較で判断する)。音はシミュレーターの結果から合成したもので、実物の笛のかすれや鳴り損ないは入っていない。</p>
   </section>
 
   <section aria-labelledby="log-h" style="display:grid; gap:24px;">
@@ -402,7 +404,38 @@ footer { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--ru
           </ul>
           <p><span class="tag decided">決定(ユーザー)</span>学習は 100 世代で打ち切り、GPU での高速化を織り込んだうえで、厳しくシミュレーションする。</p>
           <p>GPU 版として、多数の機体をまとめて 1 ステップずつ進めるシミュレーターと制御を作った(雑音なしなら numpy 版と行動が完全に一致)。1 世代 768 回の演奏では CPU 20 コアの numpy 版とほぼ同じ速さ(約 6 秒)で、候補を 10 倍にすると 1 秒あたりの演奏数が約 2.3 倍になった。今は細かい計算の呼び出しが時間を決めていて、さらに速くするには計算をまとめる工夫が要る。</p>
-          <p><span class="tag open">進行中</span>静止摩擦・非線形な速さ・演奏中の速さの変化・動きの雑音・遅れの揺らぎ、鳴り始めの遅れ・ヒステリシス・確率的な窓の端・動く窓の中心・息による音程の揺らぎ、オクターブの取り違えを、厳しさの度合い 1 つで入れられるようにしている。制御側のモデルは単純なままにして、今の方式がどれだけ崩れるかをまず測る。値はすべて推測で、実物を測って合わせる必要がある。</p>
+          <p>静止摩擦・非線形な速さ・演奏中の速さの変化・動きの雑音・遅れの揺らぎ、鳴り始めの遅れ・ヒステリシス・確率的な窓の端・動く窓の中心・息による音程の揺らぎ、オクターブの取り違えを、厳しさの度合い 1 つで入れられるようにした(値はすべて推測)。制御側のモデルは単純なまま、学習し直さずに評価すると、2 回目のずれが 3〜4 倍になり(機体推定 + ILC で <span class="num">19 → 79</span> セント)、テイクを重ねても良くならなくなった。これまでの結果は、シミュレーターの甘さに大きく助けられていた。</p>
+        </div>
+      </div>
+
+      <div class="step key-step">
+        <div class="step-label"><span class="step-no">11</span><span class="step-when">09-15 · 厳しい機体</span></div>
+        <div class="step-body">
+          <h3>厳しい機体で学習し直し、耳で聞かせた</h3>
+          <p>3 つの方策を、厳しいシミュレーターで GPU を使って 100 世代学習し直した。あわせて E2E の方法 A として、シミュレーターの中で笛の音を鳴らし、学習済みの耳のネットワークで聞かせた。耳が聞き取った音程を演奏中の補正と機体推定に使い、耳の特徴(自信の度合いと 16 次元の要約)も方策に渡した。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>厳しい機体、200 台</th><th style="text-align:right">1 回目</th><th style="text-align:right">2 回目</th><th style="text-align:right">3 回目</th><th style="text-align:right">音が出ている割合</th></tr></thead>
+              <tbody>
+                <tr><td>手作りの補正(測定値で聞く)</td><td class="n">104.0</td><td class="n">66.6</td><td class="n">64.9</td><td class="n">0.96</td></tr>
+                <tr><td>手作りの補正(耳で聞く)</td><td class="n">109.6</td><td class="n">65.4</td><td class="n">67.5</td><td class="n">0.96</td></tr>
+                <tr><td>GRU(甘い機体で学習)</td><td class="n">87.4</td><td class="n">57.0</td><td class="n">60.4</td><td class="n">0.92</td></tr>
+                <tr><td>履歴つき MLP(甘い機体で学習)</td><td class="n">87.8</td><td class="n">59.3</td><td class="n">62.4</td><td class="n">0.93</td></tr>
+                <tr><td>履歴つき MLP(学習し直した後)</td><td class="n">84.6</td><td class="n">56.5</td><td class="n">57.3</td><td class="n">0.96</td></tr>
+                <tr><td>GRU(学習し直した後)</td><td class="n">86.9</td><td class="n">58.0</td><td class="n">61.1</td><td class="n">0.96</td></tr>
+                <tr><td>GRU(学習し直した後、耳で聞く)</td><td class="n">91.0</td><td class="n">55.3</td><td class="n">61.2</td><td class="n">0.96</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <ul>
+            <li><span class="tag found">分かったこと</span>耳は測定値の代わりに使える(手作りの補正で比べて、差は信頼区間の範囲内)</li>
+            <li>学習し直しても伸びは約 3 セントと小さい。変わったのは、黙って点を稼ぐ癖が消えたこと(音が出ている割合 0.92〜0.93 → 0.96)</li>
+            <li>耳の特徴を渡しても(方法 A)、はっきりした効果はなかった</li>
+            <li>GRU は厳しい機体でも、耳を信じる度合いを場面や遅れによらず約 1.8 倍にしているだけで、「いつ信じるか」は学習できていない</li>
+            <li>学習した方策は、手作りの補正より 15〜20% 良いところで頭打ちになっている。一番の原因は、制御側の機体モデル(機体推定の式)が機体の形に合っていないことだと考えている</li>
+          </ul>
+          <p><span class="tag decided">並行して(ユーザー)</span>3D プリントで内径 10mm・長さ 60mm の笛を試作。はじめは鳴らなかったが、底を閉じると簡単に鳴るようになった(片側を閉じた管は計算上 約 1.4kHz)。録音を解析するスクリプト <code>scripts/analyze_recording.py</code> を用意した。</p>
+          <p><span class="tag open">次</span>実物の測定(差し込み量ごとの音程、鳴る角度の範囲、アクチュエーターの速さ)でシミュレーターを合わせ込むこと、機体推定のモデルに厳しい効果の一部(不感帯や非線形)を加えること、方法 B(音から行動までを PPO でまとめて学習)。</p>
         </div>
       </div>
 
@@ -436,6 +469,15 @@ const PIECES = [
 // [take1 cents, take1 gap leak, take2 cents, take2 gap leak] per piece, from manifest.json of each generation
 const BASELINE = { label: "物理モデルのみ(うまくいかない例)", slug: "prior", dir: "baseline", r: { legato: [195.1, null, 194.9, null], detached: [74.6, 0.167, 74.1, 0.167], uguisu: [156.8, 0.222, 157.0, 0.222] } };
 const GENS = {
+  "hb": [
+    { label: "物理モデルのみ(うまくいかない例)", slug: "prior", dir: "harsh_before", r: { legato: [175.7, null, 179.1, null], detached: [142.1, 0.0, 139.4, 0.0], uguisu: [210.2, 0.0, 185.2, 0.0] } },
+    { label: "手作りの補正(学習なし)", slug: "classic", dir: "harsh_before", r: { legato: [116.1, null, 144.4, null], detached: [96.0, 0.0, 46.3, 0.0], uguisu: [52.8, 0.0, 27.0, 0.0] } },
+    { label: "GRU(甘い機体で学習、100 世代目)", slug: "fb_gru_gen100", dir: "harsh_before", r: { legato: [77.1, null, 48.7, null], detached: [85.8, 0.033, 71.9, 0.0], uguisu: [40.5, 0.0, 21.9, 0.0] } },
+  ],
+  "ha": [
+    { label: "GRU(厳しい機体で学習し直した後)", slug: "harsh_gru", dir: "harsh_after", r: { legato: [72.5, null, 75.4, null], detached: [90.7, 0.0, 49.5, 0.0], uguisu: [52.4, 0.0, 25.0, 0.0] } },
+    { label: "履歴つき MLP(厳しい機体で学習し直した後)", slug: "harsh_hist", dir: "harsh_after", r: { legato: [76.7, null, 72.1, null], detached: [92.3, 0.0, 51.5, 0.0], uguisu: [56.4, 0.0, 32.1, 0.0] } },
+  ],
   "100": [
     BASELINE,
     { label: "手作りの補正(学習なし)", slug: "classic", r: { legato: [48.8, null, 37.5, null], detached: [23.6, 0.167, 16.4, 0.167], uguisu: [44.0, 0.222, 24.3, 0.222] } },
