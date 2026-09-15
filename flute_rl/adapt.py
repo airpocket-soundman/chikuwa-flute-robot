@@ -42,8 +42,12 @@ def plunger_trace(pwm: np.ndarray, p: FluteParams) -> np.ndarray:
         q.append(float(u_new))
         u = q.pop(0)
         mag = abs(u)
-        drive = 0.0 if mag < db else (mag - db) / (1.0 - db) * (1.0 if u > 0 else -1.0)
-        v += (drive * (p.v_max_in if drive > 0 else p.v_max_out) - v) * k
+        threshold = db + (p.stiction if abs(v) < 0.005 else 0.0)
+        drive = 0.0 if mag < threshold else (mag - db) / (1.0 - db) * (1.0 if u > 0 else -1.0)
+        if p.pwm_curve != 1.0:
+            drive = float(np.sign(drive)) * abs(drive) ** p.pwm_curve
+        v_in = p.v_max_in * (1.0 - p.load_slope * min(max(x / p.stroke, 0.0), 1.0))
+        v += (drive * (v_in if drive > 0 else p.v_max_out) - v) * k
         x += v * DT
         if x <= 0.0:
             x, v = 0.0, max(v, 0.0)

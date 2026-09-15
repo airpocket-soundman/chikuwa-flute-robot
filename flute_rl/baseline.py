@@ -36,21 +36,35 @@ class PhysicsPriorPolicy:
         self.v_hat = 0.0
         self.q = deque([0.0] * p.cmd_delay)
 
-    def _pwm_for(self, x_des: float) -> float:
+    def _v_in(self, x: float) -> float:
         p = self.p
-        v_des = np.clip((x_des - self.x_hat) / self.track_time, -p.v_max_out, p.v_max_in)
-        drive = v_des / (p.v_max_in if v_des > 0 else p.v_max_out)
+        return p.v_max_in * (1.0 - p.load_slope * float(np.clip(x / p.stroke, 0.0, 1.0)))
+
+    def _pwm_for(self, x_des: float) -> float:
+        """PWM that the model says gives the wanted speed (dead band, PWM curve, load and stiction included;
+        with the default FluteParams these reduce to the plain linear dead-band model)."""
+        p = self.p
+        v_in = self._v_in(self.x_hat)
+        v_des = np.clip((x_des - self.x_hat) / self.track_time, -p.v_max_out, v_in)
+        drive = v_des / (v_in if v_des > 0 else p.v_max_out)
         if abs(drive) < 0.02:
             return 0.0
-        return float(np.sign(drive) * (p.deadband + (1.0 - p.deadband) * abs(drive)))
+        mag = abs(drive) ** (1.0 / p.pwm_curve) if p.pwm_curve != 1.0 else abs(drive)
+        pwm = p.deadband + (1.0 - p.deadband) * mag
+        if p.stiction > 0.0 and abs(self.v_hat) < 0.005:
+            pwm = max(pwm, p.deadband + p.stiction + 0.01)  # enough to break away from standstill
+        return float(np.sign(drive) * min(pwm, 1.0))
 
     def _dead_reckon(self, pwm: float) -> None:
         p = self.p
         self.q.append(pwm)
         u = self.q.popleft()
         mag = abs(u)
-        drive = 0.0 if mag < p.deadband else np.sign(u) * (mag - p.deadband) / (1.0 - p.deadband)
-        v_cmd = drive * (p.v_max_in if drive > 0 else p.v_max_out)
+        threshold = p.deadband + (p.stiction if abs(self.v_hat) < 0.005 else 0.0)
+        drive = 0.0 if mag < threshold else np.sign(u) * (mag - p.deadband) / (1.0 - p.deadband)
+        if p.pwm_curve != 1.0:
+            drive = np.sign(drive) * abs(drive) ** p.pwm_curve
+        v_cmd = drive * (self._v_in(self.x_hat) if drive > 0 else p.v_max_out)
         self.v_hat += (v_cmd - self.v_hat) * min(1.0, DT / p.tau_v)
         self.x_hat = float(np.clip(self.x_hat + self.v_hat * DT, 0.0, p.stroke))
 
