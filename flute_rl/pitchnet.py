@@ -72,14 +72,16 @@ def make_clip(rng: np.random.Generator, kind: str) -> tuple[np.ndarray, np.ndarr
     return frames_at_steps(y, ear, len(truth)), truth.astype(np.float32)
 
 
-def make_dataset(n_clips: int, kinds: tuple[str, ...], seed: int) -> tuple[np.ndarray, np.ndarray]:
+def make_dataset(n_clips: int, kinds: tuple[str, ...], seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(frames, true cents, index into `kinds` per frame); the kinds take turns clip by clip."""
     rng = np.random.default_rng(seed)
-    xs, ys = [], []
+    xs, ys, ks = [], [], []
     for i in range(n_clips):
         x, y = make_clip(rng, kinds[i % len(kinds)])
         xs.append(x)
         ys.append(y)
-    return np.concatenate(xs), np.concatenate(ys)
+        ks.append(np.full(len(y), i % len(kinds), dtype=np.int8))
+    return np.concatenate(xs), np.concatenate(ys), np.concatenate(ks)
 
 
 class PitchNet(nn.Module):

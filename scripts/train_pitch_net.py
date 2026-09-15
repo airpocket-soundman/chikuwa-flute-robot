@@ -34,7 +34,7 @@ def build(n_clips: int, kinds: tuple[str, ...], seed: int, workers: int):
     chunks = [(max(1, n_clips // workers), kinds, seed * 1000 + i) for i in range(workers)]
     with Pool(workers) as pool:
         parts = pool.map(_make, chunks)
-    return np.concatenate([p[0] for p in parts]), np.concatenate([p[1] for p in parts])
+    return tuple(np.concatenate([p[j] for p in parts]) for j in range(3))
 
 
 def yin_track(frames: np.ndarray, ear, limit: int) -> np.ndarray:
@@ -65,6 +65,7 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--yin-frames", type=int, default=20000)
+    ap.add_argument("--init", default=None, help="continue from a saved network (adding timbres step by step)")
     ap.add_argument("--out", default="runs/pitchnet.pt")
     args = ap.parse_args()
 
@@ -72,12 +73,15 @@ def main() -> None:
     kinds = ("self",) if args.ear == "self" else tuple(args.kinds.split(","))
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     t0 = time.time()
-    xtr, ytr = build(args.clips, kinds, 1, args.workers)
-    xte, yte = build(args.test_clips, kinds, 2, args.workers)
+    xtr, ytr, _ = build(args.clips, kinds, 1, args.workers)
+    xte, yte, kte = build(args.test_clips, kinds, 2, args.workers)
     print(f"ear {args.ear} {kinds}: {len(xtr)} train / {len(xte)} test frames of {ear.frame} samples @ {ear.sr} Hz "
           f"({time.time() - t0:.0f}s to synthesise), device {dev}", flush=True)
 
     net = PitchNet(ear, args.width).to(dev)
+    if args.init:
+        net.load_state_dict(torch.load(args.init, map_location=dev)["state"])
+        print(f"continuing from {args.init}", flush=True)
     print(f"parameters: {sum(p.numel() for p in net.parameters())}", flush=True)
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-4)
     steps = args.epochs * (len(xtr) // args.batch)
@@ -109,8 +113,12 @@ def main() -> None:
         print(f"epoch {ep:2d} loss {tot / (len(perm) // args.batch):.4f}", flush=True)
         report("network", m)
 
+    pred = test_pred()
+    if len(kinds) > 1:  # per timbre: shows whether an earlier timbre was forgotten
+        for i, k in enumerate(kinds):
+            report(k, pitch_metrics(pred[kte == i], yte[kte == i]))
     n = min(args.yin_frames, len(xte))
-    report("network", pitch_metrics(test_pred()[:n], yte[:n]))
+    report("network", pitch_metrics(pred[:n], yte[:n]))
     report("YIN", pitch_metrics(yin_track(xte, ear, n), yte[:n]))
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
