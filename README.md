@@ -216,6 +216,26 @@ python scripts/export_targets.py --bank runs/target_bank.npz --count 20 --out ru
 - 制御側が乱数を使わない厳しい効果(不感帯・静止摩擦・非線形・差し込み量で変わる速さ)の真の値を知っていても、2 テイク目の改善は 8〜9 セントまで。機体推定のモデルを広げる伸びしろは限られる
 - 次は、実物の測定でシミュレーターを合わせ込むこと
 
+## 段階 2・3 の準備(小さくする、マイコンで動かす)
+
+実機がなくても PC でできるところまで進めた。UNO Q の実機では、どれもまだ試していない。
+
+| 項目 | 内容 | 結果 |
+|---|---|---|
+| 方策の int8 化 | `scripts/quantize_policy.py`。行列ごとに 1 つのスケールで int8 にし、C のヘッダーを書き出す | 履歴つき MLP(3,267 パラメーター)が 3,380 バイトに収まる。厳しい機体 200 台で float32 との差は 0.0 ± 0.1 セント |
+| 小さい耳 | `PitchNet(width=8, pool=4)`、20 セント刻み | 16,131 パラメーター、1 フレーム 0.18M 回の積和(大きい耳は 250,277 / 2.41M)。合成音で誤差の中央値 1.0 セント(大きい耳 0.9、YIN 3.1)。10ms ごとに動かすと 1 秒あたり約 1,800 万回の積和で、マイコンの CPU の 1 割前後の見込み(実機で要計測) |
+| 制御の C 版 | `mcu/controller.{h,c}`、`mcu/policy_mlp.{h,c}` | 物理モデル・演奏中の補正・ILC・int8 の方策を 1 台分。機体推定はテイクの合間に Linux 側で行い、値だけ渡す。雑音のない機体で numpy 版と同じ行動(テスト) |
+| HIL の通信 | `mcu/hil_protocol.{h,c}`、`scripts/hil.py` | テイクの頭にお手本・前回のずれ・推定した機体をまとめて送り、10ms ごとには 13 バイトずつやり取りする(115200 baud で約 2.3ms)。PC 上の代役(`mcu/hil_host.c`)を相手に、numpy 版と同じ演奏になる(テスト) |
+| Arduino スケッチ | `mcu/uno_q_hil/uno_q_hil.ino` | 実機未確認。どのシリアルが PC や Linux 側につながるかは、実機で確かめる必要がある |
+
+```bash
+python scripts/quantize_policy.py runs/harsh_hist.npz --out runs/harsh_hist_int8
+python -m ziglang cc -O2 -Imcu -Iruns -DHIL_NET_HEADER='"harsh_hist_int8.h"' -DHIL_NET=HARSH_HIST_INT8 mcu/hil_host.c mcu/hil_protocol.c mcu/controller.c mcu/policy_mlp.c -o runs/hil_host.exe
+python scripts/hil.py --link process:runs/hil_host.exe --history 10 --harsh 1.0
+```
+
+C のテストには、C コンパイラーの入った `ziglang`(`pip install ziglang`)を使う。
+
 ## GPU 版(`flute_rl/torch_sim.py`、`flute_rl/torch_env.py`)
 
 多数の機体をまとめて 1 ステップずつ進める版。雑音のない機体では、行動が numpy 版と 1 ステップずつ一致する(GRU を含む)。1 世代 768 回の演奏では CPU 20 コアの numpy 版とほぼ同じ速さ(約 6 秒)で、候補を 10 倍にすると 1 秒あたりの演奏数が約 2.3 倍になる。細かい計算の呼び出しが時間を決めているので、さらに速くするには計算をまとめる工夫が要る。
