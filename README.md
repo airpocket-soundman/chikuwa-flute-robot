@@ -216,6 +216,34 @@ python scripts/export_targets.py --bank runs/target_bank.npz --count 20 --out ru
 - 制御側が乱数を使わない厳しい効果(不感帯・静止摩擦・非線形・差し込み量で変わる速さ)の真の値を知っていても、2 テイク目の改善は 8〜9 セントまで。機体推定のモデルを広げる伸びしろは限られる
 - 次は、実物の測定でシミュレーターを合わせ込むこと
 
+## 実物の笛でシミュレーターを合わせ込む
+
+シミュレーターの値は今はすべて推測なので、3D プリント笛(やちくわ)を測って置き換える。録音は WAV(16bit か 32bit の PCM)。スマホの録音は `ffmpeg -i rec.m4a -ac 1 -ar 48000 take.wav` などで変換する。
+
+**1. 1 本の録音を調べる**(何 Hz で鳴っているか、倍音か):
+
+```bash
+python scripts/analyze_recording.py take.wav --tube-mm 60 --bore-mm 10 --temp 25
+```
+
+**2. 差し込み量を変えて測る(管の合わせ込み)**: 底(プランジャーや詰め物)の差し込み量を 5〜10mm ずつ変え、同じ吹き方で 1 本ずつ録音する。`depth_mm,ファイル名` の CSV を作って:
+
+```bash
+python scripts/calibrate.py tube sweep_depth.csv --bore-mm 10
+```
+
+管の実効長と音速(気温の目安)、各点のずれ(セント)と、`FluteParams` の `tube_len` / `end_corr` / `temp_c` の値を出す。
+
+**3. 角度を変えて測る(鳴る角度の合わせ込み)**: 差し込み量を固定し、吹き込む角度を 0.5〜1° ずつ変えて録音する。`angle_deg,ファイル名` の CSV を作って:
+
+```bash
+python scripts/calibrate.py window sweep_angle.csv
+```
+
+鳴る範囲の端と中心、角度 1° あたりの音程の変化(`theta_opt_deg` / `win_lo_deg` / `win_hi_deg` / `k_theta`)を出す。
+
+どちらも、シミュレーターで作った「答えの分かっている録音」から値を取り戻せることをテストで確かめてある(`tests/test_calibrate.py`)。アクチュエーターの速さ・不感帯は、PWM を段階的に変えたときの動き(位置の記録か、動きながら鳴らした音程の変化)から合わせる予定。
+
 ## 段階 2・3 の準備(小さくする、マイコンで動かす)
 
 実機がなくても PC でできるところまで進めた。UNO Q の実機では、どれもまだ試していない。
