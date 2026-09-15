@@ -242,7 +242,15 @@ python scripts/calibrate.py window sweep_angle.csv
 
 鳴る範囲の端と中心、角度 1° あたりの音程の変化(`theta_opt_deg` / `win_lo_deg` / `win_hi_deg` / `k_theta`)を出す。
 
-どちらも、シミュレーターで作った「答えの分かっている録音」から値を取り戻せることをテストで確かめてある(`tests/test_calibrate.py`)。アクチュエーターの速さ・不感帯は、PWM を段階的に変えたときの動き(位置の記録か、動きながら鳴らした音程の変化)から合わせる予定。
+**4. PWM を変えて動かす(アクチュエーターの合わせ込み)**: 笛を鳴らしたまま、一定の PWM でプランジャーを動かして録音する。PWM を何段階か変えて(押し込む向きと引き戻す向きは別々に)、`pwm,ファイル名` の CSV を作る。2 の結果(実効長と音速)を渡して:
+
+```bash
+python scripts/calibrate.py actuator sweep_pwm.csv --acoustic-mm 150.5 --sound-speed 346.4
+```
+
+音程の変化を位置の変化に直して速さを求め、最大の速さ・不感帯・PWM と速さの非線形(`v_max_in` / `deadband` / `pwm_curve`)を出す。
+
+どれも、シミュレーターで作った「答えの分かっている録音」から値を取り戻せることをテストで確かめてある(`tests/test_calibrate.py`)。
 
 ## 段階 2・3 の準備(小さくする、マイコンで動かす)
 
