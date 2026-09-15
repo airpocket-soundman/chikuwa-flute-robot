@@ -61,6 +61,8 @@ def main() -> None:
     ap.add_argument("--fb-gain", type=float, default=0.05)
     ap.add_argument("--ilc-gain", type=float, default=0.5)
     ap.add_argument("--progress", type=float, default=0.8)
+    ap.add_argument("--harsh", type=float, default=0.0,
+                    help="0..1: rig effects the controllers do not model (training and evaluation rigs)")
     ap.add_argument("--bank", type=int, default=1000)
     ap.add_argument("--bank-file", default="runs/target_bank.npz")
     ap.add_argument("--eval-episodes", type=int, default=100)
@@ -89,12 +91,12 @@ def main() -> None:
 
     # evaluation: fixed rigs and targets generated like FluteEnv(seed=s) would, kept for the whole run
     eval_seeds = range(1_000_000, 1_000_000 + args.eval_episodes)
-    eval_rigs = [rig_from_seed(s) for s in eval_seeds]
+    eval_rigs = [rig_from_seed(s, harsh=args.harsh) for s in eval_seeds]
     eval_targets = []
     for s in eval_seeds:
         r = np.random.default_rng(s)
         from flute_rl.sim import FluteParams, FluteSim  # noqa: E402  (replay the env's rng use)
-        FluteSim(FluteParams.sample(r), r)
+        FluteSim(FluteParams.sample(r, harsh=args.harsh), r)
         eval_targets.append(make_target(r, sample_level(r, args.progress)))
 
     def evaluate(th: np.ndarray) -> np.ndarray:
@@ -106,7 +108,8 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     meta = dict(scale=args.scale, horizon=args.horizon, ilc_gain=args.ilc_gain, feedback=True,
                 fb_gain=args.fb_gain, history=args.history)
-    print(f"params: {net.n_params}  arch: {args.arch}  pop {args.pop} x episodes {args.episodes} on {args.device}", flush=True)
+    print(f"params: {net.n_params}  arch: {args.arch}  pop {args.pop} x episodes {args.episodes} on {args.device}  "
+          f"harsh {args.harsh}", flush=True)
     t0 = time.time()
     cur = evaluate(theta)
     report("start  ", cur)
@@ -117,7 +120,7 @@ def main() -> None:
         t0 = time.time()
         seeds = rng.integers(0, 2**31 - 1, size=args.episodes)
         idxs = rng.integers(0, args.bank, size=args.episodes)
-        rigs = [rig_from_seed(int(s)) for s in seeds]
+        rigs = [rig_from_seed(int(s), harsh=args.harsh) for s in seeds]
         targets = [bank[int(i)] for i in idxs]
         eps = rng.standard_normal((half, theta.size))
         cands = np.stack([theta + s * args.sigma * e for e in eps for s in (1.0, -1.0)])  # (pop, P)
