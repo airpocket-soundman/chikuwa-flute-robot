@@ -8,7 +8,10 @@
 ## 構成
 
 ```
-tools/arduino-physical-ai-2026/
+chikuwa-flute-robot/
+├─ docs/
+│  ├─ idea.md               作品アイデアのページ(元は maker_contest_2026 のアイデア集)
+│  └─ uno_q_model_design.md UNO Q 向けモデル設計メモ
 ├─ flute_rl/
 │  ├─ sim.py       物理シミュレーター(管の共鳴・リニアアクチュエーター・SCS0009・発音の窓・測定ノイズ)
 │  ├─ targets.py   お手本の自動生成(カリキュラム)と、口笛の音程軌跡からの変換
@@ -25,7 +28,7 @@ tools/arduino-physical-ai-2026/
 ## すぐ試す
 
 ```bash
-cd tools/arduino-physical-ai-2026
+cd chikuwa-flute-robot
 python -m pytest -q
 python scripts/train_es.py --takes 3 --gens 40 --pop 16 --episodes 4
 python scripts/bench.py

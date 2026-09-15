@@ -5,8 +5,8 @@ related_contest: arduino-physical-ai-challenge-2026
 order: 10
 status: アイデア検討中(シミュレーター・強化学習環境・UNO Q 向けモデル設計まで作成)
 updated: 2026-09-15
-code_url: https://github.com/airpocket-soundman/maker_contest_2026/tree/main/tools/arduino-physical-ai-2026
-code_label: tools/arduino-physical-ai-2026(強化学習環境)
+code_url: https://github.com/airpocket-soundman/chikuwa-flute-robot
+code_label: chikuwa-flute-robot(強化学習環境)
 tagline: 自分の音を耳で聴いて吹き方を覚え、人の口笛を数回の練習で真似る。ちくわという不安定な笛を AI が鳴らしこなすフィジカル AI 作品
 ---
 
@@ -143,7 +143,7 @@ MCU の SAI1 ブロック A は PE5(SCK)/ PE4(FS)/ PE6(SD)で、どれも Media 
 
 ## シミュレーターと強化学習環境(進捗)
 
-[`tools/arduino-physical-ai-2026`](https://github.com/airpocket-soundman/maker_contest_2026/tree/main/tools/arduino-physical-ai-2026) に、numpy だけで動くシミュレーターと強化学習環境を置いた。
+このリポジトリに、numpy だけで動くシミュレーターと強化学習環境を置いた。
 
 - **シミュレーター**: 管の共鳴(f = c / 4L、気温依存)、位置センサーのない DC プランジャー(遅れ・不感帯・惰性・ガタ)、SCS0009(0.29° 刻み・速度制限)、角度の「鳴る窓」と裏返り、音程推定のノイズと欠落
 - **ドメインランダム化**: 管長・アクチュエーターの速さ・窓の位置と幅・気温などをエピソードごとにばらつかせる
@@ -165,7 +165,7 @@ MCU の SAI1 ブロック A は PE5(SCK)/ PE4(FS)/ PE6(SD)で、どれも Media 
 
 ## UNO Q の Linux 側で動かすモデル設計
 
-詳細は [設計メモ](https://github.com/airpocket-soundman/maker_contest_2026/blob/main/tools/arduino-physical-ai-2026/docs/uno_q_model_design.md)。要点:
+詳細は [設計メモ](uno_q_model_design.md)。要点:
 
 - **numpy だけで推論も学習も行う**(深層学習フレームワークに依存しない)。学習は自動微分の要らない進化戦略(ES)
 - **Linux 側の処理はすべて「テイクとテイクの間」に行う**。1 テイク分のプロファイルを演奏前に一括生成して MCU に送り、MCU が 100Hz で再生する。Linux の非リアルタイム性や Bridge の遅延が演奏に影響しない
