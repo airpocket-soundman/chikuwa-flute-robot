@@ -4,6 +4,11 @@
 
 プロジェクト全体の進め方(6 段階)と現状は [docs/roadmap.md](docs/roadmap.md) にまとめています。
 
+> **テーマの変更(2026-09-17): やまびこ1号。** 笛の音程を直動軸の位置センサーに使い、エンコーダーなしで位置制御する。
+> 機体の違いは再帰的なモデルの記憶の中だけで覚え、吹くほど合ってくる。設計・実装・学習なしの結果は
+> [docs/yamabiko.md](docs/yamabiko.md)、コードは `flute_rl/yamabiko/` と `scripts/yamabiko_*.py`。
+> 以下の内容(エッジに吹き付ける笛、結果 1〜5)は旧テーマのもので、再現できるよう残しています。
+
 - **numpy だけで動きます**(PyTorch などは不要)。Arduino UNO Q の Linux 側(Debian / Cortex-A53)でそのまま動かす前提です
 - gymnasium が入っていれば `gymnasium.Env` として動作し、入っていなければ同じ API の簡易版で動きます(gymnasium 経由での動作確認はまだしていません)
 
