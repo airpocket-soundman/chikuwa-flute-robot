@@ -6,12 +6,17 @@ Many rigs are stepped at once (arrays of shape (n,)), numpy only.
   plunger, so f = c / (4 L) with L = tube_len + end_corr - x. A closed tube
   has odd harmonics only: when it overblows it jumps to the 3rd mode, a
   twelfth up (+1902 cents), not an octave.
-* Air: a fan runs at a constant speed for the whole session. A 3-way solenoid
-  valve sends the air to the flute or to a bypass, so the fan load (and the
-  blowing pressure) does not change when a note starts. After the valve
-  switches, the air arrives `valve_delay` steps later, the tone needs
-  `onset_s` to build up and starts `onset_cents` off pitch, settling with
-  `onset_tau`. Closing the valve stops the tone after the same valve delay.
+* Air: a fan runs at a constant speed for the whole session and a 2-way
+  valve shuts the air off. The flute draws a few percent of the fan's free
+  flow, so the fan works close to shut-off either way and the blowing
+  pressure barely changes. After the valve opens, the air arrives
+  `valve_delay` steps later, the tone needs `onset_s` to build up and starts
+  `onset_cents` off pitch, settling with `onset_tau`. Closing the valve stops
+  the tone after the same valve delay. While the valve is shut the chamber
+  before it charges up to the shut-off pressure (time constant `surge_tau`),
+  and after it opens the excess drains out through the flute with the same
+  time constant: the pitch is `surge_cents` sharp times the charge, so a
+  note after a long rest starts sharper than one after a short rest.
 * Plunger: DC linear actuator driven by PWM with no position sensor (same
   model as flute_rl.sim: command delay, dead band, velocity lag, end stops,
   backlash, and the optional "harsh" effects).
@@ -38,7 +43,7 @@ def speed_of_sound(temp_c):
 
 NOMINAL = dict(
     tube_len=0.150, end_corr=0.005, temp_c=25.0, press_cents=0.0, overblow_len=0.050, pitch_jitter=2.0,
-    valve_delay=1, onset_s=0.03, onset_cents=-20.0, onset_tau=0.03,
+    valve_delay=1, onset_s=0.03, onset_cents=-20.0, onset_tau=0.03, surge_cents=10.0, surge_tau=0.05,
     stroke=0.105, v_in=0.150, v_out=0.150, deadband=0.20, tau_v=0.030, cmd_delay=1, backlash=0.0003,
     stiction=0.0, pwm_curve=1.0, load_slope=0.0, speed_drift=0.0, motion_noise=0.0, delay_jitter=0.0,
     pitch_noise=3.0, dropout=0.02, octave_err=0.0, obs_delay=3,
@@ -62,6 +67,8 @@ class RigParams:
     onset_s: np.ndarray       # the tone needs this long to build up [s]
     onset_cents: np.ndarray   # the tone starts this far off pitch ...
     onset_tau: np.ndarray     # ... and settles with this time constant [s]
+    surge_cents: np.ndarray   # pitch offset from the pressure stored while the valve was shut, fully charged [cents]
+    surge_tau: np.ndarray     # the chamber before the valve charges and drains with this time constant [s]
     # plunger
     stroke: np.ndarray
     v_in: np.ndarray          # speed at pwm = +1 (tube shorter, pitch up) [m/s]
@@ -111,6 +118,7 @@ class RigParams:
             pitch_jitter=np.maximum(0.0, u("pitch_jitter", 1.0)),
             valve_delay=ui("valve_delay", 1.0), onset_s=np.maximum(DT, u("onset_s", 0.015)),
             onset_cents=u("onset_cents", 15.0), onset_tau=np.maximum(0.005, u("onset_tau", 0.015)),
+            surge_cents=np.zeros(n), surge_tau=np.full(n, N["surge_tau"]),
             stroke=np.full(n, N["stroke"]), v_in=u("v_in", 0.030), v_out=u("v_out", 0.030),
             deadband=u("deadband", 0.08), tau_v=np.maximum(0.005, u("tau_v", 0.015)), cmd_delay=ui("cmd_delay", 1.0),
             backlash=np.maximum(0.0, u("backlash", 0.0002)),
@@ -133,6 +141,9 @@ class RigParams:
             p.motion_noise = g(0.0, 0.1)
             p.delay_jitter = g(0.0, 0.15)
             p.octave_err = p.octave_err + g(0.0, 0.03)
+        # drawn last, so the other values of a seed are the same as before the 2-way valve
+        p.surge_cents = u("surge_cents", 8.0)
+        p.surge_tau = np.maximum(2.0 * DT, u("surge_tau", 0.03))
         return p
 
     def tile(self, reps: int) -> "RigParams":
@@ -162,7 +173,7 @@ class Rig:
         self.reset()
 
     def reset(self, mask: np.ndarray | None = None) -> None:
-        """Power on (all rigs, or only where `mask`): plunger at home, valve to the bypass, no sound."""
+        """Power on (all rigs, or only where `mask`): plunger at home, valve shut, chamber not charged, no sound."""
         n = self.p.n
         if mask is None:
             self.t = 0
@@ -172,9 +183,10 @@ class Rig:
             self.meas_q = np.full((n, QUEUE), np.nan)
             self.u_last, self.speed, self.jit = np.zeros(n), np.ones(n), np.zeros(n)
             self.air_steps, self.over = np.zeros(n, int), np.zeros(n, bool)
+            self.charge = np.zeros(n)
             return
         m = np.asarray(mask, bool)
-        for a in ("x_motor", "x", "v", "u_last", "jit", "pwm_q"):
+        for a in ("x_motor", "x", "v", "u_last", "jit", "pwm_q", "charge"):
             getattr(self, a)[m] = 0.0
         self.speed[m] = 1.0
         self.air_steps[m] = 0
@@ -222,6 +234,9 @@ class Rig:
         self.air_steps = np.where(flow, self.air_steps + 1, 0)
         t_air = self.air_steps * DT
         sounding = flow & (t_air >= p.onset_s - 1e-9)
+        # the chamber before the valve charges while it is shut and drains through the flute while it is open
+        k = np.minimum(1.0, DT / p.surge_tau)
+        self.charge = np.where(flow, self.charge * (1.0 - k), self.charge + (1.0 - self.charge) * k)
 
         length = np.maximum(p.tube_len + p.end_corr - self.x, 0.02)
         # overblowing with a little hysteresis: it starts below overblow_len and stops 2 mm above it
@@ -229,7 +244,7 @@ class Rig:
         self.jit = self.jit - self.jit * DT / 0.05 + p.pitch_jitter * np.sqrt(2.0 * DT / 0.05) * r.standard_normal(n)
         transient = np.where(sounding, p.onset_cents * np.exp(-np.maximum(t_air - p.onset_s, 0.0) / p.onset_tau), 0.0)
         cents = (hz_to_cents(speed_of_sound(p.temp_c) / (4.0 * length)) + p.press_cents
-                 + OVERBLOW_CENTS * self.over + self.jit + transient)
+                 + OVERBLOW_CENTS * self.over + self.jit + transient + np.where(sounding, p.surge_cents * self.charge, 0.0))
 
         # listening
         detected = sounding & (r.random(n) >= p.dropout)

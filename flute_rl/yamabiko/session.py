@@ -1,7 +1,7 @@
 """A session: power on, then K different songs in a row on the same rigs.
 
 Before each song the plunger is homed (driven out against the end stop with
-the valve on the bypass), so every song starts from a known position. The
+the valve shut), so every song starts from a known position. The
 valve follows the score with a fixed lead: articulation is not what this
 rig is about, the plunger position is.
 

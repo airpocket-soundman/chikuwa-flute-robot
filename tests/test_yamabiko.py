@@ -25,7 +25,7 @@ def play(params, sched, ctrl, seed=1, **kw):
 
 
 def test_pitch_depends_only_on_the_tube_with_the_valve_open():
-    p = quiet_rigs(3, onset_cents=0.0)
+    p = quiet_rigs(3, onset_cents=0.0, surge_cents=0.0)
     rig = Rig(p, np.random.default_rng(0))
     for _ in range(30):
         rig.step(np.array([0.6, 0.8, 1.0]), np.ones(3, bool))
@@ -39,7 +39,7 @@ def test_pitch_depends_only_on_the_tube_with_the_valve_open():
 
 
 def test_a_closed_tube_overblows_a_twelfth_not_an_octave():
-    p = quiet_rigs(1, onset_cents=0.0, overblow_len=0.5)  # always too short: overblows as soon as it sounds
+    p = quiet_rigs(1, onset_cents=0.0, surge_cents=0.0, overblow_len=0.5)  # always too short: overblows as soon as it sounds
     rig = Rig(p, np.random.default_rng(0))
     for _ in range(10):
         out = rig.step(np.zeros(1), np.ones(1, bool))
@@ -55,6 +55,22 @@ def test_valve_delay_and_tone_onset():
     # air arrives 2 steps after the valve opens and the tone needs 3 steps; closing stops it 2 steps later
     assert snd.index(True) == 2 + 3 - 1
     assert snd[11] and not snd[12]
+
+
+def test_pressure_stored_behind_the_shut_valve_makes_the_onset_sharp():
+    p = quiet_rigs(2, onset_cents=0.0, onset_s=DT, valve_delay=0, surge_cents=10.0, surge_tau=0.05)
+    rig = Rig(p, np.random.default_rng(0))
+    steady = p.cents_at(np.zeros(2))
+    for _ in range(50):  # long enough open to drain the chamber
+        rig.step(np.zeros(2), np.ones(2, bool))
+    for t in range(40):  # rig 0 rests 400 ms, rig 1 only 50 ms
+        rig.step(np.zeros(2), np.array([False, t < 35]))
+    first = rig.step(np.zeros(2), np.ones(2, bool))["cents"] - steady
+    assert first[0] == pytest.approx(10.0 * 0.8, abs=0.01)  # fully charged, minus the step it has been open
+    assert first[1] == pytest.approx(10.0 * 0.8 * (1.0 - 0.8 ** 5), abs=0.01)  # a 5-step rest charges it less
+    for _ in range(50):
+        out = rig.step(np.zeros(2), np.ones(2, bool))
+    np.testing.assert_allclose(out["cents"], steady, atol=0.01)
 
 
 def test_pitch_is_heard_obs_delay_steps_late():
@@ -86,7 +102,7 @@ def test_valve_opens_ahead_of_each_note():
 
 def test_oracle_and_open_loop_are_accurate_on_the_nominal_rig():
     sched = schedule(4, 2)
-    p = quiet_rigs(4, onset_cents=0.0)
+    p = quiet_rigs(4, onset_cents=0.0, surge_cents=0.0)
     for ctrl, limit in ((Oracle(), 10.0), (OpenLoop(), 25.0), (Encoder(), 10.0)):
         m = song_metrics(play(p, sched, ctrl)["logs"], sched)
         assert all(d["mean_abs"] < limit for d in m), (ctrl.name, m)
@@ -102,7 +118,7 @@ def test_the_hand_observer_beats_open_loop_on_random_rigs():
 
 
 def test_external_fit_recovers_the_actuator_speeds():
-    p = quiet_rigs(2, v_in=0.18, v_out=0.12, onset_cents=0.0)
+    p = quiet_rigs(2, v_in=0.18, v_out=0.12, onset_cents=0.0, surge_cents=0.0)
     rng = np.random.default_rng(0)
     melodies = [[make_target(rng, 3) for _ in range(2)] for _ in range(3)]  # moves both ways
     ctrl = ExternalFit()

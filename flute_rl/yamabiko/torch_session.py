@@ -88,7 +88,7 @@ class Player:
         self.x_motor, self.x, self.v, self.u_last, self.speed, self.jit = (z(n) for _ in range(6))
         self.pwm_q, self.meas_q = z(n, QUEUE), z(n, QUEUE)
         self.valve_q = z(n, QUEUE, dtype=torch.bool)
-        self.air_steps, self.over = z(n, dtype=torch.long), z(n, dtype=torch.bool)
+        self.air_steps, self.over, self.charge = z(n, dtype=torch.long), z(n, dtype=torch.bool), z(n)
         # policy: dead reckoning, GRU, listening
         self.dv, self.t_in, self.t_out, self.last_pwm, self.pulse = (z(n) for _ in range(5))
         self.dq, self.hist = z(n, QUEUE), z(n, QUEUE)
@@ -117,14 +117,14 @@ class Player:
     def _reset_rig(self, mask=None) -> None:
         """Power on, as rig.Rig.reset (all rigs, or only where `mask`)."""
         if mask is None:
-            for a in (self.x_motor, self.x, self.v, self.u_last, self.jit, self.pwm_q, self.air_steps):
+            for a in (self.x_motor, self.x, self.v, self.u_last, self.jit, self.pwm_q, self.air_steps, self.charge):
                 a.zero_()
             self.speed.fill_(1.0)
             self.over.fill_(False)
             self.valve_q.fill_(False)
             self.meas_q.fill_(float("nan"))
             return
-        for a in (self.x_motor, self.x, self.v, self.u_last, self.jit, self.air_steps):
+        for a in (self.x_motor, self.x, self.v, self.u_last, self.jit, self.air_steps, self.charge):
             a.masked_fill_(mask, 0)
         self.speed.masked_fill_(mask, 1.0)
         self.over.masked_fill_(mask, False)
@@ -263,6 +263,8 @@ class Player:
         self.air_steps.copy_(torch.where(flow, self.air_steps + 1, 0))
         t_air = self.air_steps.to(dt) * DT
         sounding = flow & (t_air >= p["onset_s"] - self.eps)
+        k = torch.clamp(DT / p["surge_tau"], max=1.0)
+        self.charge.copy_(torch.where(flow, self.charge * (1.0 - k), self.charge + (1.0 - self.charge) * k))
         length = torch.clamp(p["tube_len"] + p["end_corr"] - self.x, min=0.02)
         self.over.copy_(sounding & torch.where(self.over, length < p["overblow_len"] + 0.002, length < p["overblow_len"]))
         self.jit.copy_(self.jit - self.jit * DT / 0.05
@@ -270,7 +272,8 @@ class Player:
         transient = torch.where(sounding, p["onset_cents"] * torch.exp(-torch.clamp(t_air - p["onset_s"], min=0.0) / p["onset_tau"]),
                                 0.0)
         cents = (_hz_to_cents((331.3 + 0.606 * p["temp_c"]) / (4.0 * length)) + p["press_cents"]
-                 + OVERBLOW_CENTS * self.over.to(dt) + self.jit + transient)
+                 + OVERBLOW_CENTS * self.over.to(dt) + self.jit + transient
+                 + torch.where(sounding, p["surge_cents"] * self.charge, 0.0))
         detected = sounding & (torch.rand(n, device=dev, dtype=dt) >= p["dropout"])
         measured = torch.where(detected, cents + p["pitch_noise"] * torch.randn(n, device=dev, dtype=dt), float("nan"))
         octave = detected & (torch.rand(n, device=dev, dtype=dt) < p["octave_err"])
