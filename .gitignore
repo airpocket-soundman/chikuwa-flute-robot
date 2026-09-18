@@ -7,3 +7,5 @@ fp-info-cache
 hardware/**/_unrouted*
 hardware/**/*.dsn
 hardware/**/*.ses
+*.lck
+hardware/fab/*/
