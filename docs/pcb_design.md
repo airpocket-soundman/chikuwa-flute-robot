@@ -61,7 +61,7 @@ QRB2210 の primary MI2S は 48kHz、ステレオ、32bit スロット（有効 
 
 | # | デバイス | 電気的な要件 | 出典 |
 |---|---|---|---|
-| 5 | **INMP441 I2S MEMS マイク** | B 基板の MI2S0（1.8V）へ。先例のとおり | `idea.md:138`, IchiPing-UNO-Q |
+| 5 | **ICS-43434 I2S MEMS マイク** | 1.65〜3.63V、550µA、SNR 65dBA、**ボトムポート**。MCU の SAI1（3.3V）へ。配線は [`i2s_mic_trial.md`](i2s_mic_trial.md) | `idea.md:138,142` |
 | 6 | 温度センサー | 気温は約 3 セント/℃ で音程に効く＝モデル入力。I2C。笛の近くに置くので XH で引き出し | `idea.md:46` |
 | 7 | 差圧センサー（〜1kPa） | 「PWM → 圧力」の実測用。I2C またはアナログ | `yamabiko.md:82` |
 | 8 | ファンのタコ信号 | digital in（割り込み可）+ プルアップ。「圧力一定」の前提の検証用 | `yamabiko.md:80` |
@@ -157,7 +157,7 @@ QRB2210 の primary MI2S は 48kHz、ステレオ、32bit スロット（有効 
 
 | リファレンス | 極数 | 中身 | 秋月 |
 |---|---:|---|---|
-| J_MIC | 6 | 1V8 / GND / SCK / WS / SD / L-R（先例と同じ 6 極） | 112251 |
+| J_MIC | 6 | 3V3 / GND / SCK / WS / SD / L-R（先例と同じ 6 極） | 112251 |
 | J_MIC_ANA | 3 | `MIC2_INP` / `MIC2_INM` / `MIC2_BIAS`（保険経路） | 112248 |
 | J_I2C4 | 4 | 3V3 / GND / SDA / SCL | 112249 |
 | J_AIN | 3 | OPAMP 入力（アナログ差圧センサー用） | 112248 |
