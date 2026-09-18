@@ -178,14 +178,16 @@ def test_metrics_onset_convergence_and_censoring():
     T = 40
     target = np.full((2, T), np.nan)
     target[:, 5:25] = 1000.0
-    sched = Schedule(target, np.zeros(T, bool), np.zeros(T, int), [0], target.copy(), np.isfinite(target), 1)
+    note = np.isfinite(target)
+    sched = Schedule(target, np.zeros(T, bool), np.zeros(T, int), [0], target.copy(), note, note, 1)
     cents = np.full((2, T), 1000.0)
     cents[0, 5:25] = 1000.0 + np.array([100, 60, 30, 15, 10] + [5] * 15)
     cents[1, 5:25] = 1000.0 + 50.0  # never converges
-    snd = np.isfinite(target)
+    snd = note
     logs = {"cents": cents, "sounding": snd, "overblown": np.zeros((2, T), bool)}
     m = song_metrics(logs, sched)[0]
     assert m["onset1"] == pytest.approx((100 + 50) / 2)
+    assert m["first1"] == m["onset1"]  # there is only one note
     assert m["converge"] == pytest.approx(0.5)
     assert m["converge_ms"] == pytest.approx(3 * DT * 1000)
     assert m["steady"] == pytest.approx((15 + 10 + 5 * 15) / 17)

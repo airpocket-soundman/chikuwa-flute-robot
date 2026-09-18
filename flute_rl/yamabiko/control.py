@@ -298,11 +298,19 @@ class GRUPolicy(OpenLoop):
         return int(sum(np.prod(s) for s in cls.shapes(hidden)))
 
     @classmethod
-    def init_params(cls, rng: np.random.Generator, hidden: int) -> np.ndarray:
-        """Random recurrent weights, zero read-out: a fresh network plays exactly like OpenLoop."""
+    def init_params(cls, rng: np.random.Generator, hidden: int, memory_steps: float = 0.0) -> np.ndarray:
+        """Random recurrent weights, zero read-out: a fresh network plays exactly like OpenLoop.
+
+        memory_steps > 1: "chrono" initialisation of the update gate, bias = log(T - 1) with T drawn
+        log-uniformly from 2 .. memory_steps, so the units keep their state for a few steps up to a
+        whole session. With the plain bias of 1 every unit forgets within a few steps, and evolution
+        strategies (small parameter noise) do not find the long time constants a rig memory needs."""
         F, H, O = cls.FEATURES, hidden, cls.OUT
         b = np.zeros(3 * H)
-        b[:H] = 1.0  # update gate biased toward keeping the memory
+        if memory_steps > 1.0:
+            b[:H] = np.log(np.exp(rng.uniform(np.log(2.0), np.log(memory_steps), H)) - 1.0)
+        else:
+            b[:H] = 1.0  # update gate biased toward keeping the memory
         return np.concatenate([(rng.standard_normal((F, 3 * H)) / np.sqrt(F)).ravel(),
                                (rng.standard_normal((H, 3 * H)) / np.sqrt(H)).ravel(),
                                b, np.zeros((H + F) * O), np.zeros(O)])

@@ -27,6 +27,7 @@ class TaskSpec:
     spread: float = 1.0
     swap_prob: float = 0.25  # fraction of rigs swapped in a session (at one random song boundary)
     weight_growth: float = 1.0  # song k weight = 1 + weight_growth * k / (songs - 1)
+    first_weight: float = 1.0   # how much more the first note of a song counts in the reward
     progress: float = 0.8
 
 
@@ -49,7 +50,8 @@ def fitness(thetas: np.ndarray, spec: TaskSpec, seed: int, bank=None) -> np.ndar
             song = int(rng.integers(1, spec.songs))
             swap = Swap(song, np.tile(mask, P), RigParams.sample(rng, R, spec.spread, spec.harsh).tile(P))
     rig = Rig(base.tile(P), np.random.default_rng(seed + 1))
-    res = run_session(rig, sched.tile(P), GRUPolicy(thetas, spec.hidden, carry=True), swap=swap)
+    res = run_session(rig, sched.tile(P), GRUPolicy(thetas, spec.hidden, carry=True), swap=swap,
+                      first_weight=spec.first_weight)
     w = song_weights(spec.songs, spec.weight_growth)
     per_rig = res["reward"] @ w / w.sum()
     return per_rig.reshape(P, R).mean(axis=1)

@@ -23,6 +23,7 @@ from flute_rl.yamabiko.metrics import KEYS  # noqa: E402
 
 LABELS = {
     "mean_abs": "mean |cents|",
+    "first1": "first note of the song, first step |cents|",
     "onset1": "onset, first step |cents|",
     "onset5": "onset, first 5 steps |cents|",
     "converge": "converged (within 20 cents)",

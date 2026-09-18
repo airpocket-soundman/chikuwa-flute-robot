@@ -5,6 +5,8 @@ not the estimate. An "onset" is a step where the tone starts (valve opened,
 tone built up) during a note; the run is the stretch that keeps sounding
 over notes after it.
 
+* first1       |error| at the first sounding step of the song's FIRST note: the hardest moment,
+               nothing has been heard since the homing wiped the dead reckoning
 * onset1       |error| at the first sounding step: pure feed-forward, no feedback can have arrived yet
 * onset5       mean |error| over the first 5 sounding steps
 * converge     fraction of runs that get within CONVERGE_CENTS ...
@@ -33,7 +35,7 @@ SETTLE_RANGE = 100.0   # ... a semitone over the last SETTLE_STEPS steps of the 
 def _settled(tgt: np.ndarray) -> np.ndarray:
     w = np.lib.stride_tricks.sliding_window_view(np.concatenate([np.full(SETTLE_STEPS, tgt[0]), tgt]), SETTLE_STEPS + 1)
     return (w.max(axis=1) - w.min(axis=1)) < SETTLE_RANGE
-KEYS = ("mean_abs", "onset1", "onset5", "converge", "converge_ms", "steady", "sounding", "blowups", "overblow")
+KEYS = ("mean_abs", "first1", "onset1", "onset5", "converge", "converge_ms", "steady", "sounding", "blowups", "overblow")
 
 
 def _runs(flags: np.ndarray) -> list[tuple[int, int]]:
@@ -54,10 +56,12 @@ def song_metrics(logs: dict, sched, rigs: np.ndarray | None = None) -> list[dict
         note = np.isfinite(tgt)
         err = np.abs(cents - np.nan_to_num(tgt))
         played = note & snd
-        acc = {"onset1": [], "onset5": [], "conv": [], "conv_steps": [], "steady": [], "blow": []}
+        acc = {"first1": [], "onset1": [], "onset5": [], "conv": [], "conv_steps": [], "steady": [], "blow": []}
         for i in range(len(rows)):
-            for s, e in _runs(played[i]):
+            for j, (s, e) in enumerate(_runs(played[i])):
                 ev = err[i, s:e]
+                if j == 0:
+                    acc["first1"].append(ev[0])
                 acc["onset1"].append(ev[0])
                 acc["onset5"].append(ev[:5].mean())
                 inside = np.flatnonzero(ev < CONVERGE_CENTS)
@@ -77,6 +81,7 @@ def song_metrics(logs: dict, sched, rigs: np.ndarray | None = None) -> list[dict
 
         out.append({
             "mean_abs": float(err[played].mean()) if played.any() else float("nan"),
+            "first1": mean(acc["first1"]),
             "onset1": mean(acc["onset1"]),
             "onset5": mean(acc["onset5"]),
             "converge": mean(acc["conv"]),

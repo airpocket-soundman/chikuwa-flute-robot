@@ -36,6 +36,7 @@ class Schedule:
     starts: list         # first (homing) step of each song
     aim: np.ndarray      # (n, T) the note to steer toward now (first note AIM_LEAD steps ahead), NaN = hold
     valve: np.ndarray    # (n, T) bool, valve command (to the flute)
+    first: np.ndarray    # (n, T) bool, the steps of the FIRST note of each song
     k: int = field(default=0)
 
     @property
@@ -48,7 +49,8 @@ class Schedule:
 
     def tile(self, reps: int) -> "Schedule":
         return Schedule(np.tile(self.target, (reps, 1)), self.homing, self.song, self.starts,
-                        np.tile(self.aim, (reps, 1)), np.tile(self.valve, (reps, 1)), self.k)
+                        np.tile(self.aim, (reps, 1)), np.tile(self.valve, (reps, 1)),
+                        np.tile(self.first, (reps, 1)), self.k)
 
 
 def make_schedule(pieces: list[list[np.ndarray]]) -> Schedule:
@@ -65,6 +67,7 @@ def make_schedule(pieces: list[list[np.ndarray]]) -> Schedule:
         song.append(np.full(block.shape[1], k))
         starts.append(t)
         t += block.shape[1]
+    first = np.concatenate([_first_note(b) for b in blocks], axis=1)
     target = np.concatenate(blocks, axis=1)
     homing = np.concatenate(homing)
     T = target.shape[1]
@@ -81,7 +84,14 @@ def make_schedule(pieces: list[list[np.ndarray]]) -> Schedule:
         return np.concatenate([note[:, lead:], np.zeros((n, lead), bool)], axis=1)
 
     valve = (ahead(VALVE_OPEN_LEAD) | ahead(VALVE_CLOSE_LEAD)) & ~homing[None, :]
-    return Schedule(target, homing, np.concatenate(song), starts, aim, valve, k_songs)
+    return Schedule(target, homing, np.concatenate(song), starts, aim, valve, first, k_songs)
+
+
+def _first_note(block: np.ndarray) -> np.ndarray:
+    """The steps of the first note of one song block: after the homing, up to the first rest."""
+    note = np.isfinite(block)
+    started = np.concatenate([np.zeros((len(block), 1), bool), note[:, :-1]], axis=1)
+    return note & (np.cumsum(note & ~started, axis=1) == 1)
 
 
 def draw_pieces(rng: np.random.Generator, n: int, k: int, bank: list[np.ndarray] | None = None,
@@ -99,8 +109,12 @@ class Swap:
     params: RigParams      # the new rigs (used where mask)
 
 
-def run_session(rig: Rig, sched: Schedule, ctrl, keep_logs: bool = False, swap: Swap | None = None) -> dict:
-    """Play the whole session. Returns per-song reward per rig, (n, K), and the logs if asked."""
+def run_session(rig: Rig, sched: Schedule, ctrl, keep_logs: bool = False, swap: Swap | None = None,
+                first_weight: float = 1.0) -> dict:
+    """Play the whole session. Returns per-song reward per rig, (n, K), and the logs if asked.
+
+    `first_weight` > 1 counts the first note of each song that much more: it is the note played
+    with no pitch heard since the homing, so it is where a memory of the rig has to pay off."""
     n, T, K = sched.n, sched.T, sched.k
     reward = np.zeros((n, K))
     steps = np.zeros((n, K))
@@ -134,8 +148,9 @@ def run_session(rig: Rig, sched: Schedule, ctrl, keep_logs: bool = False, swap: 
             k = int(sched.song[t])
             err = np.minimum(np.abs(np.nan_to_num(out["cents"] - tgt)), PITCH_CLIP) / 100.0
             r = np.where(out["sounding"], -err, -SILENCE_PENALTY)
-            reward[:, k] += np.where(note, r, 0.0)
-            steps[:, k] += note
+            w = 1.0 + (first_weight - 1.0) * sched.first[:, t]
+            reward[:, k] += np.where(note, r * w, 0.0)
+            steps[:, k] += note * w
         if logs is not None:
             for key in logs:
                 logs[key][:, t] = out[key]
