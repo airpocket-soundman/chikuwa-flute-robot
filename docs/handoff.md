@@ -91,3 +91,44 @@ UNO Q で音が出ないときに「マイクが悪いのか SAI の設定が悪
 やまびこが MCU 側 SAI1 を選ぶのは、低遅延フィードバックがこの経路の前提だから
 （`idea.md:138`）。**MCU 側で動いた公開例は見つかっていない**ので、そこは賭けになっている。
 ラズパイでの先行テストと、手順 6 の遅延測定は、この賭けを早く判定するためにある。
+
+## 追記（2026-09-18、ローカル）— MCU の SAI1 でマイクが動いた
+
+ラズパイは使わず、**UNO Q の MCU（SAI1）で直接**試した。マイクは Breakout Carrier の J15-8/9/10 に配線済み。
+
+**Zephyr コア 0.53.1 のローダーには `CONFIG_I2S` が無い**ので、`mcu/sai1_mic_test/sai1_mic_test.ino` は
+RCC / GPIOE / SAI1 を CMSIS で直接叩く（スケッチは特権モード・MPU 無効で動く）。
+クロックは HSE 16MHz → PLL3（M=4, N=49, FRACN=1245, P=4）= 49.152MHz、MCKDIV=16 で SCK 3.072MHz / 48kHz。
+
+| 項目 | 結果 |
+|---|---|
+| PLL3 | ロック、SAI1 のクロック源 |
+| サンプリング | 実測 48,031.9Hz（物差しは DWT、CPU 160.013MHz） |
+| L/R | 左だけ動き、右は全部 0 → LR = GND どおり、フレームの位置も合っている |
+| オーバーラン | 8192 フレーム（0.17 秒）で 0 |
+| 中身 | 下位 8bit は常に 0（24bit を MSB 詰め）。隣り合うサンプルの相関 0.98〜0.99、エネルギーの 9 割以上が 4kHz 以下 → 本物の音 |
+| レベル | 部屋の音で -44〜-58 dBFS |
+
+**未確認:** 定常音での音程の読み（PC のビープは出せなかった）と、手順 6 の遅延測定。
+
+### 再開の手順
+
+- UNO Q には **adb で入れる**（USB、`adb devices`）。Git Bash では `MSYS_NO_PATHCONV=1` を付ける。
+  `adb shell` 内で arduino-cli を使うときは `TMPDIR=/tmp HOME=/home/arduino` を付ける。
+- ビルドと書き込みは UNO Q 上で行う:
+  `arduino-cli compile -b arduino:zephyr:unoq --output-dir build sai1_mic_test` のあと、
+  `~/.arduino15/packages/arduino/tools/remoteocd/0.0.4-rc.4/remoteocd upload -f <variant>/flash_sketch.cfg build/sai1_mic_test.ino.elf-zsk.bin`
+- スケッチは Serial1（= `/dev/ttyHS1`、921600 baud）を占有するので、**arduino-router を止める**。
+  止めるには sudo のパスワードが要るので、ユーザーに実行してもらう:
+  `adb shell -t "su - airpocket -c 'sudo systemctl stop arduino-router arduino-router-serial'"`
+- `python3 scripts/sai1_capture.py info | stats | capture --out /tmp/x.raw`（UNO Q 上、標準ライブラリのみ）。
+  UNO Q には numpy が無いので、解析は PC で `python scripts/mic_test.py --from-raw x.raw --channels 1 --rate 48000`。
+- IchiPing アプリ（`user:ichiping-uno-q`）は止めてあり、MCU は試験用スケッチで上書きしてある。
+
+### 次の一手
+
+1. マイクのそばで 440Hz / 880Hz の定常音を鳴らして `capture` → 音程とばらつき（セント）
+2. 遅延測定。方法（MCU がブザーを鳴らして DWT で測る / オシロ）はユーザーと相談中
+3. ユーザーの問い「Linux 側（MI2S0）につないだほうが早くないか」。MCU⇔Linux が 115200 baud の UART しかなく、
+   GRU の C 版も無いので、**全体構成では Linux 側が素直**という見立てを伝えてある。MCU で動くことは確かめたので、
+   遅延を測ったうえでどちらにするか決める（MI2S0 は 1.8V 系なのでマイクの VDD も 1.8V にする）
