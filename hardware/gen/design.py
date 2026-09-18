@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 
 NC = None  # pin left unconnected (gets a no-connect flag)
 
+REV = "1.0"  # board revision: printed on both boards and in the schematic title blocks
+SILK_TITLE = {"yamabiko_a": "Yamabiko No.1 A", "yamabiko_b": "Yamabiko No.1 B"}  # + " Rev X.Y" on the silkscreen
+
 
 @dataclass
 class Part:

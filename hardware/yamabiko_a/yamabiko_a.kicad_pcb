@@ -16374,6 +16374,17 @@
 		(layer "Edge.Cuts")
 		(uuid "6714e261-8ff1-434f-8752-2420ec54480c")
 	)
+	(gr_text "Yamabiko No.1 A Rev 1.0"
+		(at 133.475 58.385 0)
+		(layer "F.SilkS")
+		(uuid "ca38345d-b878-4361-a14d-64936628bf8e")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
 	(segment
 		(start 112.3 95.415)
 		(end 112.3 96.8)
