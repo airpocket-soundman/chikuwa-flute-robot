@@ -1,2 +1,9 @@
 __pycache__/
 runs/
+# KiCad
+*-backups/
+*.kicad_prl
+fp-info-cache
+hardware/**/_unrouted*
+hardware/**/*.dsn
+hardware/**/*.ses
