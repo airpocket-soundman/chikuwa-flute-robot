@@ -1,0 +1,173 @@
+"""Yamabiko No.1 on the real rig: listen to a whistle, then play it back with the trained network
+(runs on the UNO Q's Linux side).
+
+    sudo systemctl stop arduino-router arduino-router-serial     # the firmware owns /dev/ttyHS1
+    python3 scripts/yamabiko_play.py --policy runs/yamabiko_gru.npz
+
+Press the EXEC button (or Enter with --key) and whistle; the recording stops after --silence seconds
+without a tone. The pitch track becomes the song (octaves folded into the flute's range, as in
+targets.from_pitch_track), the plunger is homed and the network plays it. Its memory of the rig is kept
+from song to song and only cleared when this program starts (power on), as in training.
+
+--demo N plays N random songs instead of whistles (no button, no whistling), to try the rig.
+Each run is logged like yamabiko_collect.py, so what is played is also training data.
+
+A network trained on a fitted rig (YAMABIKO_RIG=... yamabiko_train.py) must be played with the same
+--rig: the dead reckoning inside the controller uses the nominal rig.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import os
+import pathlib
+import select
+import sys
+import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+from yamabiko_collect import add_rig_args, close_rig, open_rig  # noqa: E402
+
+
+def wait_trigger(link, use_key: bool) -> None:
+    """Until the EXEC button is pressed (or Enter with use_key). The MCU has stopped the plunger and
+    shut the valve by now (no commands for 100 ms)."""
+    if use_key:
+        print("Enter to record a whistle")
+    else:
+        print("press EXEC to record a whistle")
+    start = link.status.buttons if link.status else None
+    while True:
+        link.poll(0.02)
+        if use_key and select.select([sys.stdin], [], [], 0)[0]:
+            sys.stdin.readline()
+            return
+        st = link.status
+        if not use_key and st is not None:
+            if start is None:
+                start = st.buttons
+            elif st.buttons != start:
+                return
+
+
+def record_whistle(link, max_s: float, silence_s: float, floor_db: float, wait_s: float = 5.0):
+    """Audio from the first sound 10 dB over the floor (room and fan) until `silence_s` without one
+    (at most `max_s`), as int16."""
+    import numpy as np
+
+    from flute_rl.yamabiko.hw import SR
+    print("whistle now")
+    t0 = time.monotonic()
+    start = end = None
+    quiet_since = None
+    while True:
+        link.poll(0.01)
+        x = link.audio.latest(320)
+        db = 20.0 * np.log10(max(float(np.sqrt(np.mean(x * x))), 1e-9))
+        now = time.monotonic()
+        loud = db > floor_db + 10.0
+        if start is None:
+            if loud:
+                start = link.audio.end - 3200                    # keep 0.2 s before the first tone
+            elif now - t0 > wait_s:
+                return None
+            continue
+        if loud:
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = now
+        if (quiet_since is not None and now - quiet_since > silence_s) or link.audio.end - start > max_s * SR:
+            end = link.audio.end
+            break
+    return link.audio.span(start, end)
+
+
+def whistle_to_song(audio):
+    """Pitch track (10 ms hop) -> target of the flute, leading and trailing silence cut off."""
+    import numpy as np
+
+    from flute_rl.pitch import pitch_track
+    from flute_rl.targets import from_pitch_track
+    from flute_rl.yamabiko.hw import SR
+    _, f0, _ = pitch_track(audio.astype(float) / 32768.0, SR, frame=512, hop=160, fmin=400.0, fmax=4000.0)
+    voiced = np.flatnonzero(np.isfinite(f0))
+    if voiced.size < 20:                                          # less than 0.2 s of tone
+        return None
+    f0 = f0[voiced[0]:voiced[-1] + 1]
+    return from_pitch_track(f0, 0.01)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_rig_args(ap)
+    ap.add_argument("--policy", default="runs/yamabiko_gru.npz")
+    ap.add_argument("--songs", type=int, default=0, help="stop after this many songs (0 = until Ctrl-C)")
+    ap.add_argument("--demo", type=int, default=0, help="play this many random songs instead of whistles")
+    ap.add_argument("--key", action="store_true", help="Enter instead of the EXEC button")
+    ap.add_argument("--max-whistle", type=float, default=8.0, help="longest whistle [s]")
+    ap.add_argument("--silence", type=float, default=1.0, help="the whistle ends after this long without a tone [s]")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", default=None)
+    args = ap.parse_args()
+    if args.rig:
+        os.environ["YAMABIKO_RIG"] = str(pathlib.Path(args.rig).resolve())
+
+    import numpy as np
+
+    from flute_rl.sim import DT
+    from flute_rl.targets import make_target, sample_level
+    from flute_rl.yamabiko import GRUPolicy, make_schedule
+    from flute_rl.yamabiko.hw import SessionLog, hold, play_song
+    from flute_rl.yamabiko.rig import NOMINAL, RIG_FILE
+
+    d = np.load(args.policy)
+    ctrl = GRUPolicy(d["theta"][None, :], int(d["hidden"]), carry=True)
+    rng = np.random.default_rng(args.seed)
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = pathlib.Path(args.out or f"runs/real/play_{stamp}.npz")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    log = SessionLog({"kind": "play", "date": stamp, "args": vars(args), "controller": "gru",
+                      "policy": str(args.policy), "rig_file": RIG_FILE, "nominal": NOMINAL})
+
+    link, rig = open_rig(args)
+    try:
+        hold(rig, log, args.settle, song=-1)
+        floor_db = max(-66.0, float(np.median(rig.log["level_db"][-100:])))   # room + fan
+        print(f"noise floor {floor_db:.1f} dBFS")
+        k = 0
+        while args.songs <= 0 or k < args.songs:
+            if args.demo:
+                if k >= args.demo:
+                    break
+                target = make_target(rng, sample_level(rng, 0.8))
+            else:
+                wait_trigger(link, args.key)
+                audio = record_whistle(link, args.max_whistle, args.silence, floor_db)
+                target = whistle_to_song(audio) if audio is not None else None
+                if target is None:
+                    print("no whistle heard")
+                    continue
+                log.whistles.append(audio)
+            sched = make_schedule([[target]])
+            print(f"song {k}: {np.isfinite(target).sum() * DT:.1f} s of notes")
+            rig.resync()
+            play_song(rig, ctrl, sched, k, log, first=(k == 0))
+            rig.safe()
+            heard = np.asarray(rig.log["heard"][-sched.T:])
+            note = np.isfinite(sched.target[0])
+            both = note & np.isfinite(heard)
+            err = np.abs(heard[both] - sched.target[0][both])
+            print(f"  heard on {both.sum()}/{note.sum()} note steps, median |error| "
+                  f"{np.median(err) if err.size else float('nan'):.0f} cents, late steps {rig.late_steps}")
+            log.save(out, rig)
+            k += 1
+    finally:
+        close_rig(link, rig)
+        log.save(out, rig)
+        print("saved", out)
+
+
+if __name__ == "__main__":
+    main()

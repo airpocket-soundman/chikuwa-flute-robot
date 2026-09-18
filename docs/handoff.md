@@ -228,3 +228,11 @@ MCU 3.1〜7.8ms（中央値 5.1）、MI2S0 21.4〜42ms（中央値 29.5、外れ
 - ただし MCU 経由は UART を音声が使う（帯域の約 1/3）。アクチュエーターの指令も同じ UART に載せる前提で、プロトコルは作ってある（型つきパケット）
 
 **判断の材料**: 遅れだけなら MCU 経由が明確に良い。MI2S0 の良さは、ファームウェアが要らないこと、UART が空くこと、48kHz のまま使えること。
+
+## 追記（2026-09-19、ローカル）— 実機で動かす・学習するための一式
+
+[yamabiko_real.md](yamabiko_real.md) にまとめた。ファームウェア `mcu/yamabiko_fw`（音声リンク＋ A 基板の IO）は書き込み済みで、
+音声の遅れは変わらない（中央値 2.76 ms）。Linux 側は `flute_rl/yamabiko/hw.py`（実機を `Rig` と同じ形で包む）、
+`scripts/yamabiko_collect.py`（学習データ収集）、`scripts/yamabiko_play.py`（口笛 → GRU で演奏）、PC 側は
+`scripts/yamabiko_fit.py`（記録からシミュレーターの機体を当てはめ、`YAMABIKO_RIG` で学習の中心にする）。
+UNO Q で動かすには `sudo apt install python3-numpy` が要る（未実施）。remoteocd は `TMPDIR=/tmp` を付けないと動かない。

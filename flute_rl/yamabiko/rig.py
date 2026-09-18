@@ -27,6 +27,8 @@ Many rigs are stepped at once (arrays of shape (n,)), numpy only.
 from __future__ import annotations
 
 import dataclasses
+import json
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -49,6 +51,16 @@ NOMINAL = dict(
     pitch_noise=3.0, dropout=0.02, octave_err=0.0, obs_delay=3,
 )
 INTS = ("valve_delay", "cmd_delay", "obs_delay")
+# The nominal rig can be moved to one measured on the real rig (scripts/yamabiko_fit.py writes the file):
+#   YAMABIKO_RIG=runs/real/rig_fit.json python scripts/yamabiko_train.py ...
+# It must be set before this module is imported: the controllers and the schedule read NOMINAL at import.
+RIG_FILE = os.environ.get("YAMABIKO_RIG") or None
+if RIG_FILE:
+    with open(RIG_FILE, encoding="utf-8") as _f:
+        for _k, _v in json.load(_f)["nominal"].items():
+            if _k not in NOMINAL:
+                raise KeyError(f"{RIG_FILE}: unknown rig property {_k!r}")
+            NOMINAL[_k] = int(round(_v)) if _k in INTS else float(_v)
 
 
 @dataclass
