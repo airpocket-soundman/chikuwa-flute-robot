@@ -81,7 +81,10 @@ def main(pcb: str, jar: str, passes: str = "100"):
     for z in zones:
         board.Add(z)
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+    pro = pcb.with_suffix(".kicad_pro")
+    pro_text = pro.read_text(encoding="utf-8")
     board.Save(str(pcb))
+    pro.write_text(pro_text, encoding="utf-8")  # the save rewrote it with the temporary copy's sheet name
     clean.unlink(missing_ok=True)
     clean.with_suffix(".kicad_pro").unlink(missing_ok=True)
     clean.with_suffix(".kicad_prl").unlink(missing_ok=True)
