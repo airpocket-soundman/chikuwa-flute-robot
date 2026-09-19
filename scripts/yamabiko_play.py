@@ -10,6 +10,8 @@ targets.from_pitch_track), the plunger is homed and the network plays it. Its me
 from song to song and only cleared when this program starts (power on), as in training.
 
 --demo N plays N random songs instead of whistles (no button, no whistling), to try the rig.
+--listen only records whistles and shows the songs they become (nothing moves; the microphone alone).
+--auto starts recording at once instead of waiting for the button.
 Each run is logged like yamabiko_collect.py, so what is played is also training data.
 
 A network trained on a fitted rig (YAMABIKO_RIG=... yamabiko_train.py) must be played with the same
@@ -99,6 +101,23 @@ def whistle_to_song(audio):
     return from_pitch_track(f0, 0.01)
 
 
+def describe(audio, target) -> None:
+    """What was heard and what the flute will play."""
+    import numpy as np
+
+    from flute_rl.pitch import pitch_track
+    from flute_rl.yamabiko.hw import SR
+    _, f0, _ = pitch_track(audio.astype(float) / 32768.0, SR, frame=512, hop=160, fmin=400.0, fmax=4000.0)
+    v = f0[np.isfinite(f0)]
+    hz = 440.0 * 2.0 ** (target[np.isfinite(target)] / 1200.0)
+    notes = np.isfinite(target)
+    n_notes = int(np.sum(notes[1:] & ~notes[:-1]) + notes[0])
+    print(f"  whistle {len(audio) / SR:.1f} s, pitch {np.percentile(v, 5):.0f}-{np.percentile(v, 95):.0f} Hz "
+          f"(median {np.median(v):.0f})")
+    print(f"  song {len(target) * 0.01:.1f} s, {n_notes} phrase(s), {notes.mean() * 100:.0f} % sounding, "
+          f"flute {hz.min():.0f}-{hz.max():.0f} Hz (shifted {1200 * np.log2(np.median(hz) / np.median(v)):+.0f} cents)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_rig_args(ap)
@@ -106,11 +125,16 @@ def main() -> None:
     ap.add_argument("--songs", type=int, default=0, help="stop after this many songs (0 = until Ctrl-C)")
     ap.add_argument("--demo", type=int, default=0, help="play this many random songs instead of whistles")
     ap.add_argument("--key", action="store_true", help="Enter instead of the EXEC button")
+    ap.add_argument("--auto", action="store_true", help="record at once, no button")
+    ap.add_argument("--listen", action="store_true", help="record whistles and show the songs, do not play")
     ap.add_argument("--max-whistle", type=float, default=8.0, help="longest whistle [s]")
+    ap.add_argument("--wait", type=float, default=5.0, help="give up if no whistle starts within this long [s]")
     ap.add_argument("--silence", type=float, default=1.0, help="the whistle ends after this long without a tone [s]")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+    if args.listen:
+        args.fan = 0.0                                            # nothing moves, nothing blows
     if args.rig:
         os.environ["YAMABIKO_RIG"] = str(pathlib.Path(args.rig).resolve())
 
@@ -143,13 +167,23 @@ def main() -> None:
                     break
                 target = make_target(rng, sample_level(rng, 0.8))
             else:
-                wait_trigger(link, args.key)
-                audio = record_whistle(link, args.max_whistle, args.silence, floor_db)
+                if not args.auto:
+                    wait_trigger(link, args.key)
+                audio = record_whistle(link, args.max_whistle, args.silence, floor_db, args.wait)
                 target = whistle_to_song(audio) if audio is not None else None
                 if target is None:
                     print("no whistle heard")
+                    if args.auto and args.songs > 0:
+                        k += 1
                     continue
                 log.whistles.append(audio)
+                log.meta.setdefault("songs", []).append([None if not np.isfinite(v) else round(float(v), 1)
+                                                         for v in target])
+                describe(audio, target)
+                if args.listen:
+                    log.save(out, rig)
+                    k += 1
+                    continue
             sched = make_schedule([[target]])
             print(f"song {k}: {np.isfinite(target).sum() * DT:.1f} s of notes")
             rig.resync()
