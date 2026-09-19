@@ -54,9 +54,29 @@ def wait_trigger(link, use_key: bool) -> None:
                 return
 
 
+def band_db(x) -> float:
+    """Level of a window in the whistle band (400-5000 Hz) [dBFS]: breath on the microphone and handling
+    noise (tens of Hz) do not count."""
+    import numpy as np
+    w = np.hanning(len(x))
+    X = np.fft.rfft(x * w)
+    f = np.fft.rfftfreq(len(x), 1.0 / 16000)
+    band = (f >= 400.0) & (f <= 5000.0)
+    power = 2.0 * np.sum(np.abs(X[band]) ** 2) / (len(x) * np.sum(w * w))
+    return float(10.0 * np.log10(max(power, 1e-18)))
+
+
+def noise_floor(link) -> float:
+    """The quieter 20 % of the last second, in the whistle band, and never above -45 dBFS."""
+    import numpy as np
+    x = link.audio.latest(16000)
+    levels = [band_db(x[i:i + 320]) for i in range(0, 16000, 320)]
+    return min(-45.0, float(np.percentile(levels, 20)))
+
+
 def record_whistle(link, max_s: float, silence_s: float, floor_db: float, wait_s: float = 5.0):
-    """Audio from the first sound 10 dB over the floor (room and fan) until `silence_s` without one
-    (at most `max_s`), as int16."""
+    """Audio from the first sound 10 dB over the floor (room and fan) in the whistle band until `silence_s`
+    without one (at most `max_s`), as int16."""
     import numpy as np
 
     from flute_rl.yamabiko.hw import SR
@@ -66,8 +86,7 @@ def record_whistle(link, max_s: float, silence_s: float, floor_db: float, wait_s
     quiet_since = None
     while True:
         link.poll(0.01)
-        x = link.audio.latest(320)
-        db = 20.0 * np.log10(max(float(np.sqrt(np.mean(x * x))), 1e-9))
+        db = band_db(link.audio.latest(320))
         now = time.monotonic()
         loud = db > floor_db + 10.0
         if start is None:
@@ -86,18 +105,36 @@ def record_whistle(link, max_s: float, silence_s: float, floor_db: float, wait_s
     return link.audio.span(start, end)
 
 
-def whistle_to_song(audio):
-    """Pitch track (10 ms hop) -> target of the flute, leading and trailing silence cut off."""
+def whistle_to_song(audio, floor_db: float = -70.0, bridge: int = 3):
+    """Pitch track (10 ms hop) -> target of the flute, leading and trailing silence cut off.
+
+    Frames are voiced down to 10 dB over the noise floor (a whistle from 30 cm is quiet), and gaps of up
+    to `bridge` frames inside a phrase are filled from both sides: a frame the estimator missed is not a
+    rest for the valve."""
     import numpy as np
 
     from flute_rl.pitch import pitch_track
     from flute_rl.targets import from_pitch_track
     from flute_rl.yamabiko.hw import SR
-    _, f0, _ = pitch_track(audio.astype(float) / 32768.0, SR, frame=512, hop=160, fmin=400.0, fmax=4000.0)
+    gate = 10.0 ** ((floor_db + 10.0) / 20.0)
+    _, f0, _ = pitch_track(audio.astype(float) / 32768.0, SR, frame=512, hop=160, fmin=400.0, fmax=4000.0,
+                           rms_gate=gate)
     voiced = np.flatnonzero(np.isfinite(f0))
     if voiced.size < 20:                                          # less than 0.2 s of tone
         return None
     f0 = f0[voiced[0]:voiced[-1] + 1]
+    on = np.isfinite(f0)
+    i = 0
+    while i < len(f0):
+        if on[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(f0) and not on[j]:
+            j += 1
+        if j - i <= bridge and i > 0 and j < len(f0):              # geometric mean of the neighbours
+            f0[i:j] = np.sqrt(f0[i - 1] * f0[j])
+        i = j
     return from_pitch_track(f0, 0.01)
 
 
@@ -158,8 +195,8 @@ def main() -> None:
     link, rig = open_rig(args)
     try:
         hold(rig, log, args.settle, song=-1)
-        floor_db = max(-66.0, float(np.median(rig.log["level_db"][-100:])))   # room + fan
-        print(f"noise floor {floor_db:.1f} dBFS")
+        floor_db = max(-70.0, noise_floor(link))                  # room + fan
+        print(f"noise floor {floor_db:.1f} dBFS (400-5000 Hz)")
         k = 0
         while args.songs <= 0 or k < args.songs:
             if args.demo:
@@ -170,9 +207,11 @@ def main() -> None:
                 if not args.auto:
                     wait_trigger(link, args.key)
                 audio = record_whistle(link, args.max_whistle, args.silence, floor_db, args.wait)
-                target = whistle_to_song(audio) if audio is not None else None
+                target = whistle_to_song(audio, floor_db) if audio is not None else None
                 if target is None:
                     print("no whistle heard")
+                    floor_db = max(-70.0, noise_floor(link))
+                    print(f"noise floor {floor_db:.1f} dBFS (400-5000 Hz)")
                     if args.auto and args.songs > 0:
                         k += 1
                     continue
