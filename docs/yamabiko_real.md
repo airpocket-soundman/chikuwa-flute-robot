@@ -66,7 +66,7 @@ python3 scripts/yamabiko_collect.py --songs 20 --out runs/real/collect_01.npz
 # PC: 取ってくる
 adb pull /home/arduino/yamabiko/runs/real/collect_01.npz runs/real/
 # PC: 機体を当てはめる（数分）
-python scripts/yamabiko_fit.py runs/real/collect_01.npz --temp 24 --out runs/real/rig_fit.json
+python scripts/yamabiko_fit.py runs/real/collect_01.npz --temp 24 --validation-fraction 0.2 --out runs/real/rig_fit.json
 # PC: 当てはめた機体を中心に学習し直す
 YAMABIKO_RIG=runs/real/rig_fit.json python scripts/yamabiko_train.py --device cuda --gens 300 --pop 256 --rigs 64 --songs 5 --out runs/yamabiko_gru_real.npz
 # UNO Q へ送って演奏
@@ -95,6 +95,7 @@ python3 scripts/yamabiko_play.py --rig runs/real/rig_fit.json --policy runs/yama
 - 聞こえる遅れと弁の遅れも、鳴り始めの時刻では入れ替えがきく（弁 1 ステップ ＋ 聞こえ 3 ステップ ≒ 2 ＋ 2）。
   学習は既定のばらつき（遅れ ±2 ステップ）で回すので、1 ステップのずれは覆える
 - 当てはめで合わなかった分（`pitch_noise`）は、実機の音程のばらつきより大きめに出る。学習では雑音が多めになる側に倒れる
+- 既定では時系列の末尾20%を当てはめに使わず、`held-out loss` として報告する。学習損失だけが小さくホールドアウトが悪い場合は、物理式や乱数化範囲が実機を表せていないので、そのfitを学習の基準にしない
 
 ## 試験の状況（2026-09-19）
 

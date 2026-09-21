@@ -8,12 +8,23 @@ from flute_rl.yamabiko import (OVERBLOW_CENTS, Encoder, ExternalFit, GRUPolicy, 
                                song_metrics)
 from flute_rl.yamabiko.rig import speed_of_sound
 from flute_rl.yamabiko.session import HOME_STEPS
+from scripts.yamabiko_fit import Log, validation_split
 
 QUIET = dict(pitch_noise=0.0, dropout=0.0, pitch_jitter=0.0, octave_err=0.0)
 
 
 def quiet_rigs(n, **kw):
     return RigParams.nominal(n, **{**QUIET, **kw})
+
+
+def test_simulator_fit_uses_a_disjoint_chronological_holdout():
+    scored = np.array([False, True, True, False, True, True, True])
+    z = np.zeros(len(scored))
+    log = Log("test", z, z.astype(bool), z, scored)
+    train, validation = validation_split([log], 0.4)
+    assert not np.any(train[0].scored & validation[0].scored)
+    np.testing.assert_array_equal(train[0].scored | validation[0].scored, scored)
+    np.testing.assert_array_equal(validation[0].scored, [False, False, False, False, False, True, True])
 
 
 def schedule(n, k, seed=0):

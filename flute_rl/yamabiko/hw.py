@@ -207,8 +207,8 @@ class RealRig:
     LOG_KEYS = ("t_step", "pwm", "valve", "heard", "conf", "level_db", "isense_mv", "isense_peak_mv",
                 "fan_rpm", "servo_pos", "sample", "late_ms")
 
-    def __init__(self, link: Link, flip: bool = False, max_pwm: float = 1.0):
-        self.link, self.flip, self.max_pwm = link, flip, max_pwm
+    def __init__(self, link: Link, flip: bool = False, max_pwm: float = 1.0, pitch_enabled: bool = True):
+        self.link, self.flip, self.max_pwm, self.pitch_enabled = link, flip, max_pwm, pitch_enabled
         self.t_next = None
         self.late_steps = 0
         self.log = {k: [] for k in self.LOG_KEYS}
@@ -240,7 +240,12 @@ class RealRig:
             self.late_steps += 1
             self.t_next = time.monotonic()
         self.t_next += DT
-        cents, conf, db = heard_pitch(self.link.audio.latest(PITCH_FRAME))
+        if self.pitch_enabled:
+            cents, conf, db = heard_pitch(self.link.audio.latest(PITCH_FRAME))
+        else:
+            # E2E path: the raw 16 kHz PCM is consumed directly by the model.
+            # Skipping YIN also leaves more of the 10 ms control budget for inference.
+            cents, conf, db = float("nan"), 0.0, float("nan")
         st = self.link.status
         row = {"t_step": time.monotonic() - self.t0, "pwm": p, "valve": v, "heard": cents, "conf": conf,
                "level_db": db, "isense_mv": st.isense_mv if st else -1, "isense_peak_mv": st.isense_peak_mv if st else -1,

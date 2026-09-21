@@ -75,6 +75,31 @@ def load_log(path) -> Log:
     return Log(str(path), d["pwm"].astype(float), d["valve"].astype(bool), d["heard"].astype(float), scored, isense)
 
 
+def validation_split(logs: list[Log], fraction: float) -> tuple[list[Log], list[Log]]:
+    """Split score masks chronologically while replaying every command in both sets.
+
+    The simulator state still evolves through the complete recording; only
+    which frames contribute to calibration versus validation changes.  A
+    held-out tail catches wrong velocity, drift and transient assumptions that
+    an in-sample fit can otherwise hide by adjusting tube length or pressure.
+    """
+    if not 0.0 <= fraction < 1.0:
+        raise ValueError("validation fraction must be in [0, 1)")
+    if fraction == 0.0:
+        return logs, []
+    train, validation = [], []
+    for log in logs:
+        idx = np.flatnonzero(log.scored)
+        count = min(max(1, int(np.ceil(len(idx) * fraction))), max(0, len(idx) - 1))
+        val_mask = np.zeros_like(log.scored)
+        if count:
+            val_mask[idx[-count:]] = True
+        train_mask = log.scored & ~val_mask
+        train.append(dataclasses.replace(log, scored=train_mask))
+        validation.append(dataclasses.replace(log, scored=val_mask))
+    return train, validation
+
+
 def current_delay(logs: list[Log], max_lag: int = 4) -> tuple[int, float] | None:
     """Steps from a PWM command to the motor current, from the current sense: the one delay that the pitch
     cannot tell apart from the listening delay (only their sum is heard)."""
@@ -283,6 +308,8 @@ def main() -> None:
                     help="hold a property, e.g. --fix cmd_delay=1 (repeatable)")
     ap.add_argument("--selftest", action="store_true", help="fit logs made with the simulator instead")
     ap.add_argument("--selftest-songs", type=int, default=10)
+    ap.add_argument("--validation-fraction", type=float, default=0.2,
+                    help="chronological tail excluded from fitting and used for predictive validation")
     args = ap.parse_args()
 
     if args.selftest:
@@ -293,6 +320,10 @@ def main() -> None:
             ap.error("give the logs of yamabiko_collect.py / yamabiko_play.py, or --selftest")
         logs, true = [load_log(p) for p in args.logs], None
         temp_c, stroke = args.temp, args.stroke
+    try:
+        train_logs, validation_logs = validation_split(logs, args.validation_fraction)
+    except ValueError as exc:
+        ap.error(str(exc))
     fixed = dict(f.split("=", 1) for f in args.fix)
     if args.selftest and "cmd_delay" not in fixed:     # stands in for the current sense of the real rig
         fixed["cmd_delay"] = str(int(true.cmd_delay[0]))
@@ -307,15 +338,25 @@ def main() -> None:
     for name, v in fixed.items():
         fix(name, float(v))
         print(f"fixed {name} = {v}")
-    n = sum(int(l.scored.sum()) for l in logs)
-    heard = sum(int(np.isfinite(l.heard[l.scored]).sum()) for l in logs)
-    print(f"{len(logs)} log(s), {n} steps scored ({n * DT:.0f} s), pitch heard on {heard}")
+    n = sum(int(l.scored.sum()) for l in train_logs)
+    n_validation = sum(int(l.scored.sum()) for l in validation_logs)
+    heard = sum(int(np.isfinite(l.heard[l.scored]).sum()) for l in train_logs)
+    print(f"{len(logs)} log(s), {n} fit steps ({n * DT:.0f} s), {n_validation} held-out steps, "
+          f"pitch heard on {heard} fit steps")
 
-    (best_loss, x), nominal_loss = fit(logs, temp_c, stroke, args.gens, args.pop, args.elite, args.seed)
-    noise = leftover_noise(x, logs, temp_c, stroke)
+    (best_loss, x), nominal_loss = fit(train_logs, temp_c, stroke, args.gens, args.pop, args.elite, args.seed)
+    noise = leftover_noise(x, train_logs, temp_c, stroke)
+    validation_loss = (float(loss(x[None, :], validation_logs, temp_c, stroke)[0])
+                       if n_validation else float("nan"))
+    nominal_validation_loss = (float(loss(np.array([[NOMINAL[f[0]] for f in FIT]]), validation_logs,
+                                                   temp_c, stroke)[0])
+                               if n_validation else float("nan"))
     fitted = {name: (int(round(v)) if name in INTS else float(v)) for (name, _, _), v in zip(FIT, x)}
     print(f"\nloss: nominal {nominal_loss:.3f} -> fitted {best_loss:.3f}   "
           f"(median miss {noise['_median_miss_cents']:.1f} cents over {noise['_frames_compared']} frames)")
+    if n_validation:
+        print(f"held-out loss: nominal {nominal_validation_loss:.3f} -> fitted {validation_loss:.3f}   "
+              f"(generalization gap {validation_loss - best_loss:+.3f})")
     print(f"{'property':14s} {'nominal':>10s} {'fitted':>10s}" + (f" {'true':>10s}" if true is not None else ""))
     for name, v in fitted.items():
         line = f"{name:14s} {NOMINAL[name]:10.4g} {v:10.4g}"
@@ -335,6 +376,9 @@ def main() -> None:
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"nominal": nominal, "loss": best_loss, "loss_nominal": nominal_loss,
+                               "validation_loss": validation_loss,
+                               "validation_loss_nominal": nominal_validation_loss,
+                               "validation_fraction": args.validation_fraction,
                                "median_miss_cents": noise["_median_miss_cents"], "steps": n,
                                "logs": [l.name for l in logs]}, indent=2), encoding="utf-8")
     print("wrote", out)
