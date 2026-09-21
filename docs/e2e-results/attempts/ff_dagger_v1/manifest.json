@@ -1,0 +1,269 @@
+{
+  "format": "yamabiko-staged-audio-v1",
+  "checkpoint": "runs/yamabiko_staged_nn_ff_dagger.pt",
+  "ear_checkpoint": "runs/yamabiko_e2e_pc_ear_gate1_balanced.pt",
+  "seed": 9471,
+  "sonification_note": "Ear/memory/comparator after-WAVs sonify predicted pitch for diagnosis; only feedforward after-WAV is simulated physical performance.",
+  "summary": {
+    "ear": {
+      "mae": 11.899808390299478,
+      "correlation": 0.9956096123801285,
+      "pass": true
+    },
+    "memory": {
+      "mae": 40.57326630933356,
+      "correlation": 0.9732677603374347,
+      "pass": true
+    },
+    "feedforward": {
+      "mae": 340.6546973567569,
+      "correlation": -0.10437794484447979,
+      "voiced_recall": 1.0,
+      "direction": 0.7666666666666667,
+      "gain": 0.9297103666277504,
+      "pass": false
+    },
+    "comparator": {
+      "error_mae": 70.52632675170898,
+      "sign_accuracy": 0.9905780673027038,
+      "pass": false
+    }
+  },
+  "details": {
+    "ear": [
+      {
+        "case": "sustain",
+        "mae_cents_with_silence_penalty": 7.177401123046875,
+        "p90_cents_with_silence_penalty": 12.85015869140625,
+        "trajectory_correlation": 1.0,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0
+      },
+      {
+        "case": "step_up_down",
+        "mae_cents_with_silence_penalty": 9.78306884765625,
+        "p90_cents_with_silence_penalty": 16.4779541015625,
+        "trajectory_correlation": 0.9951976116356018,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0
+      },
+      {
+        "case": "glide",
+        "mae_cents_with_silence_penalty": 20.737367553710932,
+        "p90_cents_with_silence_penalty": 53.61002678148684,
+        "trajectory_correlation": 0.9933839070921417,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0
+      },
+      {
+        "case": "rests",
+        "mae_cents_with_silence_penalty": 13.039694213867188,
+        "p90_cents_with_silence_penalty": 29.244042968750005,
+        "trajectory_correlation": 0.9955014099944041,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.02142857142857143
+      },
+      {
+        "case": "melody",
+        "mae_cents_with_silence_penalty": 8.761510213216146,
+        "p90_cents_with_silence_penalty": 14.424536132812525,
+        "trajectory_correlation": 0.9939651331784951,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0
+      }
+    ],
+    "memory": [
+      {
+        "case": "sustain",
+        "mae_cents_with_silence_penalty": 7.5885107421875,
+        "p90_cents_with_silence_penalty": 9.704992675781266,
+        "trajectory_correlation": 1.0,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0
+      },
+      {
+        "case": "step_up_down",
+        "mae_cents_with_silence_penalty": 80.67353597005209,
+        "p90_cents_with_silence_penalty": 184.39219970703124,
+        "trajectory_correlation": 0.9503713512640667,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0
+      },
+      {
+        "case": "glide",
+        "mae_cents_with_silence_penalty": 16.331017215613166,
+        "p90_cents_with_silence_penalty": 28.57249053030304,
+        "trajectory_correlation": 0.9985652061368743,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0
+      },
+      {
+        "case": "rests",
+        "mae_cents_with_silence_penalty": 24.231423950195314,
+        "p90_cents_with_silence_penalty": 51.9767578125,
+        "trajectory_correlation": 0.9897770735836832,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.007142857142857143
+      },
+      {
+        "case": "melody",
+        "mae_cents_with_silence_penalty": 74.04184366861979,
+        "p90_cents_with_silence_penalty": 167.17913818359378,
+        "trajectory_correlation": 0.9276251707025489,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0
+      }
+    ],
+    "feedforward": [
+      {
+        "case": "sustain",
+        "mae_cents_with_silence_penalty": 242.42904612008763,
+        "p90_cents_with_silence_penalty": 425.474944235362,
+        "trajectory_correlation": 1.0,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.00909090909090909,
+        "transition_direction_accuracy": 1.0,
+        "transition_gain_median": 1.0,
+        "settled_transition_mae_cents": 0.0
+      },
+      {
+        "case": "step_up_down",
+        "mae_cents_with_silence_penalty": 499.0283024028393,
+        "p90_cents_with_silence_penalty": 716.1982846492951,
+        "trajectory_correlation": -0.2886740266924784,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0,
+        "transition_direction_accuracy": 0.5,
+        "transition_gain_median": 0.5743817677959087,
+        "settled_transition_mae_cents": 553.0381604921786
+      },
+      {
+        "case": "glide",
+        "mae_cents_with_silence_penalty": 323.88371420696564,
+        "p90_cents_with_silence_penalty": 702.1737827496439,
+        "trajectory_correlation": -0.9811783510654912,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0,
+        "transition_direction_accuracy": 1.0,
+        "transition_gain_median": 1.0,
+        "settled_transition_mae_cents": 0.0
+      },
+      {
+        "case": "rests",
+        "mae_cents_with_silence_penalty": 220.6729455892373,
+        "p90_cents_with_silence_penalty": 484.4359667701798,
+        "trajectory_correlation": 0.18604601222790138,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.014285714285714285,
+        "transition_direction_accuracy": 1.0,
+        "transition_gain_median": 1.0,
+        "settled_transition_mae_cents": 0.0
+      },
+      {
+        "case": "melody",
+        "mae_cents_with_silence_penalty": 417.2594784646546,
+        "p90_cents_with_silence_penalty": 619.4665663702881,
+        "trajectory_correlation": -0.43808335869233084,
+        "voiced_recall": 1.0,
+        "rest_false_positive_rate": 0.0,
+        "transition_direction_accuracy": 0.3333333333333333,
+        "transition_gain_median": 1.0741700653428439,
+        "settled_transition_mae_cents": 459.53523816037097
+      }
+    ],
+    "comparator": [
+      {
+        "case": "sustain",
+        "error_mae_cents": 60.09024429321289,
+        "error_p90_cents": 81.06190490722656,
+        "error_sign_accuracy": 0.9696969985961914
+      },
+      {
+        "case": "step_up_down",
+        "error_mae_cents": 61.12984848022461,
+        "error_p90_cents": 127.49134063720703,
+        "error_sign_accuracy": 1.0
+      },
+      {
+        "case": "glide",
+        "error_mae_cents": 77.61663818359375,
+        "error_p90_cents": 112.40574645996094,
+        "error_sign_accuracy": 1.0
+      },
+      {
+        "case": "rests",
+        "error_mae_cents": 89.92374420166016,
+        "error_p90_cents": 138.40484619140625,
+        "error_sign_accuracy": 1.0
+      },
+      {
+        "case": "melody",
+        "error_mae_cents": 63.871158599853516,
+        "error_p90_cents": 131.63641357421875,
+        "error_sign_accuracy": 0.9831933379173279
+      }
+    ]
+  },
+  "audio": [
+    {
+      "case": "sustain",
+      "ear_before": "audio/sustain/01_ear_before_reference.wav",
+      "ear_after": "audio/sustain/01_ear_after_prediction.wav",
+      "memory_before": "audio/sustain/02_memory_before_ear.wav",
+      "memory_after": "audio/sustain/02_memory_after_recall.wav",
+      "ff_before": "audio/sustain/03_feedforward_before_target.wav",
+      "ff_after": "audio/sustain/03_feedforward_after_physical.wav",
+      "comparator_before": "audio/sustain/04_comparator_before_detuned_self.wav",
+      "comparator_after": "audio/sustain/04_comparator_after_reconstructed_target.wav"
+    },
+    {
+      "case": "step_up_down",
+      "ear_before": "audio/step_up_down/01_ear_before_reference.wav",
+      "ear_after": "audio/step_up_down/01_ear_after_prediction.wav",
+      "memory_before": "audio/step_up_down/02_memory_before_ear.wav",
+      "memory_after": "audio/step_up_down/02_memory_after_recall.wav",
+      "ff_before": "audio/step_up_down/03_feedforward_before_target.wav",
+      "ff_after": "audio/step_up_down/03_feedforward_after_physical.wav",
+      "comparator_before": "audio/step_up_down/04_comparator_before_detuned_self.wav",
+      "comparator_after": "audio/step_up_down/04_comparator_after_reconstructed_target.wav"
+    },
+    {
+      "case": "glide",
+      "ear_before": "audio/glide/01_ear_before_reference.wav",
+      "ear_after": "audio/glide/01_ear_after_prediction.wav",
+      "memory_before": "audio/glide/02_memory_before_ear.wav",
+      "memory_after": "audio/glide/02_memory_after_recall.wav",
+      "ff_before": "audio/glide/03_feedforward_before_target.wav",
+      "ff_after": "audio/glide/03_feedforward_after_physical.wav",
+      "comparator_before": "audio/glide/04_comparator_before_detuned_self.wav",
+      "comparator_after": "audio/glide/04_comparator_after_reconstructed_target.wav"
+    },
+    {
+      "case": "rests",
+      "ear_before": "audio/rests/01_ear_before_reference.wav",
+      "ear_after": "audio/rests/01_ear_after_prediction.wav",
+      "memory_before": "audio/rests/02_memory_before_ear.wav",
+      "memory_after": "audio/rests/02_memory_after_recall.wav",
+      "ff_before": "audio/rests/03_feedforward_before_target.wav",
+      "ff_after": "audio/rests/03_feedforward_after_physical.wav",
+      "comparator_before": "audio/rests/04_comparator_before_detuned_self.wav",
+      "comparator_after": "audio/rests/04_comparator_after_reconstructed_target.wav"
+    },
+    {
+      "case": "melody",
+      "ear_before": "audio/melody/01_ear_before_reference.wav",
+      "ear_after": "audio/melody/01_ear_after_prediction.wav",
+      "memory_before": "audio/melody/02_memory_before_ear.wav",
+      "memory_after": "audio/melody/02_memory_after_recall.wav",
+      "ff_before": "audio/melody/03_feedforward_before_target.wav",
+      "ff_after": "audio/melody/03_feedforward_after_physical.wav",
+      "comparator_before": "audio/melody/04_comparator_before_detuned_self.wav",
+      "comparator_after": "audio/melody/04_comparator_after_reconstructed_target.wav"
+    }
+  ],
+  "feedback": {
+    "trained": false,
+    "pass": false,
+    "reason": "feedback residual training is the next gated stage"
+  }
+}

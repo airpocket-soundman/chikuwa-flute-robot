@@ -57,6 +57,17 @@ def main():
         body = "".join("<tr><th>" + html.escape(row["case"]) + "</th>" +
                        "".join(f"<td>{n(row[k], 3)}</td>" for k in heads) + "</tr>" for row in rows)
         details.append(f"<h3>{html.escape(stage)}</h3><div class='table'><table><thead><tr><th>case</th>{header}</tr></thead><tbody>{body}</tbody></table></div>")
+    attempts = []
+    attempt_root = pathlib.Path(args.manifest).parent / "attempts"
+    for attempt_manifest in sorted(attempt_root.glob("*/manifest.json")):
+        attempt = json.loads(attempt_manifest.read_text(encoding="utf-8"))
+        ff = attempt["summary"]["feedforward"]
+        sample = next((x for x in attempt["audio"] if x["case"] == "step_up_down"), attempt["audio"][0])
+        prefix = attempt_manifest.parent.relative_to(pathlib.Path(args.manifest).parent).as_posix() + "/"
+        attempts.append(f'''<section class="card"><div class="stage"><b>試</b><span>FAIL</span></div>
+        <h2>{html.escape(attempt_manifest.parent.name)}</h2>
+        <p>MAE {n(ff['mae'])} cent / correlation {n(ff['correlation'], 3)} / direction {n(ff['direction'], 3)} / gain {n(ff['gain'], 3)}</p>
+        <div class="listen">{audio(prefix + sample['ff_before'], "お手本")}{audio(prefix + sample['ff_after'], "試行後")}</div></section>''')
     old = {"mae": 264.1299841855391, "corr": -0.995092265219766,
            "direction": 1.0, "explanation": "旧方向指標は300 ms以内の微小な符号一致で1.0となるため無効化"}
     feedback = data["feedback"]
@@ -81,6 +92,7 @@ footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padd
 <div class="grid">{''.join(cards)}</div>
 <h2>評価を厳格化した理由</h2><p>旧一体モデルはMAE {old['mae']:.1f} cent、軌跡相関 {old['corr']:.3f} で実際には逆方向へ追従した。一方、旧方向指標だけは {old['direction']:.1f} だった。{old['explanation']}。新評価は発音できない目標区間へ1200 cent罰を与え、P90、発音率、休符漏れ、遷移ゲイン、整定誤差をケース別に残す。</p>
 <h2>学習の分離と再統合</h2><p>前段が合格したら凍結して次段を学習する。FFは名目rig・自己音なしから開始し、同じ参照でもrigごとに異なるOracle操作を回帰する不可能問題を避けた。次に閉ループDAggerでFeedback Residualを学習し、最後に未知rigと複数takeのRig Adapterを追加する。最終配備時は各NNを一つのforward graphとcheckpointへ束ねられるため、分離評価とE2E推論は両立する。</p>
+<h2>不採用試行の音</h2><p>改善しなかった学習も消さず、同じ固定課題のWAVと指標を残す。</p><div class="grid">{''.join(attempts) if attempts else '<p>まだ記録なし</p>'}</div>
 <h2>全ケース詳細</h2>{''.join(details)}
 <footer>seed {data['seed']} / checkpoint {html.escape(data['checkpoint'])}<br>{html.escape(data['sonification_note'])}</footer>
 </main></body></html>'''
