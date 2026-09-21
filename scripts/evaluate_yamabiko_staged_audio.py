@@ -20,8 +20,9 @@ from flute_rl.yamabiko.e2e_audio import RawSelfAudio  # noqa: E402
 from flute_rl.yamabiko.e2e_io import SAMPLE_RATE, frame_audio_numpy  # noqa: E402
 from flute_rl.yamabiko.session import HOME_STEPS  # noqa: E402
 from flute_rl.yamabiko.staged_nn import (ErrorComparator, FeedForwardPolicy,
-                                         FeedbackResidualPolicy, ReferenceMemory,
-                                         StagedConfig)  # noqa: E402
+                                         FeedbackResidualPolicy, MotorInversePolicy,
+                                         ReferenceMemory, StagedConfig,
+                                         TargetPositionPlanner)  # noqa: E402
 
 CENTER, SCALE = 1300.0, 600.0
 
@@ -52,7 +53,12 @@ def load_stages(path, device):
                FeedbackResidualPolicy(config)]
     for module, key in zip(modules, ("memory", "feedforward", "comparator", "feedback")):
         module.load_state_dict(ck[key]); module.to(device).eval()
-    return ck, modules
+    planner = motor = None
+    if "position_planner" in ck and "motor_inverse" in ck:
+        planner, motor = TargetPositionPlanner(config).to(device), MotorInversePolicy(config).to(device)
+        planner.load_state_dict(ck["position_planner"]); motor.load_state_dict(ck["motor_inverse"])
+        planner.eval(); motor.eval()
+    return ck, modules, planner, motor
 
 
 def corr(a, b):
@@ -102,7 +108,7 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); out = pathlib.Path(args.out); audio_dir = out / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
-    ck, (memory, ff, comparator, feedback) = load_stages(args.model, args.device)
+    ck, (memory, ff, comparator, feedback), position_planner, motor_inverse = load_stages(args.model, args.device)
     ear_path = ck["ear_checkpoint"]
     ear_model = E2EImitator.from_checkpoint(torch.load(ear_path, map_location=args.device), args.device).eval()
     rng = np.random.default_rng(args.seed)
@@ -115,7 +121,11 @@ def main():
         length = torch.tensor([len(target)], device=args.device)
         decoded, stored = memory(ear[None], length); decoded = memory.decode(stored)[0]
         mem_pitch = decoded[:, 0].cpu().numpy(); mem_voice = (decoded[:, 1] >= 0).cpu().numpy()
-        actions = ff(decoded[None], length)[0].cpu().numpy()
+        if position_planner is not None:
+            planned_position = position_planner(decoded[None])
+            actions = motor_inverse(planned_position, decoded[None], length)[0].cpu().numpy()
+        else:
+            actions = ff(decoded[None], length)[0].cpu().numpy()
         rig = Rig(RigParams.nominal(1), np.random.default_rng(args.seed + 100 + case_index))
         for _ in range(HOME_STEPS): rig.step(np.array([-1.0]), np.array([False]))
         cents, sounding = [], []

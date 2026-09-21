@@ -38,14 +38,15 @@ class Sample:
     ear: torch.Tensor
     target: torch.Tensor
     actions: torch.Tensor
+    position: torch.Tensor
 
 
-def oracle_actions(target: np.ndarray, rng: np.random.Generator, *, random_rig: bool) -> np.ndarray:
+def oracle_actions(target: np.ndarray, rng: np.random.Generator, *, random_rig: bool):
     params = RigParams.sample(rng, 1, harsh=0.0) if random_rig else RigParams.nominal(1)
     rig = Rig(params, np.random.default_rng(int(rng.integers(2**31))))
     schedule = make_schedule([[target]])
     control = Oracle(); control.begin(schedule, rig)
-    result = []
+    result, positions = [], []
     for t in range(schedule.T):
         home = bool(schedule.homing[t])
         if home:
@@ -57,7 +58,8 @@ def oracle_actions(target: np.ndarray, rng: np.random.Generator, *, random_rig: 
             control.homed()
         if not home:
             result.append((float(pwm[0]), float(valve[0])))
-    return np.asarray(result, np.float32)
+            positions.append(float(out["x"][0] / rig.p.stroke[0]))
+    return np.asarray(result, np.float32), np.asarray(positions, np.float32)
 
 
 @torch.inference_mode()
@@ -71,8 +73,9 @@ def make_samples(ear_model, rng, count: int, device, progress: float, random_rig
         learned = ear_model.audio_features(torch.from_numpy(frames).to(device))[:, -2:].cpu()
         pitch = np.where(np.isfinite(target), (np.nan_to_num(target) - PITCH_CENTER) / PITCH_SCALE, 0.0)
         voice = np.isfinite(target).astype(np.float32)
+        actions, position = oracle_actions(target, rng, random_rig=random_rig)
         samples.append(Sample(learned, torch.from_numpy(np.column_stack([pitch, voice]).astype(np.float32)),
-                              torch.from_numpy(oracle_actions(target, rng, random_rig=random_rig))))
+                              torch.from_numpy(actions), torch.from_numpy(position)))
     return samples
 
 

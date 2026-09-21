@@ -104,6 +104,58 @@ class FeedForwardPolicy(nn.Module):
         return torch.stack(outputs, 1)
 
 
+class TargetPositionPlanner(nn.Module):
+    """Neural map from remembered acoustic target to normalized actuator aim."""
+
+    def __init__(self, config: StagedConfig = StagedConfig()):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(2, 64), nn.SiLU(), nn.Linear(64, 64), nn.SiLU(), nn.Linear(64, 1))
+
+    def forward(self, target: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(self.net(target))
+
+
+class MotorInversePolicy(nn.Module):
+    """Stateful neural inverse motor driven by a separately learned aim."""
+
+    FEATURES = 12
+
+    def __init__(self, config: StagedConfig = StagedConfig()):
+        super().__init__(); self.config = config
+        self.cell = nn.GRUCell(self.FEATURES, config.control_hidden)
+        self.head = nn.Sequential(nn.Linear(config.control_hidden + self.FEATURES, config.control_hidden),
+                                  nn.SiLU(), nn.Linear(config.control_hidden, 3))
+
+    @staticmethod
+    def features(position: torch.Tensor, target: torch.Tensor, previous: torch.Tensor, t: int):
+        steps = position.shape[1]
+        ids = [t, min(t + 5, steps - 1), min(t + 20, steps - 1), min(t + 50, steps - 1)]
+        p = [position[:, i] for i in ids]
+        voice = [target[:, i, 1:2] for i in ids]
+        return torch.cat([p[0], p[1], p[2], p[3], p[1] - p[0], p[2] - p[0],
+                          voice[0], voice[1], voice[2], previous,
+                          torch.full_like(p[0], float(t) / max(steps - 1, 1))], 1)
+
+    def forward(self, position: torch.Tensor, target: torch.Tensor, lengths: torch.Tensor | None = None,
+                teacher_actions: torch.Tensor | None = None, return_position: bool = False):
+        batch, steps = target.shape[:2]
+        state = torch.zeros(batch, self.config.control_hidden, device=target.device, dtype=target.dtype)
+        previous = torch.zeros(batch, 2, device=target.device, dtype=target.dtype); outputs = []; positions = []
+        for t in range(steps):
+            x = self.features(position, target, previous, t); nxt = self.cell(x, state)
+            raw = self.head(torch.cat([nxt, x], 1))
+            action = torch.stack([torch.tanh(raw[:, 0]), torch.sigmoid(raw[:, 1])], 1)
+            estimated_position = torch.sigmoid(raw[:, 2])
+            if lengths is not None:
+                active = (t < lengths)[:, None]; state = torch.where(active, nxt, state)
+                action = torch.where(active, action, torch.zeros_like(action))
+            else: state = nxt
+            outputs.append(action); positions.append(estimated_position)
+            previous = teacher_actions[:, t] if teacher_actions is not None else action
+        actions = torch.stack(outputs, 1)
+        return (actions, torch.stack(positions, 1)) if return_position else actions
+
+
 class ErrorComparator(nn.Module):
     """Estimate signed target-minus-self pitch error from two neural ears."""
 
