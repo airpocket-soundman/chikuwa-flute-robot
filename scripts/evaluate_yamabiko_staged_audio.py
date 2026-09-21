@@ -157,8 +157,12 @@ def main():
         write_wav(comp_before, synth_self(own_cents, np.isfinite(target), np.random.default_rng(2100 + case_index),
                                           sr=SAMPLE_RATE), SAMPLE_RATE)
         write_wav(comp_after, sonify(corrected.cpu().numpy(), mem_voice, 2200 + case_index), SAMPLE_RATE)
-        valid = torch.from_numpy(np.isfinite(target)).to(args.device)
-        true_error = decoded[:, 0] - own_ear[:, 0]
+        # Score against the physical cents trace, not the convenient neural
+        # target-minus-neural-self identity used inside the model.
+        prior_note = np.r_[False, np.isfinite(target[:-1])]
+        valid = torch.from_numpy(np.isfinite(target) & prior_note).to(args.device)
+        observed_cents = np.r_[0.0, own_cents[:-1]]
+        true_error = torch.from_numpy(((np.nan_to_num(target) - observed_cents) / SCALE).astype(np.float32)).to(args.device)
         e = (error[valid] - true_error[valid]).abs().cpu().numpy() * SCALE
         reports["comparator"].append({"case": name, "error_mae_cents": float(np.mean(e)),
                                       "error_p90_cents": float(np.quantile(e, .9)),

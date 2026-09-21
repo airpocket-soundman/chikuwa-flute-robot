@@ -1,6 +1,6 @@
 {
   "format": "yamabiko-staged-audio-v1",
-  "checkpoint": "runs/yamabiko_staged_nn.pt",
+  "checkpoint": "runs/yamabiko_staged_nn_comparator.pt",
   "ear_checkpoint": "runs/yamabiko_e2e_pc_ear_gate1_balanced.pt",
   "seed": 9471,
   "sonification_note": "Ear/memory/comparator after-WAVs sonify predicted pitch for diagnosis; only feedforward after-WAV is simulated physical performance.",
@@ -24,9 +24,9 @@
       "pass": false
     },
     "comparator": {
-      "error_mae": 24.709095764160157,
-      "sign_accuracy": 1.0,
-      "pass": true
+      "error_mae": 70.52632675170898,
+      "sign_accuracy": 0.9905780673027038,
+      "pass": false
     }
   },
   "details": {
@@ -174,33 +174,33 @@
     "comparator": [
       {
         "case": "sustain",
-        "error_mae_cents": 27.66411781311035,
-        "error_p90_cents": 32.15190887451172,
-        "error_sign_accuracy": 1.0
+        "error_mae_cents": 60.09024429321289,
+        "error_p90_cents": 81.06190490722656,
+        "error_sign_accuracy": 0.9696969985961914
       },
       {
         "case": "step_up_down",
-        "error_mae_cents": 26.931564331054688,
-        "error_p90_cents": 47.48004150390625,
+        "error_mae_cents": 61.12984848022461,
+        "error_p90_cents": 127.49134063720703,
         "error_sign_accuracy": 1.0
       },
       {
         "case": "glide",
-        "error_mae_cents": 19.811717987060547,
-        "error_p90_cents": 24.896568298339844,
+        "error_mae_cents": 77.61663818359375,
+        "error_p90_cents": 112.40574645996094,
         "error_sign_accuracy": 1.0
       },
       {
         "case": "rests",
-        "error_mae_cents": 19.91141700744629,
-        "error_p90_cents": 29.6014404296875,
+        "error_mae_cents": 89.92374420166016,
+        "error_p90_cents": 138.40484619140625,
         "error_sign_accuracy": 1.0
       },
       {
         "case": "melody",
-        "error_mae_cents": 29.226661682128906,
-        "error_p90_cents": 48.63806915283203,
-        "error_sign_accuracy": 1.0
+        "error_mae_cents": 63.871158599853516,
+        "error_p90_cents": 131.63641357421875,
+        "error_sign_accuracy": 0.9831933379173279
       }
     ]
   },
