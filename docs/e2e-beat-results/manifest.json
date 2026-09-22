@@ -1,6 +1,6 @@
 {
   "format": "yamabiko-beat-audio-v1",
-  "checkpoint": "runs/yamabiko_musical_memory_aligned_v7_pass.pt",
+  "checkpoint": "runs/yamabiko_temporal_aligner.pt",
   "seed": 15551,
   "official_path": "predicted_upstream",
   "audio_kind": "tempo_after is diagnostic click track, not physical performance",
@@ -46,6 +46,23 @@
     "split": "frozen-unknown-bpm",
     "official_path": "predicted_upstream"
   },
+  "temporal_aligner_trained": true,
+  "temporal_aligner": {
+    "clock_pointer_mae_cells": 0.07756879925727844,
+    "clock_pointer_p95_cells": 0.18897247314453125,
+    "clock_backward_jumps": 0,
+    "clock_eos_mae_ms": 166.14583333333331,
+    "pitch_mae_cents": 19.49104118347168,
+    "trajectory_correlation": 0.9959003402343236,
+    "voice_f1": 0.9834054112434387,
+    "rest_false_positive_rate": 0.031331177800893784,
+    "onset_f1_exact_frame": 0.35749250650405884,
+    "offset_f1_exact_frame": 0.41722431778907776,
+    "pass": false,
+    "seed": 18431,
+    "split": "frozen-oracle-grid-unknown-bpm",
+    "official_path": "oracle_memory"
+  },
   "cases": [
     {
       "case": "bpm_73",
@@ -57,7 +74,9 @@
       "tempo_before": "audio/bpm_73_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_73_tempo_after_clicks.wav",
       "memory_before": "audio/bpm_73_tempo_before_reference.wav",
-      "memory_after": "audio/bpm_73_memory_after_recall.wav"
+      "memory_after": "audio/bpm_73_memory_after_recall.wav",
+      "aligner_before": "audio/bpm_73_memory_after_recall.wav",
+      "aligner_after": "audio/bpm_73_aligner_after_100hz.wav"
     },
     {
       "case": "bpm_97",
@@ -69,7 +88,9 @@
       "tempo_before": "audio/bpm_97_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_97_tempo_after_clicks.wav",
       "memory_before": "audio/bpm_97_tempo_before_reference.wav",
-      "memory_after": "audio/bpm_97_memory_after_recall.wav"
+      "memory_after": "audio/bpm_97_memory_after_recall.wav",
+      "aligner_before": "audio/bpm_97_memory_after_recall.wav",
+      "aligner_after": "audio/bpm_97_aligner_after_100hz.wav"
     },
     {
       "case": "bpm_137",
@@ -81,7 +102,9 @@
       "tempo_before": "audio/bpm_137_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_137_tempo_after_clicks.wav",
       "memory_before": "audio/bpm_137_tempo_before_reference.wav",
-      "memory_after": "audio/bpm_137_memory_after_recall.wav"
+      "memory_after": "audio/bpm_137_memory_after_recall.wav",
+      "aligner_before": "audio/bpm_137_memory_after_recall.wav",
+      "aligner_after": "audio/bpm_137_aligner_after_100hz.wav"
     },
     {
       "case": "bpm_173",
@@ -93,7 +116,9 @@
       "tempo_before": "audio/bpm_173_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_173_tempo_after_clicks.wav",
       "memory_before": "audio/bpm_173_tempo_before_reference.wav",
-      "memory_after": "audio/bpm_173_memory_after_recall.wav"
+      "memory_after": "audio/bpm_173_memory_after_recall.wav",
+      "aligner_before": "audio/bpm_173_memory_after_recall.wav",
+      "aligner_after": "audio/bpm_173_aligner_after_100hz.wav"
     }
   ]
 }

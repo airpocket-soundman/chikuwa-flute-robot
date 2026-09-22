@@ -20,6 +20,8 @@ class BeatGridConfig:
     subdivision: int = 4
     bpm_center: float = 120.0
     bpm_log_scale: float = 0.5
+    clock_hidden: int = 48
+    aligner_hidden: int = 96
 
 
 class TempoBeatNet(nn.Module):
@@ -198,6 +200,71 @@ class BeatAlignedMusicalMemoryNet(nn.Module):
             decoded = torch.cat([pooled_ear_pitch[..., None] + self.pitch_residual_scale * decoded[..., :1],
                                  decoded[..., 1:]], -1)
         return decoded, weights
+
+
+class NeuralPerformanceClock(nn.Module):
+    """Causal learned clock: stored tempo + reset/ticks -> monotone cell pointer.
+
+    The host supplies only the 100 Hz tick cadence.  Musical position and EOS
+    are model outputs, so replaying a memorised phrase means resetting this
+    small recurrent state rather than analysing the reference again.
+    """
+
+    def __init__(self, config: BeatGridConfig):
+        super().__init__(); self.config = config
+        h = config.clock_hidden
+        self.initial = nn.Sequential(nn.Linear(2, h), nn.SiLU(), nn.Linear(h, h))
+        self.start = nn.Sequential(nn.Linear(2, h), nn.SiLU(), nn.Linear(h, 1))
+        self.cell = nn.GRU(3, h, batch_first=True)
+        self.delta = nn.Sequential(nn.Linear(h, h), nn.SiLU(), nn.Linear(h, 1))
+        self.done = nn.Sequential(nn.Linear(h + 2, h), nn.SiLU(), nn.Linear(h, 1))
+
+    def forward(self, normalized_bpm: torch.Tensor, cell_lengths: torch.Tensor, steps: int):
+        meta = torch.stack([normalized_bpm, cell_lengths.to(normalized_bpm.dtype) / 48.0], -1)
+        state = self.initial(meta)
+        # Negative position represents the learned lead-in before cell zero.
+        pointer0 = -torch.nn.functional.softplus(self.start(meta)[:, 0])
+        reset = torch.zeros(len(meta), steps, 1, device=meta.device, dtype=meta.dtype); reset[:, 0] = 1
+        constant = meta[:, None].expand(-1, steps, -1)
+        states, _ = self.cell(torch.cat([constant, reset], -1), state[None])
+        # Positive by construction: the learned musical clock cannot run backwards.
+        delta = torch.nn.functional.softplus(self.delta(states)[..., 0]) * .12
+        travelled = torch.cat([torch.zeros(len(meta), 1, device=meta.device, dtype=meta.dtype),
+                               torch.cumsum(delta[:, :-1], 1)], 1)
+        pointer = pointer0[:, None] + travelled
+        done = self.done(torch.cat([states, (pointer / cell_lengths[:, None].clamp_min(1)).unsqueeze(-1),
+                                    delta.unsqueeze(-1)], -1))[..., 0]
+        return pointer, done
+
+
+class NeuralTemporalAligner(nn.Module):
+    """Render remembered beat cells onto 100 Hz using a neural clock pointer."""
+
+    OUTPUTS = 4  # pitch, voice logit, onset logit, offset logit
+
+    def __init__(self, config: BeatGridConfig):
+        super().__init__(); self.config = config
+        h = config.aligner_hidden
+        self.memory = nn.GRU(5, h, batch_first=True, bidirectional=True)
+        self.decode = nn.Sequential(nn.Linear(2 * h + 7, h), nn.SiLU(),
+                                    nn.Linear(h, h), nn.SiLU(), nn.Linear(h, self.OUTPUTS))
+
+    def forward(self, grid: torch.Tensor, grid_lengths: torch.Tensor, pointer: torch.Tensor):
+        encoded, _ = self.memory(grid)
+        cells = torch.arange(grid.shape[1], device=grid.device, dtype=grid.dtype)
+        centers = cells[None, None, :] + .5
+        distance = pointer[..., None] - centers
+        valid = cells[None, :] < grid_lengths[:, None]
+        weights = torch.exp(-.5 * (distance / .22) ** 2) * valid[:, None]
+        weights = weights / weights.sum(-1, keepdim=True).clamp_min(1e-8)
+        context = torch.einsum("btc,bch->bth", weights, encoded)
+        raw = torch.einsum("btc,bcf->btf", weights, grid)
+        # Relative position lets the NN learn intra-cell slopes and attacks.
+        local = torch.tanh(4.0 * distance)
+        offset = torch.einsum("btc,btc->bt", weights, local).unsqueeze(-1)
+        started = (pointer >= 0).to(grid.dtype).unsqueeze(-1)
+        out = self.decode(torch.cat([context, raw, offset, started], -1))
+        return out, weights
 
 
 def checkpoint(config: BeatGridConfig, tempo: TempoBeatNet, memory: MusicalMemoryNet, **metadata):

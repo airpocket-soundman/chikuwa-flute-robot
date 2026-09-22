@@ -48,6 +48,17 @@ def main():
             <div><dt>voice F1</dt><dd>{n(mm['voice_f1'], 3)}</dd></div><div><dt>onset F1</dt><dd>{n(mm['onset_f1'], 3)}</dd></div>
             <div><dt>correlation</dt><dd>{n(mm['trajectory_correlation'], 3)}</dd></div></dl>
             <p class="note">raw音声と正解セル数を捨て、予測BPM・予測位相から求めたセル数で再生した診断音。</p></section>'''
+        if beat.get("temporal_aligner_trained") and beat.get("temporal_aligner"):
+            am = beat["temporal_aligner"]; ast = "PASS" if am.get("pass") else "FAIL"
+            beat_section += f'''<section class="card"><div class="stage"><b>A</b><span>{ast}</span></div>
+            <h2>Neural Clock / Temporal Aligner</h2><p class="flow">記憶セル + BPM + 100 Hz tick → 時刻付き演奏目標</p>
+            <div class="listen">{beat_audio(bc['aligner_before'], '拍セル記憶')}{beat_audio(bc['aligner_after'], '100 Hz再現')}</div>
+            <dl><div><dt>pointer MAE cells</dt><dd>{n(am['clock_pointer_mae_cells'], 3)}</dd></div>
+            <div><dt>EOS MAE ms</dt><dd>{n(am['clock_eos_mae_ms'])}</dd></div>
+            <div><dt>pitch MAE cents</dt><dd>{n(am['pitch_mae_cents'])}</dd></div>
+            <div><dt>voice F1</dt><dd>{n(am['voice_f1'], 3)}</dd></div>
+            <div><dt>onset F1 exact</dt><dd>{n(am['onset_f1_exact_frame'], 3)}</dd></div></dl>
+            <p class="note">これはOracle拍セルでの単独Gate。100 Hz tick以外の正解時刻は推論入力に与えていない。afterは診断再合成で、物理演奏ではない。</p></section>'''
         beat_section += "</div>"
 
     stages = [

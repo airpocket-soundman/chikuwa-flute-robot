@@ -16,7 +16,8 @@ from export_targets import write_wav  # noqa: E402
 from flute_rl.audio import room, synth_self, synth_source  # noqa: E402
 from flute_rl.targets import make_beat_target  # noqa: E402
 from flute_rl.yamabiko.beat_grid import (BeatAlignedMusicalMemoryNet, BeatGridConfig,
-                                         MusicalMemoryNet, TempoBeatNet)  # noqa: E402
+                                         MusicalMemoryNet, NeuralPerformanceClock,
+                                         NeuralTemporalAligner, TempoBeatNet)  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from flute_rl.yamabiko.e2e_io import HOP, SAMPLE_RATE, frame_audio_numpy  # noqa: E402
 
@@ -50,6 +51,10 @@ def main():
               if kind in ("beat-aligned-v1", "beat-aligned-v2", "beat-aligned-v3", "beat-aligned-v4", "beat-aligned-v5", "beat-aligned-v6", "beat-aligned-v7")
               else MusicalMemoryNet(cfg)).to(args.device)
     memory.load_state_dict(ck["musical_memory"]); memory.eval()
+    clock = aligner = None
+    if ck.get("temporal_aligner_trained"):
+        clock = NeuralPerformanceClock(cfg).to(args.device); clock.load_state_dict(ck["performance_clock"]); clock.eval()
+        aligner = NeuralTemporalAligner(cfg).to(args.device); aligner.load_state_dict(ck["temporal_aligner"]); aligner.eval()
     ear = E2EImitator.from_checkpoint(torch.load(ck["ear_checkpoint"], map_location=args.device), args.device).eval()
     out = pathlib.Path(args.out); audio = out / "audio"; audio.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed); cases = []; tempo_errors = []; phase_errors = []
@@ -84,6 +89,17 @@ def main():
             mem_after = audio / f"{name}_memory_after_recall.wav"; write_wav(mem_after, rendered, SAMPLE_RATE)
             item["memory_before"] = item["tempo_before"]
             item["memory_after"] = str(mem_after.relative_to(out)).replace("\\", "/")
+            if clock is not None:
+                cell_lengths = torch.tensor([cells], device=args.device)
+                normalized_bpm = tempo.normalized_bpm(torch.tensor([predicted_bpm], device=args.device))
+                pointer, _ = clock(normalized_bpm, cell_lengths, len(example.target))
+                aligned, _ = aligner(decoded, cell_lengths, pointer)
+                aligned_pitch = aligned[0, :, 0].cpu().numpy() * 600 + 1300
+                aligned_voice = aligned[0, :, 1].cpu().numpy() >= 0
+                aligned_wave = synth_self(aligned_pitch, aligned_voice, np.random.default_rng(17000 + index), sr=SAMPLE_RATE)
+                aligned_after = audio / f"{name}_aligner_after_100hz.wav"; write_wav(aligned_after, aligned_wave, SAMPLE_RATE)
+                item["aligner_before"] = item["memory_after"]
+                item["aligner_after"] = str(aligned_after.relative_to(out)).replace("\\", "/")
         cases.append(item)
     demo_metrics = {"tempo_relative_error_median": float(np.median(tempo_errors)),
                "tempo_relative_error_p90": float(np.quantile(tempo_errors, .9)),
@@ -96,7 +112,9 @@ def main():
                 "official_path": "predicted_upstream", "audio_kind": "tempo_after is diagnostic click track, not physical performance",
                 "tempo_beat": metrics, "demo_metrics": demo_metrics,
                 "musical_memory_trained": bool(ck.get("musical_memory_trained")),
-                "musical_memory": ck.get("musical_memory_metrics"), "cases": cases}
+                "musical_memory": ck.get("musical_memory_metrics"),
+                "temporal_aligner_trained": bool(ck.get("temporal_aligner_trained")),
+                "temporal_aligner": ck.get("temporal_aligner_metrics"), "cases": cases}
     out.mkdir(parents=True, exist_ok=True); (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"wrote {out / 'manifest.json'}")
 
