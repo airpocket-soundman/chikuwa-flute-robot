@@ -93,18 +93,21 @@ class MusicalMemoryNet(nn.Module):
                                      nn.Linear(config.memory_hidden, self.OUTPUTS))
 
     @staticmethod
-    def cell_queries(batch: int, cells: int, device, dtype):
+    def cell_queries(batch: int, cells: int, device, dtype, lengths: torch.Tensor | None = None):
         index = torch.arange(cells, device=device, dtype=dtype)[None].expand(batch, -1)
-        denom = max(cells - 1, 1); u = index / denom
+        denom = (torch.full((batch, 1), max(cells - 1, 1), device=device, dtype=dtype)
+                 if lengths is None else (lengths[:, None].to(dtype) - 1).clamp_min(1))
+        u = index / denom
         return torch.stack([u, 1 - u, torch.sin(2 * torch.pi * u), torch.cos(2 * torch.pi * u),
                             torch.sin(4 * torch.pi * u), torch.cos(4 * torch.pi * u),
                             torch.sin(8 * torch.pi * u), torch.cos(8 * torch.pi * u)], -1)
 
     def forward(self, audio_features: torch.Tensor, beat_encoded: torch.Tensor,
-                beat_outputs: torch.Tensor, frame_mask: torch.Tensor, cells: int):
+                beat_outputs: torch.Tensor, frame_mask: torch.Tensor, cells: int,
+                cell_lengths: torch.Tensor | None = None):
         source = torch.cat([audio_features, beat_encoded, beat_outputs], -1)
         contextual, _ = self.context(source)
-        q = self.query(self.cell_queries(len(source), cells, source.device, source.dtype))
+        q = self.query(self.cell_queries(len(source), cells, source.device, source.dtype, cell_lengths))
         k = self.key(contextual)
         score = torch.einsum("bcd,btd->bct", q, k) / (k.shape[-1] ** .5)
         score = score.masked_fill(~frame_mask[:, None], torch.finfo(score.dtype).min)

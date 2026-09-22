@@ -38,7 +38,17 @@ def main():
         <dl><div><dt>tempo median relative error</dt><dd>{n(bm['tempo_relative_error_median'], 4)}</dd></div>
         <div><dt>phase MAE cycle</dt><dd>{n(bm['phase_circular_mae_cycle'], 4)}</dd></div></dl>
         <p class="note">afterはTempo NNの拍だけを鳴らした診断clickで、演奏音ではない。official path: {html.escape(beat['official_path'])}</p>
-        </section></div>'''
+        </section>'''
+        if beat.get("musical_memory_trained") and beat.get("musical_memory"):
+            mm = beat["musical_memory"]; ms = "PASS" if mm.get("pass") else "FAIL"
+            beat_section += f'''<section class="card"><div class="stage"><b>M</b><span>{ms}</span></div>
+            <h2>Musical Memory NN</h2><p class="flow">予測beat + 音響表現 → 音程・休符・onset/offsetセル</p>
+            <div class="listen">{beat_audio(bc['memory_before'], 'NNの前')}{beat_audio(bc['memory_after'], '記憶から再合成')}</div>
+            <dl><div><dt>pitch MAE cents</dt><dd>{n(mm['pitch_mae_cents'])}</dd></div>
+            <div><dt>voice F1</dt><dd>{n(mm['voice_f1'], 3)}</dd></div><div><dt>onset F1</dt><dd>{n(mm['onset_f1'], 3)}</dd></div>
+            <div><dt>correlation</dt><dd>{n(mm['trajectory_correlation'], 3)}</dd></div></dl>
+            <p class="note">raw音声と正解セル数を捨て、予測BPM・予測位相から求めたセル数で再生した診断音。</p></section>'''
+        beat_section += "</div>"
 
     stages = [
         ("1", "Neural Ear", "生の20 ms波形 → 音程・発音状態", s["ear"],

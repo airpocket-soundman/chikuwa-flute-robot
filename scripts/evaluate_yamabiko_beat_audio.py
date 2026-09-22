@@ -62,13 +62,17 @@ def main():
                 "detected_beats": int(len(wraps)), "tempo_before": str(before.relative_to(out)).replace("\\", "/"),
                 "tempo_after": str(after.relative_to(out)).replace("\\", "/")}
         if ck.get("musical_memory_trained"):
-            cells = len(example.cell_pitch); decoded, _ = memory(features, encoded, beat_out, mask, cells)
+            confident = np.flatnonzero(confidence >= .5); start_frame = int(confident[0]) if len(confident) else 0
+            cells = int(np.clip(round((len(example.target) - start_frame) / 100 * predicted_bpm / 60 * cfg.subdivision), 1, 64))
+            decoded, _ = memory(features, encoded, beat_out, mask, cells)
             pitch = decoded[0, :, 0].cpu().numpy() * 600 + 1300; voice = decoded[0, :, 1].cpu().numpy() >= 0
             seconds_cell = 60.0 / predicted_bpm / cfg.subdivision
             frames_cell = max(1, int(round(seconds_cell * 100)))
-            track_pitch = np.repeat(pitch, frames_cell); track_voice = np.repeat(voice, frames_cell)
+            track_pitch = np.r_[np.zeros(start_frame), np.repeat(pitch, frames_cell)]
+            track_voice = np.r_[np.zeros(start_frame, bool), np.repeat(voice, frames_cell)]
             rendered = synth_self(track_pitch, track_voice, np.random.default_rng(16000 + index), sr=SAMPLE_RATE)
             mem_after = audio / f"{name}_memory_after_recall.wav"; write_wav(mem_after, rendered, SAMPLE_RATE)
+            item["memory_before"] = item["tempo_before"]
             item["memory_after"] = str(mem_after.relative_to(out)).replace("\\", "/")
         cases.append(item)
     demo_metrics = {"tempo_relative_error_median": float(np.median(tempo_errors)),
@@ -81,7 +85,8 @@ def main():
     manifest = {"format": "yamabiko-beat-audio-v1", "checkpoint": args.model, "seed": args.seed,
                 "official_path": "predicted_upstream", "audio_kind": "tempo_after is diagnostic click track, not physical performance",
                 "tempo_beat": metrics, "demo_metrics": demo_metrics,
-                "musical_memory_trained": bool(ck.get("musical_memory_trained")), "cases": cases}
+                "musical_memory_trained": bool(ck.get("musical_memory_trained")),
+                "musical_memory": ck.get("musical_memory_metrics"), "cases": cases}
     out.mkdir(parents=True, exist_ok=True); (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"wrote {out / 'manifest.json'}")
 
