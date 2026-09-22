@@ -1,0 +1,27 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>交換可能NN・統合E2E・ハイブリッド計画</title>
+<style>:root{--bg:#081018;--p:#112230;--ink:#edf6fb;--m:#a9bdc9;--c:#4ee1d1;--l:#294657}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 system-ui,sans-serif}main{max-width:1050px;margin:auto;padding:42px 20px 80px}h1{font-size:clamp(2rem,5vw,4rem);line-height:1.05}h2{margin-top:2.3rem;color:var(--c)}h3{margin-top:1.6rem}.lead{font-size:1.15rem;color:var(--m)}.card{background:var(--p);border:1px solid var(--l);border-radius:16px;padding:20px;margin:15px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:15px}pre{white-space:pre-wrap;background:#061018;border:1px solid var(--l);padding:16px;border-radius:12px;color:#c9fff9}table{border-collapse:collapse;width:100%;display:block;overflow:auto}th,td{border-bottom:1px solid var(--l);padding:9px;text-align:left;white-space:nowrap}a{color:var(--c)}code{color:var(--c)}</style></head><body><main>
+<p><a href="e2e-training-report.html">← 学習レポート</a></p><h1>交換可能な個別NN・<br>統合E2E・ハイブリッド計画</h1>
+<p class="lead">開発時の分離評価と、配備時の単一計算グラフを両立する。各ブロックはNN版・決定論版・Oracle診断版を同じTensor契約で交換できる。</p>
+<h2>並行実装する3方式</h2><div class="grid"><section class="card"><h3>modular_learned</h3><p>各Gateで合格した個別NNを凍結して接続する。中間出力を保存でき、故障箇所を特定しやすい。</p></section><section class="card"><h3>joint_e2e</h3><p>個別NNをComposite modelへ登録し、補助損失を残して全体微調整する。配備時は一つのgraphとcheckpointにする。</p></section><section class="card"><h3>hybrid</h3><p>任意ブロックを固定BPM、物理式、dead reckoning、PID等へ交換し、学習器の必要性と性能上限を測る。</p></section></div>
+<h2>Composite pipeline</h2><pre>reference waveform
+ → Neural Ear → Tempo/Beat → Musical Memory → Temporal Aligner
+ → Position Planner ───────────────────────────────┐
+previous actions → Motor State Estimator ──────────┼→ Position Controller
+self waveform → Neural Ear → Error Comparator ─────┴→ Feedback → PWM / valve</pre>
+<h2>ブロック契約</h2><table><thead><tr><th>出力</th><th>必須情報</th></tr></thead><tbody><tr><td>EarOutput</td><td>embedding, continuous pitch, voiced probability, confidence, mask</td></tr><tr><td>BeatOutput</td><td>BPM分布, beat/bar/subdivision phase, boundary, confidence</td></tr><tr><td>MusicalMemoryOutput</td><td>セル潜在, pitch/slope, rest, onset/offset, harmonic context</td></tr><tr><td>PlannerOutput</td><td>target position/velocity, urgency, valve, done</td></tr><tr><td>MotorStateOutput</td><td>estimated position/velocity, rig embedding, confidence</td></tr><tr><td>ErrorOutput</td><td>pitch error, timing error, voicing mismatch, confidence</td></tr></tbody></table>
+<p>NN版と決定論版は同じ形状、単位、mask、状態reset規約を守る。状態を持つブロックは <code>initial_state</code>、<code>step</code>、<code>reset_mask</code>を共通化する。</p>
+<h2>交換候補</h2><table><thead><tr><th>ブロック</th><th>NN版</th><th>決定論・比較版</th></tr></thead><tbody><tr><td>Audio</td><td>raw CNN</td><td>STFT/CQT frontend</td></tr><tr><td>Ear</td><td>learned pitch/voice</td><td>YIN、評価限定</td></tr><tr><td>Tempo</td><td>tempo/phase NN</td><td>固定BPM clock</td></tr><tr><td>Memory</td><td>GRU/Transformer</td><td>Oracle拍グリッド</td></tr><tr><td>Aligner</td><td>monotonic attention</td><td>固定index</td></tr><tr><td>Planner</td><td>learned mapper</td><td>管長物理式</td></tr><tr><td>Motor State</td><td>recurrent estimator</td><td>dead reckoning/encoder</td></tr><tr><td>Controller</td><td>learned policy</td><td>PID/open-loop/oracle</td></tr><tr><td>Comparator</td><td>learned comparator</td><td>単純差</td></tr><tr><td>Feedback</td><td>learned residual</td><td>比例補正/無補正</td></tr></tbody></table>
+<h2>学習順序</h2><ol><li>各ブロックを正解入力で単独学習</li><li>未知データで単独Gate</li><li>前段NNの実出力を与えるpredicted-upstream Gate</li><li>合格前段を凍結して次段を学習</li><li>全段を凍結接続して物理閉ループ評価</li><li>後段から順に解凍</li><li>全体を低学習率でE2E微調整</li><li>全Gateを再評価し退化checkpointを不採用</li></ol>
+<h2>joint E2Eの保護損失</h2><pre>total = physical performance
+      + ear pitch/voice
+      + tempo/phase
+      + memory reconstruction
+      + planner position
+      + motor state
+      + signed error
+      + stability and actuation penalties</pre>
+<h2>評価</h2><p>各ブロックを <b>oracle input</b>、<b>predicted upstream</b>、<b>closed loop</b> の3段階で評価する。精度だけでなく、P90/P99、失敗率、レイテンシ、メモリ、モデルサイズ、100 Hz deadline達成率、clean/乱数化/実録音を記録する。</p>
+<h2>WAVとPages</h2><ul><li>各ブロックのbefore/after sonification</li><li>制御段以降の物理演奏WAV</li><li>個別接続、joint E2E、主要hybridの同一曲比較</li><li>不採用試行をattempt履歴として保存</li><li>manifest JSONを数値の唯一のsource of truthにする</li></ul>
+<h2>UNO Q</h2><p>成立まではPC容量を優先する。成立後にblock別profile、蒸留、量子化、attention削減を行い、Python境界を避けて一つのexport graphへ統合する。平均ではなく100 Hz周期に対するP99レイテンシを合格条件にする。</p>
+<h2>完了条件</h2><ul><li>全ブロックが単独Gateとpredicted-upstream Gateを通過</li><li>個別NN接続が物理Gateを通過</li><li>joint E2Eが既存Gateを壊さず改善</li><li>少なくとも3つのhybridを全learned構成と比較</li><li>UNO Q exportとWAV/manifest/HTMLを再生成可能</li></ul>
+<p>完全な原文: <a href="modular-hybrid-model-plan.md">modular-hybrid-model-plan.md</a></p></main></body></html>

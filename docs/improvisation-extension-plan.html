@@ -1,0 +1,29 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>長期文脈・コード理解・アドリブ拡張計画</title>
+<style>:root{--bg:#090d17;--p:#151d31;--ink:#f1f5ff;--m:#aebbd0;--c:#bba2ff;--l:#394461}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#25234b,transparent 40%),var(--bg);color:var(--ink);font:15px/1.7 system-ui,sans-serif}main{max-width:1050px;margin:auto;padding:42px 20px 80px}h1{font-size:clamp(2rem,5vw,4rem);line-height:1.05}h2{margin-top:2.3rem;color:var(--c)}h3{margin-top:1.6rem}.lead{font-size:1.15rem;color:var(--m)}.card{background:var(--p);border:1px solid var(--l);border-radius:16px;padding:20px;margin:15px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:15px}pre{white-space:pre-wrap;background:#080b12;border:1px solid var(--l);padding:16px;border-radius:12px;color:#e2d9ff}table{border-collapse:collapse;width:100%;display:block;overflow:auto}th,td{border-bottom:1px solid var(--l);padding:9px;text-align:left;white-space:nowrap}a{color:var(--c)}</style></head><body><main>
+<p><a href="e2e-training-report.html">← 学習レポート</a></p><h1>長期音楽文脈・コード理解・<br>アドリブ演奏 拡張計画</h1>
+<p class="lead">8小節以上を理解し、和声とフレーズを保った新しい応答を、笛の身体制約に合わせて生成する。再現Headを残したままImprovisation Headを追加する。</p>
+<h2>全体構造</h2><pre>reference waveform
+ ├→ Raw Waveform Encoder ───────────┐
+ └→ Multi-resolution STFT Encoder ──┤→ Audio Fusion
+                                     → Tempo/Beat
+                                     → Beat-synchronous tokenizer
+                                     → Long-context Musical Transformer
+                         ┌───────────┴───────────┐
+                    Imitation Head       Improvisation Head
+                         └───────────┬───────────┘
+                               Playability NN
+                                     → physical controller</pre>
+<h2>STFTは時間×周波数の画像</h2><p>コードは複数周波数の同時関係なので周波数表現が有利である。単一FFTでは時間を失うため、約32 ms、128 ms、256 ms以上の複数窓長STFTを使い、onset、メロディ・倍音、低音・コードを分担させる。STFTは微分可能な入力表現であり、コードを決める規則はNNが学ぶ。</p>
+<h2>拍同期トークン</h2><p>スペクトログラム全画素の未来を直接描くのではなく、拍セルへ圧縮する。4/4拍子・16分音符単位なら8小節は約128セルとなる。</p><div class="grid"><section class="card"><h3>旋律・リズム</h3><p>連続cent、pitch slope、voiced/rest、onset/sustain/release/offset、音価、拍内位置。</p></section><section class="card"><h3>和声・構造</h3><p>bass/root候補、コード候補分布、自由なharmony latent、小節・フレーズ境界、style latent。</p></section></div>
+<p>音程を十二平均律へ強制量子化せず、グリッサンド、ビブラート、微分音を連続量として残す。</p>
+<h2>長期学習</h2><ol><li>1小節のmasked reconstruction</li><li>2小節の反復・変奏理解</li><li>4小節の問いと答え</li><li>8小節のコード進行とフレーズ</li><li>16小節以上のセクション構造</li></ol><p>次セル予測だけでなく、隠した小節の復元、過去4小節から次4小節の予測、移調・音色・BPM変更への対照学習を併用する。</p>
+<h2>コード理解の曖昧性</h2><p>単旋律からコードは一意に決まらないため、コード名を一点推定しない。候補分布、root/bass、変化位置、自由な和声latent、confidenceを保持する。BPMの半分・2倍問題も複数仮説として扱い、onset、小節境界、コード変化との整合で選択する。</p>
+<h2>生成モード</h2><table><thead><tr><th>モード</th><th>目的</th></tr></thead><tbody><tr><td>continuation</td><td>お手本の自然な続きを生成</td></tr><tr><td>variation</td><td>元フレーズを保った変奏</td></tr><tr><td>call_and_response</td><td>お手本への応答</td></tr><tr><td>solo</td><td>コード進行上の自由アドリブ</td></tr><tr><td>constrained</td><td>指定音域・密度・難易度内で生成</td></tr></tbody></table>
+<p>出力は連続音程分布、発音・休符、onset/offset、音価、音程傾斜、フレーズ終了、和声適合度、演奏可能性とする。</p>
+<h2>Playability NN</h2><p>候補旋律とrig embeddingから、音域、移動時間、必要PWM、発音余裕、オーバーブロー、端当たり、必要休符を予測する。最初はrerankerとして使用し、後に生成器へplayability損失を逆伝播する。手書き制約版はhybrid比較として残す。</p>
+<h2>段階Gate</h2><table><thead><tr><th>Gate</th><th>検証</th></tr></thead><tbody><tr><td>A1 Spectral</td><td>複数音・倍音の保持、音色外汎化</td></tr><tr><td>A2 Beat Tokenizer</td><td>BPM、phase、境界、休符</td></tr><tr><td>A3 Long Memory</td><td>raw破棄後の8小節復元</td></tr><tr><td>A4 Harmony</td><td>key、chord候補、変化時刻</td></tr><tr><td>A5 Continuation</td><td>held-out future、コピー率</td></tr><tr><td>A6 Improvisation</td><td>novelty、和声適合、フレーズ性</td></tr><tr><td>A7 Playability</td><td>到達率、危険率、予測誤差</td></tr><tr><td>A8 Physical Improv</td><td>理想生成対物理演奏、反復改善</td></tr></tbody></table>
+<h2>公開する音</h2><ul><li>原音とSTFT/トークン再構成音</li><li>記憶だけから復元した8小節</li><li>推定和声の診断用伴奏</li><li>正解未来と予測未来</li><li>理想アドリブWAV</li><li>物理シミュレータ演奏WAV</li><li>複数take後の適応済み演奏</li></ul><p>best例ではなく固定ホールドアウトの中央値を基本に、seed、SHA、temperature、使用ブロック構成をmanifestへ保存する。</p>
+<h2>データと分割</h2><p>制御可能な合成音楽から始め、音響乱数化、ラベル付き音楽、自己教師学習、実機録音へ進む。曲・作曲者・進行パターン単位でsplitし、同一曲の移調版やテンポ変更版をtrain/testへ跨がせない。</p>
+<h2>UNO Q</h2><p>長期理解はPC教師モデルから始める。音響encoderはお手本聴取時に実行し、演奏中は圧縮済み音楽メモリと小型controllerを100 Hzで実行するマルチレート構成も比較する。成立後に蒸留・量子化を行う。</p>
+<h2>完了条件</h2><ul><li>8小節入力後、音声なしで拍・音程・休符・和声を保持</li><li>未知曲・音色・移調・テンポ変更で長期Gate通過</li><li>単純コピーでないアドリブ生成</li><li>理想WAVと物理演奏WAVの両方を公開</li><li>再現Headを壊さずImprovisation Headを追加</li><li>全learned、個別接続、hybridを比較</li></ul>
+<p>完全な原文: <a href="improvisation-extension-plan.md">improvisation-extension-plan.md</a></p></main></body></html>
