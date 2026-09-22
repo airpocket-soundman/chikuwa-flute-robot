@@ -1,16 +1,17 @@
 {
   "format": "yamabiko-beat-audio-v1",
-  "checkpoint": "runs/yamabiko_tempo_beat_v3.pt",
+  "checkpoint": "runs/yamabiko_tempo_beat_v4_phase.pt",
   "seed": 15551,
   "official_path": "predicted_upstream",
   "audio_kind": "tempo_after is diagnostic click track, not physical performance",
   "tempo_beat": {
-    "tempo_relative_error_median": 0.06029070168733597,
-    "tempo_relative_error_p90": 0.15141591429710388,
-    "phase_circular_mae_cycle": 0.0540626086294651,
-    "phase_confidence_mean": 0.9972657561302185,
-    "half_double_confusion_rate": 0.02083333395421505,
-    "pass": false,
+    "tempo_relative_error_median": 0.008117146790027618,
+    "tempo_relative_error_p90": 0.03545817732810974,
+    "tempo_head_relative_error_median": 0.04481380805373192,
+    "phase_circular_mae_cycle": 0.03991597145795822,
+    "phase_confidence_mean": 0.9994564652442932,
+    "half_double_confusion_rate": 0.0,
+    "pass": true,
     "seed": 14449,
     "split": "frozen-heldout-bpm",
     "heldout_bpms": [
@@ -24,19 +25,19 @@
     "official_path": "predicted_upstream"
   },
   "demo_metrics": {
-    "tempo_relative_error_median": 0.04035249184336895,
-    "tempo_relative_error_p90": 0.104405498399745,
-    "phase_circular_mae_cycle": 0.035645595751702785,
-    "pass": false
+    "tempo_relative_error_median": 0.015897153723348368,
+    "tempo_relative_error_p90": 0.03789368340310032,
+    "phase_circular_mae_cycle": 0.028512934455648065,
+    "pass": true
   },
   "musical_memory_trained": false,
   "cases": [
     {
       "case": "bpm_73",
       "true_bpm": 73.0,
-      "predicted_bpm": 81.89823150634766,
-      "tempo_relative_error": 0.12189358227873502,
-      "phase_circular_mae_cycle": 0.03988690301775932,
+      "predicted_bpm": 74.28233337402344,
+      "tempo_relative_error": 0.017566210603060788,
+      "phase_circular_mae_cycle": 0.03287244215607643,
       "detected_beats": 8,
       "tempo_before": "audio/bpm_73_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_73_tempo_after_clicks.wav"
@@ -44,9 +45,9 @@
     {
       "case": "bpm_97",
       "true_bpm": 97.0,
-      "predicted_bpm": 96.96185302734375,
-      "tempo_relative_error": 0.0003932677593427835,
-      "phase_circular_mae_cycle": 0.04824646934866905,
+      "predicted_bpm": 95.75585174560547,
+      "tempo_relative_error": 0.012826270663861147,
+      "phase_circular_mae_cycle": 0.030049510300159454,
       "detected_beats": 8,
       "tempo_before": "audio/bpm_97_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_97_tempo_after_clicks.wav"
@@ -54,9 +55,9 @@
     {
       "case": "bpm_137",
       "true_bpm": 137.0,
-      "predicted_bpm": 128.28680419921875,
-      "tempo_relative_error": 0.06359996934876824,
-      "phase_circular_mae_cycle": 0.021639127284288406,
+      "predicted_bpm": 135.05075073242188,
+      "tempo_relative_error": 0.014228096843635948,
+      "phase_circular_mae_cycle": 0.012584828771650791,
       "detected_beats": 8,
       "tempo_before": "audio/bpm_137_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_137_tempo_after_clicks.wav"
@@ -64,10 +65,10 @@
     {
       "case": "bpm_173",
       "true_bpm": 173.0,
-      "predicted_bpm": 170.04083251953125,
-      "tempo_relative_error": 0.017105014337969654,
-      "phase_circular_mae_cycle": 0.03280988335609436,
-      "detected_beats": 8,
+      "predicted_bpm": 164.937255859375,
+      "tempo_relative_error": 0.04660545746026012,
+      "phase_circular_mae_cycle": 0.03854495659470558,
+      "detected_beats": 9,
       "tempo_before": "audio/bpm_173_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_173_tempo_after_clicks.wav"
     }

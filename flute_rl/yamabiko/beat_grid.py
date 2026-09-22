@@ -56,6 +56,25 @@ class TempoBeatNet(nn.Module):
         c = self.config
         return torch.log(bpm / c.bpm_center) / c.bpm_log_scale
 
+    @staticmethod
+    def phase_bpm(phase_outputs: torch.Tensor, valid_mask: torch.Tensor, gap: int = 10) -> torch.Tensor:
+        """Derive tempo from the NN's continuous phase trajectory.
+
+        This is clock arithmetic over a learned representation, not an audio
+        pitch/onset algorithm.  A median rejects local phase glitches.
+        """
+        p0, p1 = phase_outputs[:, :-gap, :2], phase_outputs[:, gap:, :2]
+        dot = (p0 * p1).sum(-1)
+        cross = p1[..., 0] * p0[..., 1] - p1[..., 1] * p0[..., 0]
+        angle = torch.remainder(torch.atan2(cross, dot), 2 * torch.pi)
+        pair = valid_mask[:, :-gap] & valid_mask[:, gap:]
+        values = []
+        for row in range(len(angle)):
+            good = angle[row][pair[row]]
+            values.append(torch.median(good) if good.numel() else torch.zeros((), device=angle.device))
+        radians = torch.stack(values)
+        return (radians / (2 * torch.pi) * 60.0 / (gap / 100.0)).clamp(40.0, 240.0)
+
 
 class MusicalMemoryNet(nn.Module):
     """Decode continuous-pitch/rest cells from beat-aligned reference memory."""

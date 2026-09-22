@@ -110,6 +110,37 @@ footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padd
 <div class="grid">{''.join(cards)}</div>
 <h2>評価を厳格化した理由</h2><p>旧一体モデルはMAE {old['mae']:.1f} cent、軌跡相関 {old['corr']:.3f} で実際には逆方向へ追従した。一方、旧方向指標だけは {old['direction']:.1f} だった。{old['explanation']}。新評価は発音できない目標区間へ1200 cent罰を与え、P90、発音率、休符漏れ、遷移ゲイン、整定誤差をケース別に残す。</p>
 <h2>学習の分離と再統合</h2><p>前段が合格したら凍結して次段を学習する。FFは名目rig・自己音なしから開始し、同じ参照でもrigごとに異なるOracle操作を回帰する不可能問題を避けた。次に閉ループDAggerでFeedback Residualを学習し、最後に未知rigと複数takeのRig Adapterを追加する。最終配備時は各NNを一つのforward graphとcheckpointへ束ねられるため、分離評価とE2E推論は両立する。</p>
+<h2>今後の実装計画</h2>
+<div class="grid">
+  <section class="card">
+    <div class="stage"><b>M</b><span>PLAN</span></div>
+    <h2>交換可能な個別NNと統合E2E</h2>
+    <p class="flow">modular learned / joint E2E / deterministic hybrid</p>
+    <p>Ear、Tempo/Beat、Musical Memory、Aligner、Planner、Motor State、Controller、Comparator、Feedbackに共通Tensor契約を定義する。開発時は個別checkpointと中間評価を維持し、配備時は単一のComposite graphへ統合する。</p>
+    <ul>
+      <li>個別NN接続: 合格済みブロックを凍結して接続</li>
+      <li>joint E2E: 補助損失を残して全体を低学習率で微調整</li>
+      <li>hybrid: 任意ブロックを固定BPM、物理Planner、dead reckoning、PID等へ交換</li>
+      <li>oracle input / predicted upstream / closed loopの3段階評価</li>
+      <li>同一曲のWAV、精度、P99レイテンシ、モデルサイズを比較</li>
+    </ul>
+    <p><a href="modular-hybrid-model-plan.html">HTML詳細計画</a> / <a href="modular-hybrid-model-plan.md">Markdown原文</a></p>
+  </section>
+  <section class="card">
+    <div class="stage"><b>A</b><span>PLAN</span></div>
+    <h2>8小節文脈・コード理解・アドリブ</h2>
+    <p class="flow">waveform + multi-resolution STFT → long musical memory → improvisation</p>
+    <p>生波形と時間×周波数のSTFTを統合し、拍同期トークンへ圧縮する。8小節を16分音符単位なら約128セルとして保持し、和声を一点断定せず候補分布と潜在表現で扱う。</p>
+    <ul>
+      <li>masked bar reconstructionと次4小節予測で長期文脈を学習</li>
+      <li>Imitation HeadとImprovisation Headが共通Memoryを利用</li>
+      <li>continuation、variation、call-and-response、soloを分離評価</li>
+      <li>Playability NNで音域、到達時間、発音余裕、危険率を評価</li>
+      <li>理想生成WAVと物理シミュレータ演奏WAVを別々に公開</li>
+    </ul>
+    <p><a href="improvisation-extension-plan.html">HTML詳細計画</a> / <a href="improvisation-extension-plan.md">Markdown原文</a></p>
+  </section>
+</div>
 <h2>不採用試行の音</h2><p>改善しなかった学習も消さず、同じ固定課題のWAVと指標を残す。</p><div class="grid">{''.join(attempts) if attempts else '<p>まだ記録なし</p>'}</div>
 <h2>全ケース詳細</h2>{''.join(details)}
 <footer>seed {data['seed']} / checkpoint {html.escape(data['checkpoint'])}<br>{html.escape(data['sonification_note'])}</footer>

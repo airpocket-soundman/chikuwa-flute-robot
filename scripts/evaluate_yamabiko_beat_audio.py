@@ -48,7 +48,8 @@ def main():
         wave = room(wave, SAMPLE_RATE, rng); frames = frame_audio_numpy(wave, len(example.target))
         features = ear.audio_features(torch.from_numpy(frames).to(args.device))[None]
         lengths = torch.tensor([len(example.target)], device=args.device)
-        bpm_log, beat_out, encoded, mask = tempo(features, lengths); predicted_bpm = float(tempo.bpm(bpm_log)[0])
+        bpm_log, beat_out, encoded, mask = tempo(features, lengths)
+        predicted_bpm = float(tempo.phase_bpm(beat_out, mask)[0])
         phase_xy = beat_out[0, :, :2].cpu().numpy(); confidence = torch.sigmoid(beat_out[0, :, 2]).cpu().numpy()
         clicks, wraps = click_track(phase_xy, confidence, len(example.target))
         name = f"bpm_{int(bpm)}"; before = audio / f"{name}_tempo_before_reference.wav"; after = audio / f"{name}_tempo_after_clicks.wav"

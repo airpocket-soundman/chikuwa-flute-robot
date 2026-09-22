@@ -63,16 +63,19 @@ def circular_error(pred_xy, true_xy):
 
 @torch.inference_mode()
 def evaluate(model, samples, device):
-    bpm_errors, phase_errors, confidences = [], [], []
+    bpm_errors, head_errors, phase_errors, confidences = [], [], [], []
     for start in range(0, len(samples), 16):
         features, lengths, bpm, phase, valid = collate(samples, range(start, min(start + 16, len(samples))), device)
-        bpm_log, out, _, _ = model(features, lengths); predicted_bpm = model.bpm(bpm_log)
+        bpm_log, out, _, mask = model(features, lengths)
+        predicted_bpm = model.phase_bpm(out, valid & mask)
         bpm_errors.append(((predicted_bpm - bpm).abs() / bpm).cpu())
+        head_errors.append(((model.bpm(bpm_log) - bpm).abs() / bpm).cpu())
         phase_errors.append(circular_error(out[..., :2][valid], phase[valid]).abs().cpu())
         confidences.append(torch.sigmoid(out[..., 2][valid]).cpu())
     bpm_error, phase_error = torch.cat(bpm_errors), torch.cat(phase_errors)
     return {"tempo_relative_error_median": float(torch.median(bpm_error)),
             "tempo_relative_error_p90": float(torch.quantile(bpm_error, .9)),
+            "tempo_head_relative_error_median": float(torch.median(torch.cat(head_errors))),
             "phase_circular_mae_cycle": float(torch.cat(phase_errors).mean()),
             "phase_confidence_mean": float(torch.cat(confidences).mean()),
             "half_double_confusion_rate": float(((bpm_error > .35) & (bpm_error < 1.1)).float().mean())}
