@@ -1,6 +1,6 @@
 {
   "format": "yamabiko-beat-audio-v1",
-  "checkpoint": "runs/yamabiko_musical_memory_timbre_v2.pt",
+  "checkpoint": "runs/yamabiko_timeline_timbre_v2_final.pt",
   "seed": 15551,
   "official_path": "predicted_upstream",
   "audio_kind": "tempo_after is diagnostic click track, not physical performance",
@@ -30,28 +30,43 @@
     "phase_circular_mae_cycle": 0.032905126456171274,
     "pass": true
   },
-  "musical_memory_trained": true,
-  "musical_memory": {
-    "pitch_mae_cents": 81.15629577636719,
-    "pitch_p90_cents": 199.9368133544922,
-    "trajectory_correlation": 0.8629833435065369,
-    "voice_f1": 0.9566473988439307,
-    "onset_f1": 0.9102025219717234,
-    "offset_f1": 0.88113413304253,
-    "slope_mae_cents_per_cell": 29.97978401184082,
-    "ear_grid_upper_bound_mae_cents": 51.582740783691406,
-    "ear_grid_upper_bound_correlation": 0.8650925110686875,
-    "pass": false,
-    "seed": 16673,
-    "split": "frozen-unknown-bpm",
-    "official_path": "predicted_upstream"
-  },
+  "musical_memory_trained": false,
+  "musical_memory": null,
   "temporal_aligner_trained": false,
   "temporal_aligner": null,
   "timing_profile_trained": false,
   "timing_profile": null,
-  "timeline_memory_trained": false,
-  "timeline_memory": null,
+  "timeline_memory_trained": true,
+  "timeline_memory": {
+    "pitch_mae_cents": 57.50166702270508,
+    "trajectory_correlation": 0.9000954035535202,
+    "voice_f1": 0.9999544024467468,
+    "rest_false_positive_rate": 0.0,
+    "onset_f1_30ms": 0.8711306561463894,
+    "offset_f1_30ms": 1.0,
+    "by_source": {
+      "bird": {
+        "pitch_mae_cents": 31.62619972229004,
+        "trajectory_correlation": 0.9788778907181074
+      },
+      "hum": {
+        "pitch_mae_cents": 92.83706665039062,
+        "trajectory_correlation": 0.7336935877954529
+      },
+      "recorder": {
+        "pitch_mae_cents": 74.4786376953125,
+        "trajectory_correlation": 0.8508380029265709
+      },
+      "whistle": {
+        "pitch_mae_cents": 35.069091796875,
+        "trajectory_correlation": 0.9862670611097014
+      }
+    },
+    "pass": true,
+    "seed": 1191817,
+    "split": "frozen-final-timbre-v2-timeline",
+    "official_path": "stored_timeline_only"
+  },
   "temporal_connected": null,
   "cases": [
     {
@@ -63,8 +78,8 @@
       "detected_beats": 8,
       "tempo_before": "audio/bpm_73_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_73_tempo_after_clicks.wav",
-      "memory_before": "audio/bpm_73_tempo_before_reference.wav",
-      "memory_after": "audio/bpm_73_memory_after_recall.wav"
+      "timeline_before": "audio/bpm_73_tempo_before_reference.wav",
+      "timeline_after": "audio/bpm_73_timeline_memory_recall.wav"
     },
     {
       "case": "bpm_97",
@@ -75,8 +90,8 @@
       "detected_beats": 8,
       "tempo_before": "audio/bpm_97_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_97_tempo_after_clicks.wav",
-      "memory_before": "audio/bpm_97_tempo_before_reference.wav",
-      "memory_after": "audio/bpm_97_memory_after_recall.wav"
+      "timeline_before": "audio/bpm_97_tempo_before_reference.wav",
+      "timeline_after": "audio/bpm_97_timeline_memory_recall.wav"
     },
     {
       "case": "bpm_137",
@@ -87,8 +102,8 @@
       "detected_beats": 8,
       "tempo_before": "audio/bpm_137_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_137_tempo_after_clicks.wav",
-      "memory_before": "audio/bpm_137_tempo_before_reference.wav",
-      "memory_after": "audio/bpm_137_memory_after_recall.wav"
+      "timeline_before": "audio/bpm_137_tempo_before_reference.wav",
+      "timeline_after": "audio/bpm_137_timeline_memory_recall.wav"
     },
     {
       "case": "bpm_173",
@@ -99,8 +114,8 @@
       "detected_beats": 9,
       "tempo_before": "audio/bpm_173_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_173_tempo_after_clicks.wav",
-      "memory_before": "audio/bpm_173_tempo_before_reference.wav",
-      "memory_after": "audio/bpm_173_memory_after_recall.wav"
+      "timeline_before": "audio/bpm_173_tempo_before_reference.wav",
+      "timeline_after": "audio/bpm_173_timeline_memory_recall.wav"
     }
   ]
 }
