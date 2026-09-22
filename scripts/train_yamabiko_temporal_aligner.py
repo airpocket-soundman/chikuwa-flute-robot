@@ -145,8 +145,11 @@ def main():
         loss_voice = F.binary_cross_entropy_with_logits(pred[..., 1][mask], target[..., 1][mask])
         rests = mask & ~target[..., 1].bool()
         loss_rest = F.binary_cross_entropy_with_logits(pred[..., 1][rests], target[..., 1][rests])
-        loss_on = F.binary_cross_entropy_with_logits(pred[..., 2][mask], target[..., 2][mask], pos_weight=torch.tensor(10., device=args.device))
-        loss_off = F.binary_cross_entropy_with_logits(pred[..., 3][mask], target[..., 3][mask], pos_weight=torch.tensor(10., device=args.device))
+        # Dense event hills provide a usable gradient while the Gate still
+        # scores the decoded peak against the exact event within +/-30 ms.
+        event_target = F.max_pool1d(target[..., 2:4].transpose(1, 2), 5, stride=1, padding=2).transpose(1, 2)
+        loss_on = F.binary_cross_entropy_with_logits(pred[..., 2][mask], event_target[..., 0][mask], pos_weight=torch.tensor(5., device=args.device))
+        loss_off = F.binary_cross_entropy_with_logits(pred[..., 3][mask], event_target[..., 1][mask], pos_weight=torch.tensor(5., device=args.device))
         loss = 2 * loss_clock + .6 * loss_done + loss_pitch + .5 * loss_voice + .25 * loss_rest + .3 * (loss_on + loss_off)
         optimizer.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(trained_parameters, 1); optimizer.step()
         if step == 1 or step % 100 == 0:
