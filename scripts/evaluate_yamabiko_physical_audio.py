@@ -5,6 +5,7 @@ import argparse
 import json
 import pathlib
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -16,7 +17,8 @@ from export_targets import write_wav  # noqa: E402
 from flute_rl.audio import synth_self  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
 from flute_rl.yamabiko.staged_nn import AcousticFeedbackResidual, MotorAudioWorldModel, MotorTrajectoryController  # noqa: E402
-from train_yamabiko_physical_control import make_excitation, rollout  # noqa: E402
+from train_yamabiko_physical_control import (ARTICULATION_FRAMES, PLAYBACK_TEMPO_SCALE,
+                                              evaluate, make_excitation, rollout)  # noqa: E402
 
 
 def plot_results(out, plan, base, first, adapted):
@@ -59,8 +61,12 @@ def main():
     world = MotorAudioWorldModel().to(args.device); world.load_state_dict(checkpoint["world_model"]); world.eval()
     controller = MotorTrajectoryController().to(args.device); controller.load_state_dict(checkpoint["controller"]); controller.eval()
     feedback = AcousticFeedbackResidual(limit=cfg.feedback_limit).to(args.device); feedback.load_state_dict(checkpoint["feedback"]); feedback.eval()
-    values = np.r_[np.full(40, .25), np.full(55, .25), np.full(55, .62), np.full(55, .82), np.full(55, .38)].astype(np.float32)
-    voice_np = np.r_[np.zeros(40), np.ones(220)].astype(np.float32)
+    lead, note = 80, 110
+    values = np.r_[np.full(lead, .25), np.full(note, .25), np.full(note, .62),
+                   np.full(note, .82), np.full(note, .38)].astype(np.float32)
+    voice_np = np.r_[np.zeros(lead), np.ones(4 * note)].astype(np.float32)
+    for boundary in (lead, lead + note, lead + 2 * note, lead + 3 * note):
+        voice_np[boundary:boundary + ARTICULATION_FRAMES] = 0.0
     plan = torch.from_numpy(values[None]).to(args.device); voice = torch.from_numpy(voice_np[None]).to(args.device)
     params = plant.parameters(1, args.device, spread=1.0, generator=torch.Generator(device=args.device).manual_seed(90210))
     base = rollout(controller, feedback, plant, plan, voice, params, False)
@@ -89,7 +95,16 @@ def main():
         cents, _ = plant.flute(physical, torch.ones(64, device=args.device), nominal)
         predictions.append(pred); targets.append((cents - cfg.low_cents) / cfg.pitch_span_cents)
     world_mae = float((torch.stack(predictions, 1) - torch.stack(targets, 1)).abs().mean() * cfg.pitch_span_cents)
-    metrics = json.loads(pathlib.Path(args.report).read_text(encoding="utf-8"))
+    metrics = evaluate(controller, feedback, plant, 129431,
+                       SimpleNamespace(eval_batch=48, eval_steps=520, device=args.device,
+                                       practice_repetitions=3))
+    metrics.update({"seed": 129431, "split": "frozen-randomized-deterministic-physical-slow-tempo-v2",
+                    "training": checkpoint.get("metrics", {}).get("training", "adaptive physical control"),
+                    "playback_tempo_scale": PLAYBACK_TEMPO_SCALE,
+                    "articulation_gap_ms": ARTICULATION_FRAMES * 10,
+                    "position_planner_is_feedforward": True,
+                    "simulator_deterministic_with_fixed_parameters": True,
+                    "network_received_simulator_internal_state": False, "real_rig_validated": False})
     metrics.update({"motor_physics_pass": True, "linear_flute_pass": True,
                     "motor_audio_world_model": {"pass": world_mae <= 50, "audio_mae_cents": world_mae}})
     attempts = []

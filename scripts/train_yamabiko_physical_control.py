@@ -23,6 +23,9 @@ from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalP
 from flute_rl.yamabiko.staged_nn import (AcousticFeedbackResidual, MotorAudioWorldModel,
                                          MotorTrajectoryController)  # noqa: E402
 
+PLAYBACK_TEMPO_SCALE = 2.0
+ARTICULATION_FRAMES = 4  # 40 ms valve-off gap at a note boundary
+
 
 def make_plans(rng: np.random.Generator, batch: int, steps: int, device):
     plan = np.zeros((batch, steps), np.float32)
@@ -30,12 +33,17 @@ def make_plans(rng: np.random.Generator, batch: int, steps: int, device):
     for row in range(batch):
         t, current, first = 0, float(rng.uniform(.12, .88)), True
         while t < steps:
-            stop = min(steps, t + int(rng.integers(24, 65)))
+            stop = min(steps, t + int(rng.integers(
+                round(24 * PLAYBACK_TEMPO_SCALE), round(65 * PLAYBACK_TEMPO_SCALE))))
             sounding = False if first else bool(rng.random() > .22)
             first = False
             if sounding:
                 current = float(np.clip(current + rng.choice([-1, 1]) * rng.uniform(.08, .32), .06, .94))
             plan[row, t:stop], voice[row, t:stop] = current, float(sounding)
+            if sounding:
+                # Move first, then reopen: pitch slides during motor travel are
+                # not rendered as an unintended glissando.
+                voice[row, t:min(stop, t + ARTICULATION_FRAMES)] = 0.0
             t = stop
     return torch.from_numpy(plan).to(device), torch.from_numpy(voice).to(device)
 

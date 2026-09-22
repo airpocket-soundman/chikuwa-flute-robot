@@ -335,7 +335,7 @@ def main():
 
     beat_cards["feedback"].append(f'''<section class="card {residual_state}"><div class="stage"><b>R</b><span class="{residual_state}">{state_label(residual_state)}</span></div>
       <h2>Adaptive Feedback NN</h2><p class="flow">目標音程 − 自己音 + PWM/音程変化履歴 → PWM補正</p>
-      <p>Position PlannerのフィードフォワードPWMを置き換えず、自己音のずれだけを小さな補正として加える。</p>
+        <p>Position PlannerのフィードフォワードPWMを置き換えず、自己音のずれだけを小さな補正として加える。再生テンポは機構速度に合わせて0.5倍、音符境界では40 msだけバルブを閉じる。</p>
       <dl><div><dt>closed-loop pitch MAE</dt><dd>{n(metric_value(feedback_metrics, 'closed_pitch_mae_cents', 'feedback_pitch_mae_cents'), 1)} cent</dd></div>
       <div><dt>improvement</dt><dd>{pct(metric_value(feedback_metrics, 'improvement_fraction', 'feedback_improvement_fraction'), 1)} %</dd></div>
       <div><dt>non-worse rigs</dt><dd>{pct(metric_value(feedback_metrics, 'nonworse_rig_fraction', 'feedback_nonworse_rig_fraction'), 1)} %</dd></div></dl>

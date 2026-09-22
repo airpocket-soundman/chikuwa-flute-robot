@@ -28,11 +28,11 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
           <ol class="system-flow flow-row nodes-1"><li class="flow-node pass"><a href="#process-2"><span>PASS</span><b>Timeline Memory</b><small>MAE 57.5 cent</small><em>工程の結果を見る ↓</em></a></li></ol></section>
         <div class="phase-connector pass"><span>↓</span><b>同一フレーム再評価 — 持ち込み 59.2 ｜ Planner追加 10.5 ｜ 出口 61.5 cent（各MAEは非加算）</b></div>
         <section class="flow-phase"><header><span>3</span><div><b>身体で演奏する</b><small>Position Plannerがフィードフォワード目標を作り、PWM履歴の潜在表現でモータを制御する</small></div><strong class="fail">Physical FAIL</strong></header>
-          <ol class="system-flow flow-row nodes-4"><li class="flow-node pass"><a href="#process-3"><span>PASS</span><b>Position Planner = Feedforward</b><small>音程Timeline → 先読み位置 / 出口 61.5 cent</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow fail" aria-hidden="true"><i>→</i><small>位置目標</small></li><li class="flow-node fail"><a href="#process-3"><span>FAIL</span><b>Motor Controller</b><small>位置MAE 13.75% stroke</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow pass" aria-hidden="true"><i>→</i><small>PWM・valve</small></li><li class="flow-node pass"><a href="#process-3"><span>PASS</span><b>Motor Physics</b><small>torque rise・摩擦・慣性 → 実変位</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow pass" aria-hidden="true"><i>→</i><small>実変位</small></li><li class="flow-node pass"><a href="#process-3"><span>PASS</span><b>Linear Flute</b><small>実変位 → 音程 / valve → 発音</small><em>工程の結果を見る ↓</em></a></li></ol>
+          <ol class="system-flow flow-row nodes-4"><li class="flow-node pass"><a href="#process-3"><span>PASS</span><b>Position Planner = Feedforward</b><small>音程Timeline → 先読み位置 / 出口 61.5 cent</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow fail" aria-hidden="true"><i>→</i><small>位置目標</small></li><li class="flow-node fail"><a href="#process-3"><span>FAIL</span><b>Motor Controller</b><small>位置MAE 14.98% stroke</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow pass" aria-hidden="true"><i>→</i><small>PWM・valve</small></li><li class="flow-node pass"><a href="#process-3"><span>PASS</span><b>Motor Physics</b><small>torque rise・摩擦・慣性 → 実変位</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow pass" aria-hidden="true"><i>→</i><small>実変位</small></li><li class="flow-node pass"><a href="#process-3"><span>PASS</span><b>Linear Flute</b><small>実変位 → 音程 / valve → 発音</small><em>工程の結果を見る ↓</em></a></li></ol>
           <ol class="system-flow flow-row nodes-2"><li class="flow-node pass"><a href="#process-3"><span>PASS</span><b>Motor Audio World Model</b><small>PWM履歴 → 次の可聴音程</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow pass" aria-hidden="true"><i>→</i><small>学習時だけ制御器へ勾配</small></li><li class="flow-node fail"><a href="#process-3"><span>FAIL</span><b>Motor Controller</b><small>Planner目標 + 潜在履歴 → PWM</small><em>工程の結果を見る ↓</em></a></li></ol></section>
         <div class="phase-connector fail"><span>↓</span><b>シミュレータ自己音と目標の差を閉ループ補正へ渡す</b></div>
         <section class="flow-phase"><header><span>4</span><div><b>自分の音を聴いて直す</b><small>目標との差を測り、Position Plannerの出力へPWM補正を足す</small></div><strong class="fail">Correction FAIL</strong></header>
-          <ol class="system-flow flow-row nodes-2"><li class="flow-node fail"><a href="#process-4"><span>FAIL</span><b>Error Comparator</b><small>error MAE 70.5 cent</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow fail" aria-hidden="true"><i>→</i><small>符号付き音程差</small></li><li class="flow-node fail"><a href="#process-4"><span>FAIL</span><b>Feedback Residual</b><small>閉ループMAE 120.1 cent</small><em>工程の結果を見る ↓</em></a></li></ol></section>
+          <ol class="system-flow flow-row nodes-2"><li class="flow-node fail"><a href="#process-4"><span>FAIL</span><b>Error Comparator</b><small>error MAE 70.5 cent</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow fail" aria-hidden="true"><i>→</i><small>符号付き音程差</small></li><li class="flow-node fail"><a href="#process-4"><span>FAIL</span><b>Feedback Residual</b><small>閉ループMAE 111.8 cent</small><em>工程の結果を見る ↓</em></a></li></ol></section>
       </div>
       <div class="feedback-return"><b>↩ Feedback loop</b><span>Feedback ResidualはPWMだけを補正。音楽的フィードフォワードはPosition Plannerが担当する。</span></div>
       <p class="flow-caveat">Motor PhysicsとLinear Fluteは決定論的な訓練環境。NNは内部の位置・速度・トルク・物理定数を受け取らず、World ModelはPWMと可聴音程の関係だけを学ぶ。ここで示す結果は内部シミュレーションであり、実機検証は 未実施。</p></section>
@@ -40,7 +40,7 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
 <section class="pipeline-lab" aria-labelledby="pipeline-tabs-title"><h2 id="pipeline-tabs-title">パイプライン別の結果と試行記録</h2>
     <p>採用予定と代替案を混在させず、同じパイプラインのフロー・結果・WAV・グラフ・失敗試行を一つのタブへまとめた。</p>
     <div class="tab-list" role="tablist" aria-label="パイプライン別結果">
-      <button type="button" role="tab" id="tab-current" aria-controls="pipeline-current" aria-selected="true">採用予定 Timeline＋Physical <small>10物理試行 / 実機未検証</small></button>
+      <button type="button" role="tab" id="tab-current" aria-controls="pipeline-current" aria-selected="true">採用予定 Timeline＋Physical <small>11物理試行 / 実機未検証</small></button>
       <button type="button" role="tab" id="tab-clock" aria-controls="pipeline-clock" aria-selected="false" tabindex="-1">代替A Beat-cell＋Clock <small>26試行 / 接続FAIL</small></button>
       <button type="button" role="tab" id="tab-timing" aria-controls="pipeline-timing" aria-selected="false" tabindex="-1">代替B Duration／Timing <small>10試行 / 全体FAIL</small></button>
       <button type="button" role="tab" id="tab-legacy" aria-controls="pipeline-legacy" aria-selected="false" tabindex="-1">旧 Staged制御 <small>3系統 / 全体FAIL</small></button>
@@ -92,8 +92,8 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
         <div><dt>real rig</dt><dd>未検証</dd></div></dl></section><section class="card fail"><div class="stage"><b>C</b><span class="fail">FAIL</span></div>
         <h2>Motor Controller NN</h2><p class="flow">Position Planner目標 + 過去PWMの潜在履歴 → PWM・valve</p>
         <p>Position Plannerが先読みした位置目標を追跡する低レベル制御器。音楽的なフィードフォワードを別に重複実装しない。</p>
-        <dl><div><dt>position MAE</dt><dd>13.754 % stroke</dd></div>
-        <div><dt>feedforward pitch MAE</dt><dd>149.1 cent</dd></div></dl></section><section class="card pass"><div class="stage"><b>P</b><span class="pass">PASS</span></div>
+        <dl><div><dt>position MAE</dt><dd>14.982 % stroke</dd></div>
+        <div><dt>feedforward pitch MAE</dt><dd>179.4 cent</dd></div></dl></section><section class="card pass"><div class="stage"><b>P</b><span class="pass">PASS</span></div>
         <h2>Motor Physics Simulator</h2><p class="flow">PWM → torque rise・摩擦・慣性 → 実変位</p>
         <p>学習対象NNではなく、遅れ・オーバーシュート・摩擦を再現する訓練環境。乱数化した物理条件で制御器を評価する。</p></section><section class="card pass"><div class="stage"><b>F</b><span class="pass">PASS</span></div>
         <h2>Linear Flute Simulator</h2><p class="flow">実変位 → 線形音程 / valve → 発音ON・OFF</p>
@@ -109,10 +109,10 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
           <dl><div><dt>error mae</dt><dd>70.526</dd></div><div><dt>sign accuracy</dt><dd>0.991</dd></div></dl><p class="note">beforeは意図的に外した自己音、afterは推定誤差を足し戻した診断用再合成。物理演奏ではない。</p>
         </section><section class="card fail"><div class="stage"><b>R</b><span class="fail">FAIL</span></div>
       <h2>Adaptive Feedback NN</h2><p class="flow">目標音程 − 自己音 + PWM/音程変化履歴 → PWM補正</p>
-      <p>Position PlannerのフィードフォワードPWMを置き換えず、自己音のずれだけを小さな補正として加える。</p>
-      <dl><div><dt>closed-loop pitch MAE</dt><dd>120.1 cent</dd></div>
-      <div><dt>improvement</dt><dd>46.7 %</dd></div>
-      <div><dt>non-worse rigs</dt><dd>89.6 %</dd></div></dl>
+        <p>Position PlannerのフィードフォワードPWMを置き換えず、自己音のずれだけを小さな補正として加える。再生テンポは機構速度に合わせて0.5倍、音符境界では40 msだけバルブを閉じる。</p>
+      <dl><div><dt>closed-loop pitch MAE</dt><dd>111.8 cent</dd></div>
+      <div><dt>improvement</dt><dd>60.6 %</dd></div>
+      <div><dt>non-worse rigs</dt><dd>88.5 %</dd></div></dl>
       <p class="note">評価は乱数化シミュレータ。実機適応と反復練習はまだ検証していない。</p></section></div></section><h2>知覚・記憶・Positionの試行履歴</h2><p class="history-count">20試行 — PASS 8 / FAIL 12</p><details open><summary>Tempo / Beat — PASS 2 / FAIL 4</summary><div class="attempt-grid"><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
         <h3>yamabiko_tempo_beat_timbre_v2</h3><p>採用候補または合格checkpoint</p><p class="metrics">tempo relative error median 0.011 / tempo relative error p90 0.068 / tempo head relative error median 0.074 / phase circular mae cycle 0.057 / phase confidence mean 0.998 / half double confusion rate 0.000</p>
         <p class="note">split: frozen-heldout-bpm / seed: 14449</p><div class="listen"><div class="audio"><span>before</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>after</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/audio/bpm_137_tempo_after_clicks.wav"></audio></div></div><figure class="pitch-plot"><img loading="lazy" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/plots/bpm_137_tempo_pitch.svg" alt="横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）"><figcaption>横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）</figcaption></figure></article><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
@@ -154,7 +154,7 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
         <p class="note">split: frozen-unknown-bpm / seed: 123611</p></article><article class="attempt"><div class="stage"><b>試</b><span class="fail">FAIL</span></div>
         <h3>yamabiko_timeline_position_v3</h3><p>同一フレーム分解でPlanner自身の実入力変換誤差が大きくFAIL</p><p class="metrics">position mae percent stroke 0.590 / position p95 percent stroke 1.399 / steady pitch mae cents 11.531 / connected position mae percent stroke 7.947 / connected steady pitch mae cents 164.611 / inherited pitch mae cents 59.240</p>
         <p class="note">split: frozen-unknown-bpm / seed: 123611</p><div class="listen"><div class="audio"><span>before</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_timeline_position_v3/audio/bpm_73_timeline_memory_recall.wav"></audio></div><div class="audio"><span>after</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_timeline_position_v3/audio/bpm_73_position_planner.wav"></audio></div></div><figure class="pitch-plot"><img loading="lazy" src="e2e-beat-attempts/yamabiko_timeline_position_v3/plots/bpm_73_position_pitch.svg" alt="横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: before / 橙: after"><figcaption>横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: before / 橙: after</figcaption></figure></article></div></details>
-      <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p><p class="history-count">10試行 — PASS 0 / FAIL 10</p>
+      <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p><p class="history-count">11試行 — PASS 0 / FAIL 11</p>
     <div class="attempt-grid raw-e2e-grid"><article class="attempt"><div class="stage"><b>PHY</b><span class="fail">FAIL</span></div>
         <h3>yamabiko_physical_adaptive_v1</h3><p>public-audio-teacher-then-black-box-policy-gradient</p>
         <p class="metrics">motor position mae percent stroke 25.331 / motor position p95 percent stroke 62.270 / feedforward pitch mae cents 305.762 / randomized base pitch mae cents 288.564 / feedback pitch mae cents 169.665 / feedback first play pitch mae cents 165.549 / practice adaptation improvement fraction -0.025</p>
@@ -182,6 +182,9 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
         <p class="note">シミュレーション評価。実機検証ではない。</p></article><article class="attempt"><div class="stage"><b>PHY</b><span class="fail">FAIL</span></div>
         <h3>yamabiko_physical_control_v7</h3><p>frozen-randomized-physical-v1</p>
         <p class="metrics">motor position mae percent stroke 11.141 / motor position p95 percent stroke 35.100 / feedforward pitch mae cents 114.219 / randomized base pitch mae cents 158.886 / feedback pitch mae cents 108.926 / feedback improvement fraction 0.314 / feedback nonworse rig fraction 0.792</p>
+        <p class="note">シミュレーション評価。実機検証ではない。</p></article><article class="attempt"><div class="stage"><b>PHY</b><span class="fail">FAIL</span></div>
+        <h3>yamabiko_physical_slow_v1</h3><p>learned-pwm-audio-world-model-plus-adaptive-policy-gradient</p>
+        <p class="metrics">motor position mae percent stroke 14.982 / motor position p95 percent stroke 47.562 / feedforward pitch mae cents 179.387 / randomized base pitch mae cents 283.954 / feedback pitch mae cents 111.796 / feedback first play pitch mae cents 119.487 / practice adaptation improvement fraction 0.064</p>
         <p class="note">シミュレーション評価。実機検証ではない。</p></article><article class="attempt"><div class="stage"><b>PHY</b><span class="fail">FAIL</span></div>
         <h3>yamabiko_physical_world_v2_base_eval</h3><p>learned-pwm-audio-world-model-plus-adaptive-policy-gradient</p>
         <p class="metrics">motor position mae percent stroke 13.754 / motor position p95 percent stroke 44.139 / feedforward pitch mae cents 149.149 / randomized base pitch mae cents 225.462 / feedback pitch mae cents 211.458 / feedback first play pitch mae cents 212.447 / practice adaptation improvement fraction 0.005</p>
