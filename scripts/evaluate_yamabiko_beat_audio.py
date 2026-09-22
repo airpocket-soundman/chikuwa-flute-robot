@@ -15,7 +15,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from export_targets import write_wav  # noqa: E402
 from flute_rl.audio import room, synth_self, synth_source  # noqa: E402
 from flute_rl.targets import make_beat_target  # noqa: E402
-from flute_rl.yamabiko.beat_grid import BeatGridConfig, MusicalMemoryNet, TempoBeatNet  # noqa: E402
+from flute_rl.yamabiko.beat_grid import (BeatAlignedMusicalMemoryNet, BeatGridConfig,
+                                         MusicalMemoryNet, TempoBeatNet)  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from flute_rl.yamabiko.e2e_io import HOP, SAMPLE_RATE, frame_audio_numpy  # noqa: E402
 
@@ -39,7 +40,10 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); ck = torch.load(args.model, map_location=args.device)
     cfg = BeatGridConfig(**ck["config"]); tempo = TempoBeatNet(cfg).to(args.device); tempo.load_state_dict(ck["tempo_beat"]); tempo.eval()
-    memory = MusicalMemoryNet(cfg).to(args.device); memory.load_state_dict(ck["musical_memory"]); memory.eval()
+    kind = ck.get("musical_memory_kind")
+    memory = (BeatAlignedMusicalMemoryNet(cfg, pitch_skip=kind == "beat-aligned-v2")
+              if kind in ("beat-aligned-v1", "beat-aligned-v2") else MusicalMemoryNet(cfg)).to(args.device)
+    memory.load_state_dict(ck["musical_memory"]); memory.eval()
     ear = E2EImitator.from_checkpoint(torch.load(ck["ear_checkpoint"], map_location=args.device), args.device).eval()
     out = pathlib.Path(args.out); audio = out / "audio"; audio.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed); cases = []; tempo_errors = []; phase_errors = []

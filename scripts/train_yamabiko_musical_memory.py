@@ -13,7 +13,7 @@ from torch.nn import functional as F
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from flute_rl.yamabiko.beat_grid import BeatGridConfig, MusicalMemoryNet, TempoBeatNet  # noqa: E402
+from flute_rl.yamabiko.beat_grid import BeatAlignedMusicalMemoryNet, BeatGridConfig, TempoBeatNet  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from train_yamabiko_tempo_beat import collate, dataset  # noqa: E402
 
@@ -82,8 +82,10 @@ def main():
     ap.add_argument("--seed", type=int, default=16673); ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); rng = np.random.default_rng(args.seed); torch.manual_seed(args.seed)
     ck = torch.load(args.init, map_location=args.device); config = BeatGridConfig(**ck["config"])
-    tempo, memory = TempoBeatNet(config).to(args.device), MusicalMemoryNet(config).to(args.device)
-    tempo.load_state_dict(ck["tempo_beat"]); memory.load_state_dict(ck["musical_memory"]); tempo.eval()
+    tempo, memory = TempoBeatNet(config).to(args.device), BeatAlignedMusicalMemoryNet(config).to(args.device)
+    tempo.load_state_dict(ck["tempo_beat"])
+    if ck.get("musical_memory_kind") == "beat-aligned-v2": memory.load_state_dict(ck["musical_memory"])
+    tempo.eval()
     ear = E2EImitator.from_checkpoint(torch.load(ck["ear_checkpoint"], map_location=args.device), args.device).eval()
     for module in (ear, tempo):
         for p in module.parameters(): p.requires_grad_(False)
@@ -108,7 +110,8 @@ def main():
     metrics["pass"] = (metrics["pitch_mae_cents"] <= 50 and metrics["trajectory_correlation"] >= .95 and
                        metrics["voice_f1"] >= .95 and metrics["onset_f1"] >= .9 and metrics["offset_f1"] >= .9)
     metrics.update({"seed": args.seed, "split": "frozen-unknown-bpm", "official_path": "predicted_upstream"})
-    ck["musical_memory"] = memory.state_dict(); ck["musical_memory_trained"] = True; ck["musical_memory_metrics"] = metrics
+    ck["musical_memory"] = memory.state_dict(); ck["musical_memory_kind"] = "beat-aligned-v2"
+    ck["musical_memory_trained"] = True; ck["musical_memory_metrics"] = metrics
     torch.save(ck, args.out); pathlib.Path(args.report).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"saved {args.out}")
 

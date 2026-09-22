@@ -116,6 +116,53 @@ class MusicalMemoryNet(nn.Module):
         return self.decoder(torch.cat([q, attended], -1)), attention
 
 
+class BeatAlignedMusicalMemoryNet(nn.Module):
+    """Soft-resample neural audio memory onto the NN-predicted beat grid."""
+
+    def __init__(self, config: BeatGridConfig, pitch_skip: bool = True):
+        super().__init__(); self.config = config; self.pitch_skip = pitch_skip
+        source_dim = config.input_dim + 2 * config.beat_hidden + 3
+        self.source = nn.Sequential(nn.Linear(source_dim, config.memory_hidden), nn.SiLU(),
+                                    nn.Linear(config.memory_hidden, config.memory_hidden))
+        self.cells = nn.GRU(config.memory_hidden, config.memory_hidden, batch_first=True, bidirectional=True)
+        self.decoder = nn.Sequential(nn.Linear(2 * config.memory_hidden, config.memory_hidden), nn.SiLU(),
+                                     nn.Linear(config.memory_hidden, MusicalMemoryNet.OUTPUTS))
+
+    def forward(self, audio_features: torch.Tensor, beat_encoded: torch.Tensor,
+                beat_outputs: torch.Tensor, frame_mask: torch.Tensor, cells: int,
+                cell_lengths: torch.Tensor | None = None):
+        source = self.source(torch.cat([audio_features, beat_encoded, beat_outputs], -1))
+        xy = beat_outputs[..., :2]
+        dot = (xy[:, 1:] * xy[:, :-1]).sum(-1)
+        cross = xy[:, 1:, 0] * xy[:, :-1, 1] - xy[:, 1:, 1] * xy[:, :-1, 0]
+        delta = torch.remainder(torch.atan2(cross, dot), 2 * torch.pi) / (2 * torch.pi)
+        # Reject negative/noisy near-full-cycle jumps; at 100 Hz a physical
+        # beat advances far less than half a cycle per frame.
+        delta = torch.where(delta < .5, delta, torch.zeros_like(delta))
+        confidence = torch.sigmoid(beat_outputs[..., 2])
+        valid_delta = frame_mask[:, 1:] & frame_mask[:, :-1] & (confidence[:, 1:] >= .5) & (confidence[:, :-1] >= .5)
+        delta = delta * valid_delta
+        beat_position = torch.cat([torch.zeros(len(source), 1, device=source.device), torch.cumsum(delta, 1)], 1)
+        cell_position = beat_position * self.config.subdivision
+        centers = torch.arange(cells, device=source.device, dtype=source.dtype)[None, :, None] + .5
+        distance = cell_position[:, None, :] - centers
+        weights = torch.exp(-.5 * (distance / .55) ** 2) * (frame_mask & (confidence >= .5))[:, None]
+        if cell_lengths is not None:
+            cell_mask = torch.arange(cells, device=source.device)[None] < cell_lengths[:, None]
+            weights = weights * cell_mask[..., None]
+        weights = weights / weights.sum(-1, keepdim=True).clamp_min(1e-6)
+        pooled = torch.einsum("bct,btd->bcd", weights, source)
+        contextual, _ = self.cells(pooled)
+        decoded = self.decoder(contextual)
+        # Preserve the calibrated Neural Ear pitch through the metrical
+        # bottleneck.  The decoder learns only a bounded contextual residual;
+        # it cannot replace cell alignment with an unrelated shortcut.
+        if self.pitch_skip:
+            pooled_ear_pitch = torch.einsum("bct,bt->bc", weights, audio_features[..., -2])
+            decoded = torch.cat([pooled_ear_pitch[..., None] + .1 * decoded[..., :1], decoded[..., 1:]], -1)
+        return decoded, weights
+
+
 def checkpoint(config: BeatGridConfig, tempo: TempoBeatNet, memory: MusicalMemoryNet, **metadata):
     return {"format": "yamabiko-beat-grid-v1", "config": asdict(config),
             "tempo_beat": tempo.state_dict(), "musical_memory": memory.state_dict(), **metadata}
