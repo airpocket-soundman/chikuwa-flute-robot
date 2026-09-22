@@ -37,11 +37,11 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
             <p class="note">これはOracle拍セルでの単独Gate。100 Hz tick以外の正解時刻は推論入力に与えていない。afterは診断再合成で、物理演奏ではない。</p></section><section class="card"><div class="stage"><b>E</b><span>FAIL</span></div>
                 <h2>Connected audio → 100 Hz Gate</h2><p class="flow">raw audio → Ear → Beat → Memory → Clock → Aligner</p>
                 <div class="listen"><div class="audio"><span>生のお手本</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>全段後の再現</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_aligner_after_100hz.wav"></audio></div></div>
-                <dl><div><dt>pitch MAE cents</dt><dd>128.4</dd></div>
-                <div><dt>correlation</dt><dd>0.736</dd></div>
-                <div><dt>voice F1</dt><dd>0.892</dd></div>
-                <div><dt>rest false positive</dt><dd>0.179</dd></div>
-                <div><dt>onset F1 30 ms</dt><dd>0.569</dd></div></dl>
+                <dl><div><dt>pitch MAE cents</dt><dd>74.4</dd></div>
+                <div><dt>correlation</dt><dd>0.916</dd></div>
+                <div><dt>voice F1</dt><dd>0.884</dd></div>
+                <div><dt>rest false positive</dt><dd>0.095</dd></div>
+                <div><dt>onset F1 30 ms</dt><dd>0.629</dd></div></dl>
                 <p class="note">正解BPM・正解セル・正解時刻を使わない frozen predicted-upstream 最終試験。単独PASSでも接続誤差が累積するため、現在はFAIL。</p></section></div>
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained=false / pass=false（feedback residual training is the next gated stage）。</div>
 <div class="pipeline"><span>raw reference</span><i>→</i><span>Neural Ear</span><i>→</i><span>Reference Memory</span><i>→</i><span>FF Policy</span><i>→</i><span>plant + self audio</span><i>→</i><span>Error Comparator</span><i>→</i><span>Feedback Residual</span></div>

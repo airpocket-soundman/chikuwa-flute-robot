@@ -1,6 +1,6 @@
 {
   "format": "yamabiko-beat-audio-v1",
-  "checkpoint": "runs/yamabiko_temporal_duration_connected.pt",
+  "checkpoint": "runs/yamabiko_temporal_connected_tuned_dev.pt",
   "seed": 15551,
   "official_path": "predicted_upstream",
   "audio_kind": "tempo_after is diagnostic click track, not physical performance",
@@ -66,18 +66,18 @@
     "official_path": "oracle_memory"
   },
   "temporal_connected": {
-    "clock_pointer_mae_cells": 0.318279504776001,
+    "clock_pointer_mae_cells": 0.3843650221824646,
     "clock_backward_jumps": 0,
-    "clock_eos_mae_ms": 35.729166666666664,
-    "pitch_mae_cents": 128.36256408691406,
-    "trajectory_correlation": 0.7360614748282726,
-    "voice_f1": 0.8923311829566956,
-    "rest_false_positive_rate": 0.17889711260795593,
-    "onset_f1_30ms": 0.568608938400949,
-    "offset_f1_30ms": 0.6573842643542941,
+    "clock_eos_mae_ms": 41.875,
+    "pitch_mae_cents": 74.37360382080078,
+    "trajectory_correlation": 0.9156196250453525,
+    "voice_f1": 0.8839994668960571,
+    "rest_false_positive_rate": 0.09471331536769867,
+    "onset_f1_30ms": 0.62884747177032,
+    "offset_f1_30ms": 0.6266336085648951,
     "pass": false,
-    "seed": 1038431,
-    "split": "frozen-final-predicted-upstream",
+    "seed": 30473,
+    "split": "development-predicted-upstream",
     "official_path": "raw_audio_to_100hz_target"
   },
   "cases": [

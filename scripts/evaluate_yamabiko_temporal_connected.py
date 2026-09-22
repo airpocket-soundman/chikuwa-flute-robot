@@ -29,6 +29,7 @@ def main():
     ap.add_argument("--out", default="runs/yamabiko_temporal_connected_report.json")
     ap.add_argument("--checkpoint-out", default="runs/yamabiko_temporal_connected.pt")
     ap.add_argument("--seed", type=int, default=938431); ap.add_argument("--songs", type=int, default=96)
+    ap.add_argument("--split", default="frozen-final-predicted-upstream")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); ck = torch.load(args.model, map_location=args.device); cfg = BeatGridConfig(**ck["config"])
     tempo = TempoBeatNet(cfg).to(args.device); tempo.load_state_dict(ck["tempo_beat"]); tempo.eval()
@@ -83,7 +84,7 @@ def main():
                        metrics["pitch_mae_cents"] <= 75 and metrics["trajectory_correlation"] >= .88 and
                        metrics["voice_f1"] >= .93 and metrics["rest_false_positive_rate"] <= .08 and
                        metrics["onset_f1_30ms"] >= .80)
-    metrics.update({"seed": args.seed, "split": "frozen-final-predicted-upstream", "official_path": "raw_audio_to_100hz_target"})
+    metrics.update({"seed": args.seed, "split": args.split, "official_path": "raw_audio_to_100hz_target"})
     ck["temporal_connected_metrics"] = metrics
     torch.save(ck, args.checkpoint_out); pathlib.Path(args.out).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"saved {args.checkpoint_out}")
