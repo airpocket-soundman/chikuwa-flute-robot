@@ -118,6 +118,7 @@ def main():
     ap.add_argument("--out", default="runs/yamabiko_temporal_aligner.pt")
     ap.add_argument("--report", default="runs/yamabiko_temporal_aligner_report.json")
     ap.add_argument("--steps", type=int, default=1200); ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--freeze-clock", action="store_true")
     ap.add_argument("--seed", type=int, default=18431)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); rng = np.random.default_rng(args.seed); torch.manual_seed(args.seed)
@@ -125,7 +126,10 @@ def main():
     clock = NeuralPerformanceClock(config).to(args.device); aligner = NeuralTemporalAligner(config).to(args.device)
     if ck.get("temporal_aligner_trained"):
         clock.load_state_dict(ck["performance_clock"]); aligner.load_state_dict(ck["temporal_aligner"])
-    optimizer = torch.optim.AdamW(list(clock.parameters()) + list(aligner.parameters()), lr=8e-4, weight_decay=1e-6)
+    if args.freeze_clock:
+        for parameter in clock.parameters(): parameter.requires_grad_(False)
+    trained_parameters = list(aligner.parameters()) if args.freeze_clock else list(clock.parameters()) + list(aligner.parameters())
+    optimizer = torch.optim.AdamW(trained_parameters, lr=8e-4, weight_decay=1e-6)
     for step in range(1, args.steps + 1):
         items = [make_beat_target(rng, beats=int(rng.integers(6, 13))) for _ in range(args.batch)]
         grid, lengths = grid_tensor(items, args.device); frames = max(len(x.target) for x in items) + 100
@@ -144,7 +148,7 @@ def main():
         loss_on = F.binary_cross_entropy_with_logits(pred[..., 2][mask], target[..., 2][mask], pos_weight=torch.tensor(10., device=args.device))
         loss_off = F.binary_cross_entropy_with_logits(pred[..., 3][mask], target[..., 3][mask], pos_weight=torch.tensor(10., device=args.device))
         loss = 2 * loss_clock + .6 * loss_done + loss_pitch + .5 * loss_voice + .25 * loss_rest + .3 * (loss_on + loss_off)
-        optimizer.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(list(clock.parameters()) + list(aligner.parameters()), 1); optimizer.step()
+        optimizer.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(trained_parameters, 1); optimizer.step()
         if step == 1 or step % 100 == 0:
             print(f"step {step:4d} loss {float(loss):.5f} clock {float(loss_clock):.5f} pitch {float(loss_pitch):.5f}", flush=True)
     valid_rng = np.random.default_rng(args.seed + 100_000)
