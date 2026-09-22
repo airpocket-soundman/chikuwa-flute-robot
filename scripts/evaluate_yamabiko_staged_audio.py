@@ -69,6 +69,40 @@ def write_pitch_plot(path, target, predicted_pitch, predicted_voice):
     fig.savefig(path, format="svg", facecolor=fig.get_facecolor(), metadata={"Date": None}); plt.close(fig)
 
 
+def write_comparator_plot(path, target, self_pitch, corrected_pitch, true_error, predicted_error, valid):
+    """Show what the comparator hears and the signed correction it predicts."""
+    import matplotlib
+    matplotlib.use("Agg")
+    matplotlib.rcParams["svg.hashsalt"] = "yamabiko-comparator-v1"
+    import matplotlib.pyplot as plt
+
+    target = np.asarray(target, dtype=float); valid = np.asarray(valid, dtype=bool)
+    self_pitch = np.asarray(self_pitch, dtype=float); corrected_pitch = np.asarray(corrected_pitch, dtype=float)
+    self_pitch[~np.isfinite(target)] = np.nan; corrected_pitch[~np.isfinite(target)] = np.nan
+    truth = np.where(valid, np.asarray(true_error, dtype=float), np.nan)
+    predicted = np.where(valid, np.asarray(predicted_error, dtype=float), np.nan)
+    time = np.arange(len(target)) / 100.0
+    fig, (pitch_ax, error_ax) = plt.subplots(2, 1, figsize=(8.4, 5.2), sharex=True,
+                                             facecolor="#0b1620", gridspec_kw={"height_ratios": [1.25, 1]})
+    for ax in (pitch_ax, error_ax):
+        ax.set_facecolor("#0b1620"); ax.grid(color="#274052", alpha=.65, linewidth=.6)
+        ax.tick_params(colors="#c6d5de"); ax.yaxis.label.set_color("#c6d5de")
+        for spine in ax.spines.values(): spine.set_color("#365164")
+    pitch_ax.plot(time, target, color="#5ee9ff", lw=1.8, label="Target pitch")
+    pitch_ax.plot(time, self_pitch, color="#95a6b0", lw=1.2, label="Self pitch input")
+    pitch_ax.plot(time, corrected_pitch, color="#ffb45e", lw=1.5, label="After predicted correction")
+    pitch_ax.set_ylim(400, 2100); pitch_ax.set_ylabel("Pitch [cent]")
+    error_ax.axhline(0, color="#526675", lw=.8)
+    error_ax.plot(time, truth, color="#5ee9ff", lw=1.8, label="Required correction")
+    error_ax.plot(time, predicted, color="#ffb45e", lw=1.5, label="Comparator output")
+    error_ax.set_ylabel("Correction [cent]"); error_ax.set_xlabel("Time [s]"); error_ax.xaxis.label.set_color("#c6d5de")
+    error_ax.set_xlim(0, len(target) / 100.0)
+    for ax in (pitch_ax, error_ax):
+        ax.legend(loc="upper right", facecolor="#101d29", edgecolor="#365164", labelcolor="#e9f5f9")
+    fig.tight_layout(); path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, format="svg", facecolor=fig.get_facecolor(), metadata={"Date": None}); plt.close(fig)
+
+
 def load_stages(path, device):
     ck = torch.load(path, map_location=device)
     if ck.get("format") != "yamabiko-staged-nn-v1": raise ValueError("not a staged checkpoint")
@@ -214,12 +248,20 @@ def main():
         observed_cents = np.r_[0.0, own_cents[:-1]]
         true_error = torch.from_numpy(((np.nan_to_num(target) - observed_cents) / SCALE).astype(np.float32)).to(args.device)
         e = (error[valid] - true_error[valid]).abs().cpu().numpy() * SCALE
+        comparator_plot = plot_dir / f"{name}_comparator_error.svg"
+        write_comparator_plot(comparator_plot, target,
+                              own_ear[:, 0].cpu().numpy() * SCALE + CENTER,
+                              corrected.cpu().numpy() * SCALE + CENTER,
+                              true_error.cpu().numpy() * SCALE,
+                              error.cpu().numpy() * SCALE,
+                              valid.cpu().numpy())
         reports["comparator"].append({"case": name, "error_mae_cents": float(np.mean(e)),
                                       "error_p90_cents": float(np.quantile(e, .9)),
                                       "error_sign_accuracy": float((torch.sign(error[valid]) ==
                                                                     torch.sign(true_error[valid])).float().mean())})
         files.append({"case": name, **{k: str(v.relative_to(out)).replace("\\", "/") for k, v in paths.items()},
                       "ear_plot": str(ear_plot.relative_to(out)).replace("\\", "/"),
+                      "comparator_plot": str(comparator_plot.relative_to(out)).replace("\\", "/"),
                       "comparator_before": str(comp_before.relative_to(out)).replace("\\", "/"),
                       "comparator_after": str(comp_after.relative_to(out)).replace("\\", "/")})
 

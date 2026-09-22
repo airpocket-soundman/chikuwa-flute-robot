@@ -209,12 +209,22 @@ def main():
             metric_lines.append(f'<div><dt>{html.escape(key.replace("_", " "))}</dt><dd>{n(value, 3)}</dd></div>')
         bucket = "perception" if number == "1" else ("memory" if number == "2" else ("planning" if number == "3" else "feedback"))
         legacy_class = " legacy" if number in ("2", "3") else ""
-        stage_plot = figure(representative.get("ear_plot"),
-                            "横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: お手本 / 橙: Neural Ear出力",
-                            "e2e-results/") if number == "1" else ""
+        if number == "1":
+            stage_plot = figure(representative.get("ear_plot"),
+                                "横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: お手本 / 橙: Neural Ear出力",
+                                "e2e-results/")
+        elif number == "4":
+            stage_plot = figure(representative.get("comparator_plot"),
+                                "上段: 目標・自己音・補正後音程。下段: 必要な補正量とComparator予測 [cent]",
+                                "e2e-results/")
+        else:
+            stage_plot = ""
+        stage_explanation = ('''<div class="model-explainer"><h3>このモデルは何をしている？</h3>
+          <p>記憶した目標音程と、Neural Earが聴いた現在の自己音を比べ、「何cent上げる／下げるべきか」を出力する。正なら音程を上げ、負なら下げる指示になる。</p>
+          <p>ここでは誤差を測るだけで、モータは直接動かさない。この出力を次段のFeedback Residualが操作量の補正へ変換する。</p></div>''' if number == "4" else "")
         card_html = f'''<section class="card{legacy_class}">
           <div class="stage"><b>{number}</b><span class="{status.lower()}">{status}</span></div>
-          <h2>{title}</h2><p class="flow">{flow}</p>
+          <h2>{title}</h2><p class="flow">{flow}</p>{stage_explanation}
           <div class="listen">{audio(before, "NNの前")}{audio(after, "NNの後")}</div>{stage_plot}
           <dl>{''.join(metric_lines)}</dl><p class="note">{note}</p>
         </section>'''
@@ -369,6 +379,7 @@ main{{max-width:1120px;margin:auto;padding:48px 20px 80px}}h1{{font-size:clamp(2
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,310px),1fr));gap:18px}}.card{{position:relative;background:linear-gradient(145deg,#132433,#0d1822);border:1px solid var(--line);border-radius:18px;padding:22px}}
 .stage{{display:flex;justify-content:space-between;align-items:center}}.stage b{{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--cyan);color:#071016}}.stage span{{font-weight:800;color:var(--red)}}.card:has(.stage span:first-child){{border-color:var(--cyan)}}
 .listen{{display:grid;gap:10px;margin:18px 0}}.audio{{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:8px}}audio{{width:100%;height:36px}}dl{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}dl div{{background:#0a141d;padding:9px;border-radius:8px}}dt{{font-size:.72rem;color:var(--muted)}}dd{{margin:0;font-size:1.05rem}}.note{{color:var(--muted);font-size:.9rem}}
+.model-explainer{{margin:14px 0;padding:14px;border-left:3px solid var(--cyan);border-radius:0 10px 10px 0;background:#0a1721}}.model-explainer h3{{margin:0 0 5px;color:var(--cyan);font-size:1rem}}.model-explainer p{{margin:.35rem 0;color:#d2e0e7;font-size:.92rem}}
 .pitch-plot{{margin:14px 0 18px}}.pitch-plot img{{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px;background:#0b1620}}.pitch-plot figcaption{{margin-top:7px;color:var(--muted);font-size:.78rem}}.stage span.pass{{color:#70f0ac}}.stage span.fail{{color:#ff8c78}}.stage span.partial{{color:#ffc96b}}.stage span.pending{{color:#9eb2c0}}.legacy{{border-style:dashed;opacity:.86}}.pending{{border-color:#526675}}
 .flow-overview{{margin:28px 0;padding:24px;background:#0b1620;border:1px solid var(--line);border-radius:18px}}.flow-heading{{display:flex;justify-content:space-between;gap:20px;align-items:start}}.flow-heading strong{{color:var(--red);border:1px solid var(--red);padding:8px 12px;border-radius:9px;white-space:nowrap}}.system-flow{{list-style:none;margin:18px 0;padding:0}}.flow-row{{display:grid;grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr);align-items:stretch;gap:8px}}.flow-node{{min-width:0;display:flex;flex-direction:column;border:2px solid var(--line);border-radius:12px;background:#101d29}}.flow-node>span,.flow-node>b,.flow-node>small{{margin-left:14px;margin-right:14px}}.flow-node>a{{display:flex;flex:1;flex-direction:column;gap:6px;padding:14px;color:inherit;text-decoration:none}}.flow-node>a span,.flow-node>span{{font-size:.72rem;font-weight:900}}.flow-node small{{color:var(--muted)}}.flow-node em{{margin-top:auto;padding-top:8px;color:var(--cyan);font-size:.75rem;font-style:normal}}.flow-node.pass{{border-color:#46c987}}.flow-node.pass span{{color:#70f0ac}}.flow-node.fail{{border-color:var(--red)}}.flow-node.fail span{{color:#ff8c78}}.flow-node.partial{{border-color:#d69c3b}}.flow-node.partial span{{color:#ffc96b}}.flow-node.pending,.flow-node.neutral{{border-color:#526675}}.flow-node.pending span,.flow-node.neutral span{{color:#b3c0c8}}.flow-arrow{{min-width:0;display:grid;place-items:center;align-content:center;text-align:center;color:var(--muted)}}.flow-arrow i{{font-size:1.6rem;font-style:normal}}.flow-arrow small{{font-size:.68rem}}.flow-arrow.fail,.flow-turn.fail{{color:var(--red)}}.flow-arrow.pass{{color:#70f0ac}}.flow-arrow.pending{{color:#9eb2c0}}.flow-turn{{display:flex;justify-content:center;gap:12px;align-items:center;margin:4px 0;font-size:.82rem}}.flow-turn span{{font-size:1.5rem}}.feedback-return{{display:flex;gap:12px;align-items:center;border:1px dashed #526675;border-radius:10px;padding:10px 14px;color:var(--muted)}}.feedback-return b{{color:#9eb2c0}}.flow-caveat{{color:var(--muted);font-size:.88rem}}
 .process-section{{margin:46px 0;scroll-margin-top:20px}}.process-section>header,.history-process>header{{display:flex;gap:14px;align-items:center;margin-bottom:16px}}.process-section>header>span,.history-process>header>b{{display:grid;place-items:center;flex:0 0 44px;height:44px;border-radius:12px;background:var(--cyan);color:#071016;font-size:1.15rem}}.process-section>header p,.history-process>header p{{margin:0;color:var(--muted)}}.history-process{{margin:26px 0;padding:18px;border-left:3px solid var(--line);background:#0a141d;border-radius:0 14px 14px 0}}
