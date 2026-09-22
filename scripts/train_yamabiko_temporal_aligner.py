@@ -120,6 +120,8 @@ def main():
     ap.add_argument("--steps", type=int, default=1200); ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--freeze-clock", action="store_true")
     ap.add_argument("--seed", type=int, default=18431)
+    ap.add_argument("--eval-seed", type=int, default=118431)
+    ap.add_argument("--split", default="development-oracle-grid-unknown-bpm")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); rng = np.random.default_rng(args.seed); torch.manual_seed(args.seed)
     ck = torch.load(args.init, map_location=args.device); config = BeatGridConfig(**ck["config"])
@@ -145,20 +147,21 @@ def main():
         loss_voice = F.binary_cross_entropy_with_logits(pred[..., 1][mask], target[..., 1][mask])
         rests = mask & ~target[..., 1].bool()
         loss_rest = F.binary_cross_entropy_with_logits(pred[..., 1][rests], target[..., 1][rests])
-        # Dense event hills provide a usable gradient while the Gate still
-        # scores the decoded peak against the exact event within +/-30 ms.
-        event_target = F.max_pool1d(target[..., 2:4].transpose(1, 2), 5, stride=1, padding=2).transpose(1, 2)
+        # A pointed event kernel provides nearby gradient without turning the
+        # correct attack instant into a flat, unidentifiable plateau.
+        kernel = torch.tensor([.12, .45, 1., .45, .12], device=args.device).view(1, 1, 5).repeat(2, 1, 1)
+        event_target = F.conv1d(target[..., 2:4].transpose(1, 2), kernel, padding=2, groups=2).clamp_max(1).transpose(1, 2)
         loss_on = F.binary_cross_entropy_with_logits(pred[..., 2][mask], event_target[..., 0][mask], pos_weight=torch.tensor(5., device=args.device))
         loss_off = F.binary_cross_entropy_with_logits(pred[..., 3][mask], event_target[..., 1][mask], pos_weight=torch.tensor(5., device=args.device))
         loss = 2 * loss_clock + .6 * loss_done + loss_pitch + .5 * loss_voice + .25 * loss_rest + .3 * (loss_on + loss_off)
         optimizer.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(trained_parameters, 1); optimizer.step()
         if step == 1 or step % 100 == 0:
             print(f"step {step:4d} loss {float(loss):.5f} clock {float(loss_clock):.5f} pitch {float(loss_pitch):.5f}", flush=True)
-    valid_rng = np.random.default_rng(args.seed + 100_000)
+    valid_rng = np.random.default_rng(args.eval_seed)
     valid_bpms = [71, 89, 107, 131, 149, 179]
     valid = [make_beat_target(valid_rng, bpm=float(valid_bpms[i % len(valid_bpms)]), beats=int(valid_rng.integers(6, 13))) for i in range(96)]
     metrics = evaluate(config, clock.eval(), aligner.eval(), valid, args.device)
-    metrics.update({"seed": args.seed, "split": "frozen-oracle-grid-unknown-bpm", "official_path": "oracle_memory"})
+    metrics.update({"seed": args.eval_seed, "split": args.split, "official_path": "oracle_memory"})
     ck.update({"performance_clock": clock.state_dict(), "temporal_aligner": aligner.state_dict(),
                "temporal_aligner_trained": True, "temporal_aligner_metrics": metrics})
     torch.save(ck, args.out); pathlib.Path(args.report).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
