@@ -81,13 +81,15 @@ def main():
         pair = voiced[:, 1:] & voiced[:, :-1]
         loss_trajectory = F.smooth_l1_loss((pred[:, 1:, 0] - pred[:, :-1, 0])[pair],
                                            (target[:, 1:, 0] - target[:, :-1, 0])[pair])
+        px, tx = pred[..., 0][voiced], target[..., 0][voiced]
+        loss_correlation = 1 - F.cosine_similarity(px - px.mean(), tx - tx.mean(), dim=0)
         loss_voice = F.binary_cross_entropy_with_logits(pred[..., 1][frame_mask], target[..., 1][frame_mask])
         loss_rest = F.binary_cross_entropy_with_logits(pred[..., 1][rests], target[..., 1][rests])
         kernel = torch.tensor([.12, .45, 1., .45, .12], device=args.device).view(1, 1, 5).repeat(2, 1, 1)
         events = F.conv1d(target[..., 2:4].transpose(1, 2), kernel, padding=2, groups=2).clamp_max(1).transpose(1, 2)
         loss_on = F.binary_cross_entropy_with_logits(pred[..., 2][frame_mask], events[..., 0][frame_mask], pos_weight=torch.tensor(5., device=args.device))
         loss_off = F.binary_cross_entropy_with_logits(pred[..., 3][frame_mask], events[..., 1][frame_mask], pos_weight=torch.tensor(5., device=args.device))
-        loss = 2 * loss_pitch + .5 * loss_trajectory + .7 * loss_voice + .4 * loss_rest + .3 * (loss_on + loss_off)
+        loss = 2 * loss_pitch + .5 * loss_trajectory + .5 * loss_correlation + .7 * loss_voice + .4 * loss_rest + .3 * (loss_on + loss_off)
         optimizer.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(timeline.parameters(), 1); optimizer.step()
         if step == 1 or step % 100 == 0: print(f"step {step:4d} loss {float(loss.detach()):.5f} pitch {float(loss_pitch.detach()):.5f}", flush=True)
     metrics = evaluate(tempo, timeline.eval(), valid, args.device)

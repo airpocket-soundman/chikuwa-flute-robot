@@ -361,7 +361,7 @@ class BeatTimelineRecallNet(nn.Module):
 
     def decode(self, stored_profile: torch.Tensor):
         raw = self.decoder(stored_profile)
-        pitch = stored_profile[..., -2:-1] + .03 * raw[..., :1]
+        pitch = stored_profile[..., -2:-1] + .10 * raw[..., :1]
         return torch.cat([pitch, raw[..., 1:]], -1)
 
     def forward(self, audio_features, beat_encoded, beat_outputs, lengths):

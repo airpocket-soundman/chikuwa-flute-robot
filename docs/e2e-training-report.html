@@ -43,11 +43,11 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
             <p class="note">afterは保存されたTiming Profileの拍だけを鳴らす診断click。物理演奏音ではない。</p></section><section class="card"><div class="stage"><b>L</b><span>FAIL</span></div>
             <h2>Beat-conditioned Timeline Memory</h2><p class="flow">Beat内部系列 + Ear → 保存100 Hz profile → 再現</p>
             <div class="listen"><div class="audio"><span>生のお手本</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>保存tensorから再現</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_timeline_memory_recall.wav"></audio></div></div>
-            <dl><div><dt>pitch MAE cents</dt><dd>56.9</dd></div>
-            <div><dt>correlation</dt><dd>0.868</dd></div>
+            <dl><div><dt>pitch MAE cents</dt><dd>60.6</dd></div>
+            <div><dt>correlation</dt><dd>0.892</dd></div>
             <div><dt>voice F1</dt><dd>1.000</dd></div>
-            <div><dt>rest false positive</dt><dd>0.0001</dd></div>
-            <div><dt>onset F1 30 ms</dt><dd>0.893</dd></div></dl>
+            <div><dt>rest false positive</dt><dd>0.0006</dd></div>
+            <div><dt>onset F1 30 ms</dt><dd>0.888</dd></div></dl>
             <p class="note">remember後はraw音声とEar入力を破棄し、保存NN tensorだけでdecode。BPM/セル表現と併存するドリフトなし実行profile。</p></section></div>
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained=false / pass=false（feedback residual training is the next gated stage）。</div>
 <div class="pipeline"><span>raw reference</span><i>→</i><span>Neural Ear</span><i>→</i><span>Reference Memory</span><i>→</i><span>FF Policy</span><i>→</i><span>plant + self audio</span><i>→</i><span>Error Comparator</span><i>→</i><span>Feedback Residual</span></div>
