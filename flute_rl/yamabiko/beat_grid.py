@@ -237,6 +237,38 @@ class NeuralPerformanceClock(nn.Module):
         return pointer, done
 
 
+class DurationConditionedPerformanceClock(nn.Module):
+    """Clock variant that also remembers the observed reference duration.
+
+    BPM alone accumulates even a small tempo error across a phrase.  Reference
+    frame count is therefore stored as part of the learned performance profile;
+    it contains no pitch/event labels and remains available for repeat plays.
+    """
+
+    def __init__(self, config: BeatGridConfig):
+        super().__init__(); self.config = config; h = config.clock_hidden
+        self.initial = nn.Sequential(nn.Linear(3, h), nn.SiLU(), nn.Linear(h, h))
+        self.start = nn.Sequential(nn.Linear(3, h), nn.SiLU(), nn.Linear(h, 1))
+        self.cell = nn.GRU(4, h, batch_first=True)
+        self.delta = nn.Sequential(nn.Linear(h, h), nn.SiLU(), nn.Linear(h, 1))
+        self.done = nn.Sequential(nn.Linear(h + 2, h), nn.SiLU(), nn.Linear(h, 1))
+
+    def forward(self, normalized_bpm: torch.Tensor, cell_lengths: torch.Tensor,
+                reference_steps: torch.Tensor, steps: int):
+        meta = torch.stack([normalized_bpm, cell_lengths.to(normalized_bpm.dtype) / 48.0,
+                            reference_steps.to(normalized_bpm.dtype) / 1000.0], -1)
+        state = self.initial(meta); pointer0 = -torch.nn.functional.softplus(self.start(meta)[:, 0])
+        reset = torch.zeros(len(meta), steps, 1, device=meta.device, dtype=meta.dtype); reset[:, 0] = 1
+        states, _ = self.cell(torch.cat([meta[:, None].expand(-1, steps, -1), reset], -1), state[None])
+        delta = torch.nn.functional.softplus(self.delta(states)[..., 0]) * .12
+        travelled = torch.cat([torch.zeros(len(meta), 1, device=meta.device, dtype=meta.dtype),
+                               torch.cumsum(delta[:, :-1], 1)], 1)
+        pointer = pointer0[:, None] + travelled
+        done = self.done(torch.cat([states, (pointer / cell_lengths[:, None].clamp_min(1)).unsqueeze(-1),
+                                    delta.unsqueeze(-1)], -1))[..., 0]
+        return pointer, done
+
+
 class NeuralTemporalAligner(nn.Module):
     """Render remembered beat cells onto 100 Hz using a neural clock pointer."""
 

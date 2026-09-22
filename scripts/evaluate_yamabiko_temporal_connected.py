@@ -13,7 +13,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from flute_rl.yamabiko.beat_grid import (BeatAlignedMusicalMemoryNet, BeatGridConfig,
-                                         NeuralPerformanceClock, NeuralTemporalAligner,
+                                         DurationConditionedPerformanceClock, NeuralPerformanceClock, NeuralTemporalAligner,
                                          TempoBeatNet)  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from train_yamabiko_tempo_beat import collate, dataset  # noqa: E402
@@ -36,7 +36,9 @@ def main():
                                          alignment_sigma=.14, pitch_residual_scale=.03,
                                          wrap_clock=True).to(args.device)
     memory.load_state_dict(ck["musical_memory"]); memory.eval()
-    clock = NeuralPerformanceClock(cfg).to(args.device); clock.load_state_dict(ck["performance_clock"]); clock.eval()
+    duration_clock = ck.get("performance_clock_kind") == "duration-conditioned"
+    clock = (DurationConditionedPerformanceClock(cfg) if duration_clock else NeuralPerformanceClock(cfg)).to(args.device)
+    clock.load_state_dict(ck["performance_clock"]); clock.eval()
     aligner = NeuralTemporalAligner(cfg).to(args.device); aligner.load_state_dict(ck["temporal_aligner"]); aligner.eval()
     ear = E2EImitator.from_checkpoint(torch.load(ck["ear_checkpoint"], map_location=args.device), args.device).eval()
     bpms = [67, 83, 101, 127, 151, 181]
@@ -52,7 +54,8 @@ def main():
         cells = int(np.clip(round((int(lengths[0]) - start) / 100 * float(bpm[0]) / 60 * cfg.subdivision), 1, 64))
         grid, _ = memory(features, encoded, beat_out, mask, cells)
         cell_lengths = torch.tensor([cells], device=args.device); steps = len(sample.beat.target) + 100
-        pointer, done_logit = clock(tempo.normalized_bpm(bpm), cell_lengths, steps)
+        if duration_clock: pointer, done_logit = clock(tempo.normalized_bpm(bpm), cell_lengths, lengths, steps)
+        else: pointer, done_logit = clock(tempo.normalized_bpm(bpm), cell_lengths, steps)
         pred, _ = aligner(grid, cell_lengths, pointer)
         target, frame_mask, true_pointer, _ = frame_targets([sample.beat], steps, args.device)
         voiced = frame_mask & target[..., 1].bool(); rests = frame_mask & ~target[..., 1].bool()

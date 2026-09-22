@@ -16,7 +16,7 @@ from export_targets import write_wav  # noqa: E402
 from flute_rl.audio import room, synth_self, synth_source  # noqa: E402
 from flute_rl.targets import make_beat_target  # noqa: E402
 from flute_rl.yamabiko.beat_grid import (BeatAlignedMusicalMemoryNet, BeatGridConfig,
-                                         MusicalMemoryNet, NeuralPerformanceClock,
+                                         DurationConditionedPerformanceClock, MusicalMemoryNet, NeuralPerformanceClock,
                                          NeuralTemporalAligner, TempoBeatNet)  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from flute_rl.yamabiko.e2e_io import HOP, SAMPLE_RATE, frame_audio_numpy  # noqa: E402
@@ -53,7 +53,9 @@ def main():
     memory.load_state_dict(ck["musical_memory"]); memory.eval()
     clock = aligner = None
     if ck.get("temporal_aligner_trained"):
-        clock = NeuralPerformanceClock(cfg).to(args.device); clock.load_state_dict(ck["performance_clock"]); clock.eval()
+        clock = (DurationConditionedPerformanceClock(cfg) if ck.get("performance_clock_kind") == "duration-conditioned"
+                 else NeuralPerformanceClock(cfg)).to(args.device)
+        clock.load_state_dict(ck["performance_clock"]); clock.eval()
         aligner = NeuralTemporalAligner(cfg).to(args.device); aligner.load_state_dict(ck["temporal_aligner"]); aligner.eval()
     ear = E2EImitator.from_checkpoint(torch.load(ck["ear_checkpoint"], map_location=args.device), args.device).eval()
     out = pathlib.Path(args.out); audio = out / "audio"; audio.mkdir(parents=True, exist_ok=True)
@@ -92,7 +94,10 @@ def main():
             if clock is not None:
                 cell_lengths = torch.tensor([cells], device=args.device)
                 normalized_bpm = tempo.normalized_bpm(torch.tensor([predicted_bpm], device=args.device))
-                pointer, _ = clock(normalized_bpm, cell_lengths, len(example.target))
+                if ck.get("performance_clock_kind") == "duration-conditioned":
+                    pointer, _ = clock(normalized_bpm, cell_lengths, lengths, len(example.target))
+                else:
+                    pointer, _ = clock(normalized_bpm, cell_lengths, len(example.target))
                 aligned, _ = aligner(decoded, cell_lengths, pointer)
                 aligned_pitch = aligned[0, :, 0].cpu().numpy() * 600 + 1300
                 aligned_voice = aligned[0, :, 1].cpu().numpy() >= 0

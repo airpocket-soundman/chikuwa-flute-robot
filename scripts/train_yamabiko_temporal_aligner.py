@@ -14,6 +14,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from flute_rl.targets import BeatTarget, make_beat_target  # noqa: E402
 from flute_rl.yamabiko.beat_grid import (BeatGridConfig, NeuralPerformanceClock,
+                                         DurationConditionedPerformanceClock,
                                          NeuralTemporalAligner, TempoBeatNet)  # noqa: E402
 
 CENTER, SCALE, RATE = 1300.0, 600.0, 100.0
@@ -77,13 +78,21 @@ def tolerant_event_f1(truth: torch.Tensor, logits: torch.Tensor, mask: torch.Ten
     return 2 * tp / max(2 * tp + fp + fn, 1)
 
 
+def run_clock(clock, normalized, lengths, items, steps, duration_conditioned=False):
+    if duration_conditioned:
+        reference_steps = torch.tensor([len(x.target) for x in items], device=normalized.device)
+        return clock(normalized, lengths, reference_steps, steps)
+    return clock(normalized, lengths, steps)
+
+
 @torch.inference_mode()
-def evaluate(config, clock, aligner, items, device):
+def evaluate(config, clock, aligner, items, device, duration_conditioned=False):
     grid, lengths = grid_tensor(items, device); steps = max(len(x.target) for x in items) + 100
     target, mask, true_pointer, done = frame_targets(items, steps, device)
     bpm = torch.tensor([x.bpm for x in items], device=device)
     normalized = torch.log(bpm / config.bpm_center) / config.bpm_log_scale
-    pointer, done_logit = clock(normalized, lengths, steps); pred, _ = aligner(grid, lengths, pointer)
+    pointer, done_logit = run_clock(clock, normalized, lengths, items, steps, duration_conditioned)
+    pred, _ = aligner(grid, lengths, pointer)
     voice = mask & target[..., 1].bool(); estimated_voice = pred[..., 1] >= 0
     pointer_error = (pointer[mask] - true_pointer[mask]).abs()
     eos_errors = []
@@ -119,26 +128,34 @@ def main():
     ap.add_argument("--report", default="runs/yamabiko_temporal_aligner_report.json")
     ap.add_argument("--steps", type=int, default=1200); ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--freeze-clock", action="store_true")
+    ap.add_argument("--freeze-aligner", action="store_true"); ap.add_argument("--duration-clock", action="store_true")
     ap.add_argument("--seed", type=int, default=18431)
+    ap.add_argument("--lr", type=float, default=8e-4)
     ap.add_argument("--eval-seed", type=int, default=118431)
     ap.add_argument("--split", default="development-oracle-grid-unknown-bpm")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); rng = np.random.default_rng(args.seed); torch.manual_seed(args.seed)
     ck = torch.load(args.init, map_location=args.device); config = BeatGridConfig(**ck["config"])
-    clock = NeuralPerformanceClock(config).to(args.device); aligner = NeuralTemporalAligner(config).to(args.device)
+    clock_cls = DurationConditionedPerformanceClock if args.duration_clock else NeuralPerformanceClock
+    clock = clock_cls(config).to(args.device); aligner = NeuralTemporalAligner(config).to(args.device)
     if ck.get("temporal_aligner_trained"):
-        clock.load_state_dict(ck["performance_clock"]); aligner.load_state_dict(ck["temporal_aligner"])
+        if (ck.get("performance_clock_kind") == "duration-conditioned") == args.duration_clock:
+            clock.load_state_dict(ck["performance_clock"])
+        aligner.load_state_dict(ck["temporal_aligner"])
     if args.freeze_clock:
         for parameter in clock.parameters(): parameter.requires_grad_(False)
-    trained_parameters = list(aligner.parameters()) if args.freeze_clock else list(clock.parameters()) + list(aligner.parameters())
-    optimizer = torch.optim.AdamW(trained_parameters, lr=8e-4, weight_decay=1e-6)
+    if args.freeze_aligner:
+        for parameter in aligner.parameters(): parameter.requires_grad_(False)
+    trained_parameters = [p for p in list(clock.parameters()) + list(aligner.parameters()) if p.requires_grad]
+    optimizer = torch.optim.AdamW(trained_parameters, lr=args.lr, weight_decay=1e-6)
     for step in range(1, args.steps + 1):
         items = [make_beat_target(rng, beats=int(rng.integers(6, 13))) for _ in range(args.batch)]
         grid, lengths = grid_tensor(items, args.device); frames = max(len(x.target) for x in items) + 100
         target, mask, true_pointer, done = frame_targets(items, frames, args.device)
         bpm = torch.tensor([x.bpm for x in items], device=args.device)
         normalized = torch.log(bpm / config.bpm_center) / config.bpm_log_scale
-        pointer, done_logit = clock(normalized, lengths, frames); pred, _ = aligner(grid, lengths, pointer)
+        pointer, done_logit = run_clock(clock, normalized, lengths, items, frames, args.duration_clock)
+        pred, _ = aligner(grid, lengths, pointer)
         voiced = mask & target[..., 1].bool()
         loss_clock = F.smooth_l1_loss(pointer[mask], true_pointer[mask])
         positives = done.sum(); negatives = done.numel() - positives
@@ -160,9 +177,10 @@ def main():
     valid_rng = np.random.default_rng(args.eval_seed)
     valid_bpms = [71, 89, 107, 131, 149, 179]
     valid = [make_beat_target(valid_rng, bpm=float(valid_bpms[i % len(valid_bpms)]), beats=int(valid_rng.integers(6, 13))) for i in range(96)]
-    metrics = evaluate(config, clock.eval(), aligner.eval(), valid, args.device)
+    metrics = evaluate(config, clock.eval(), aligner.eval(), valid, args.device, args.duration_clock)
     metrics.update({"seed": args.eval_seed, "split": args.split, "official_path": "oracle_memory"})
     ck.update({"performance_clock": clock.state_dict(), "temporal_aligner": aligner.state_dict(),
+               "performance_clock_kind": "duration-conditioned" if args.duration_clock else "bpm-only",
                "temporal_aligner_trained": True, "temporal_aligner_metrics": metrics})
     torch.save(ck, args.out); pathlib.Path(args.report).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"saved {args.out}")
