@@ -22,6 +22,11 @@ from flute_rl.yamabiko.staged_nn import (ErrorComparator, FeedForwardPolicy,
                                          StagedConfig, TargetPositionPlanner)  # noqa: E402
 from flute_rl.yamabiko.physical_plant import (DifferentiableMotorFlute,
                                               PhysicalPlantConfig)  # noqa: E402
+from flute_rl.yamabiko.beat_grid import BeatGridConfig, BeatTimelineRecallNet, TempoBeatNet  # noqa: E402
+from flute_rl.yamabiko.composite import YamabikoComposite  # noqa: E402
+from flute_rl.yamabiko.deterministic_pipeline import (DeterministicEar,
+                                                       DeterministicTimelineMemory,
+                                                       DeterministicYamabikoPipeline)  # noqa: E402
 from flute_rl.yamabiko.hw import PITCH_FRAME, SR  # noqa: E402
 from flute_rl.sim import DT  # noqa: E402
 
@@ -248,3 +253,51 @@ def test_motor_audio_world_model_exposes_only_pwm_to_pitch_relation():
     pitch, state = model.step(torch.tensor([-.5, 0., .5]), state)
     assert pitch.shape == (3,) and state.shape == (3, 8)
     assert torch.all((pitch >= 0) & (pitch <= 1))
+
+
+def test_deterministic_modules_connect_with_tempo_stretch_and_articulation():
+    samples = torch.arange(FRAME) / SAMPLE_RATE
+    frequency = 440.0 * 2 ** (1300.0 / 1200.0)
+    frame = (.25 * torch.sin(2 * torch.pi * frequency * samples)).repeat(1, 80, 1)
+    ear = DeterministicEar()(frame)
+    assert ear.shape == (1, 80, 2)
+    assert ear[..., 1].bool().all()
+    memory = DeterministicTimelineMemory()
+    stored = memory.remember(ear, torch.tensor([120.0]))
+    stored.onset[:, 20] = True
+    recalled = memory.recall(stored, tempo_scale=2, articulation_frames=4)
+    assert recalled.pitch.shape == (1, 160)
+    assert not recalled.voice[0, 40:44].any()
+    assert recalled.bpm.item() == pytest.approx(60.0)
+
+
+def test_fully_deterministic_reference_pipeline_runs_end_to_end():
+    samples = torch.arange(FRAME) / SAMPLE_RATE
+    frequency = 440.0 * 2 ** (1100.0 / 1200.0)
+    frames = (.2 * torch.sin(2 * torch.pi * frequency * samples)).repeat(1, 30, 1)
+    profile, position, result = DeterministicYamabikoPipeline()(frames)
+    assert profile.pitch.shape == position.shape == (1, 60)
+    assert result["pwm"].shape == result["pitch_cents"].shape == (1, 60)
+    assert torch.isfinite(result["pitch_cents"]).all()
+
+
+def test_neural_composite_connects_every_stage_without_true_plant_state_input():
+    ear = tiny_model()
+    beat_config = BeatGridConfig(input_dim=ear.config.audio_dim + 2, beat_hidden=8,
+                                 memory_hidden=8, clock_hidden=8, aligner_hidden=8)
+    composite = YamabikoComposite(
+        ear, TempoBeatNet(beat_config), BeatTimelineRecallNet(beat_config, direct_pitch=True),
+        TargetPositionPlanner(), MotorTrajectoryController(hidden=8),
+        ErrorComparator(StagedConfig(comparator_hidden=8)),
+        AcousticFeedbackResidual(hidden=8), tempo_scale=2, articulation_frames=4)
+    reference = torch.randn(1, 20, FRAME) * .02
+    profile, performances = composite(reference, torch.tensor([20]), repetitions=2)
+    assert profile.target.shape == (1, 40, 2)
+    assert profile.position.shape == (1, 40)
+    assert profile.playback_bpm.shape == (1,)
+    assert len(performances) == 2
+    assert performances[0]["pwm"].shape == (1, 40)
+    assert performances[1]["slow_context"].shape == (1, 8)
+    restored = YamabikoComposite.from_checkpoint(composite.checkpoint())
+    restored_profile = restored.listen(reference, torch.tensor([20]))
+    torch.testing.assert_close(restored_profile.position, profile.position)

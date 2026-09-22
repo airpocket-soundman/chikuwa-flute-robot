@@ -304,10 +304,12 @@ class AcousticFeedbackResidual(nn.Module):
              heard_valid: torch.Tensor, target_voice: torch.Tensor, base_pwm: torch.Tensor,
              previous_pwm: torch.Tensor, previous_error: torch.Tensor, state: torch.Tensor,
              target_future: torch.Tensor | None = None,
-             previous_heard: torch.Tensor | None = None):
+             previous_heard: torch.Tensor | None = None,
+             external_error: torch.Tensor | None = None):
         target_future = target_pitch if target_future is None else target_future
         previous_heard = heard_pitch if previous_heard is None else previous_heard
-        error = torch.where(heard_valid, target_pitch - heard_pitch, torch.zeros_like(target_pitch))
+        measured_error = target_pitch - heard_pitch if external_error is None else external_error
+        error = torch.where(heard_valid, measured_error, torch.zeros_like(target_pitch))
         pitch_velocity = torch.where(heard_valid, heard_pitch - previous_heard,
                                      torch.zeros_like(heard_pitch))
         features = torch.stack([target_pitch, target_future, target_future - target_pitch,

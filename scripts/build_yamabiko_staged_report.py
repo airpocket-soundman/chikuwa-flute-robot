@@ -69,6 +69,8 @@ def main():
     ap.add_argument("--manifest", default="docs/e2e-results/manifest.json")
     ap.add_argument("--physical-manifest", default="docs/e2e-physical-results/manifest.json",
                     help="Optional motor/flute/feedback evaluation manifest")
+    ap.add_argument("--composite-manifest", default="docs/e2e-composite-results/manifest.json",
+                    help="Optional fully connected neural/deterministic evaluation manifest")
     ap.add_argument("--out", default="docs/e2e-training-report.html")
     args = ap.parse_args(); data = json.loads(pathlib.Path(args.manifest).read_text(encoding="utf-8"))
     s, examples, feedback = data["summary"], data["audio"], data["feedback"]
@@ -88,6 +90,16 @@ def main():
             physical_prefix = physical_path.parent.relative_to(docs_root).as_posix().rstrip("/") + "/"
         except ValueError:
             physical_prefix = physical_path.parent.as_posix().rstrip("/") + "/"
+    composite_path = pathlib.Path(args.composite_manifest)
+    composite = json.loads(composite_path.read_text(encoding="utf-8")) if composite_path.exists() else {}
+    composite_summary = composite.get("summary", {})
+    composite_audio = composite.get("audio", {})
+    composite_prefix = ""
+    if composite_path.exists():
+        try:
+            composite_prefix = composite_path.parent.relative_to(docs_root).as_posix().rstrip("/") + "/"
+        except ValueError:
+            composite_prefix = composite_path.parent.as_posix().rstrip("/") + "/"
     history_path = docs_root / "e2e-beat-results" / "attempt-history.json"
     history = json.loads(history_path.read_text(encoding="utf-8"))["attempts"] if history_path.exists() else []
     beat_path = pathlib.Path(args.manifest).parent.parent / "e2e-beat-results" / "manifest.json"
@@ -484,6 +496,27 @@ def main():
     <div class="attempt-grid raw-e2e-grid">{''.join(physical_attempt_cards)}</div>''' if physical_attempt_rows else
                         '<p>物理制御の試行記録はまだありません。</p>')
 
+    composite_listens = "".join(doc_audio(composite_prefix + src, label) for src, label in (
+        (composite_audio.get("reference"), "元のお手本"),
+        (composite_audio.get("target"), "0.5倍速の演奏目標"),
+        (composite_audio.get("neural"), "全NN接続後"),
+        (composite_audio.get("deterministic"), "決定論的診断器"),
+    ) if src)
+    composite_status = "PASS" if composite_summary.get("pass") else "接続済み / 未合格"
+    composite_state = "pass" if composite_summary.get("pass") else "fail"
+    composite_card = f'''<section class="card {composite_state}"><div class="stage"><b>ALL</b><span class="{composite_state}">{composite_status}</span></div>
+      <h2>全工程 Connected Composite</h2>
+      <p class="flow">お手本raw音声 → 記憶 → 0.5倍速計画 → PWM → 決定論的実変位・発音 → 自己音raw波形 → 同じNeural Ear → Comparator → Feedback</p>
+      <div class="listen">{composite_listens}</div>
+      {figure(composite.get('plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — 目標・全NN接続・決定論的診断器', composite_prefix)}
+      <dl><div><dt>Timeline出口 MAE</dt><dd>{n(composite_summary.get('timeline_pitch_mae_cents'))} cent</dd></div>
+      <div><dt>全NN接続 演奏MAE</dt><dd>{n(composite_summary.get('neural_e2e_pitch_mae_cents'))} cent</dd></div>
+      <div><dt>全NN 無音欠落率</dt><dd>{pct(composite_summary.get('neural_e2e_missing_voice_fraction'))} %</dd></div>
+      <div><dt>決定論的診断器 MAE</dt><dd>{n(composite_summary.get('deterministic_e2e_pitch_mae_cents'))} cent</dd></div></dl>
+      <p class="note"><b>接続の存在は確認できたが、性能合格ではない。</b> 凍結済みの各NNを1ケースで接続した結果で、結合学習・実機検証は未実施。Position Plannerと物理plantの較正差、Comparatorの学習分布差が残る。決定論版はplantの真値を読める診断用oracleで、実機へ搭載する制御器ではない。</p>
+      <p class="note">各工程には決定論的な対応モジュール（FFT Ear、自己相関Tempo、完全Timeline Memory、線形Position、PD Motor Control、差分Comparator、PID Feedback）も実装し、NNの故障箇所を切り分けられる。</p>
+    </section>''' if composite_summary else '<p>全工程Compositeの評価記録はまだありません。</p>'
+
     pipeline_tabs = f'''<section class="pipeline-lab" aria-labelledby="pipeline-tabs-title"><h2 id="pipeline-tabs-title">パイプライン別の結果と試行記録</h2>
     <p>採用予定と代替案を混在させず、同じパイプラインのフロー・結果・WAV・グラフ・失敗試行を一つのタブへまとめた。</p>
     <div class="tab-list" role="tablist" aria-label="パイプライン別結果">
@@ -496,11 +529,11 @@ def main():
     <section class="tab-panel" role="tabpanel" id="pipeline-current" aria-labelledby="tab-current">
       <header class="pipeline-summary adopted"><div><span>採用予定</span><h2>Beat-conditioned Timeline + Physical Control</h2></div><strong>Physical simulation {state_label(performance_gate_state)} / 実機未検証</strong></header>
       <div class="pipeline-explainer"><h3>この方式は何をしている？</h3>
-        <p>お手本を「時間に沿った音程と休符の地図」として覚え、Position Plannerが先読み位置を作ります。これがフィードフォワードです。Motor Controllerは推定した身体状態で位置を追い、自己音の誤差だけをFeedback ResidualがPWMへ足します。</p>
+        <p>お手本を「時間に沿った音程と休符の地図」として覚え、Position Plannerが先読み位置を作ります。これがフィードフォワードです。Motor ControllerはPWM履歴から作る潜在状態で位置を追い、実変位から合成した自己音をNeural Earで再び聴き、Feedback ResidualがPWMへ補正を足します。</p>
         <dl><div><dt>Feedforward</dt><dd>Position Planner（別Policyは置かない）</dd></div><div><dt>関係学習</dt><dd>PWM履歴 → 可聴音程のWorld Model</dd></div><div><dt>訓練環境</dt><dd>決定論的なtorque rise・摩擦・慣性 + 線形笛</dd></div><div><dt>検証範囲</dt><dd>内部simulationのみ / 実機未検証</dd></div></dl>
       </div>
-      <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner (= Feedforward) → Motor Controller → Motor Physics → Linear Flute → Comparator → Adaptive Feedback ↩ PWM<br>学習時: PWM/audio → Motor Audio World Model → Motor Controller</p>
-      {process_results}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
+      <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner (= Feedforward) → Motor Controller → Motor Physics → Linear Flute → deterministic waveform → Neural Ear (self) → Comparator → Adaptive Feedback ↩ PWM<br>学習時: PWM/audio → Motor Audio World Model → Motor Controller</p>
+      {process_results}<h2>全工程を実際に接続した結果</h2>{composite_card}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
       <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p>{physical_history}
     </section>
     <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">
