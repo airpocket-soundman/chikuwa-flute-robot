@@ -946,6 +946,38 @@
       "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_position_v3/manifest.json"
     },
     {
+      "id": "yamabiko_timeline_position_v4",
+      "stage": "Position Planner",
+      "pass": true,
+      "split": "frozen-unknown-bpm",
+      "seed": 123611,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "position_mae_percent_stroke": 0.5634161233901978,
+        "position_p95_percent_stroke": 1.622915267944336,
+        "steady_pitch_mae_cents": 11.027009010314941,
+        "connected_position_mae_percent_stroke": 3.3140487670898438,
+        "connected_steady_pitch_mae_cents": 61.52597427368164,
+        "inherited_pitch_mae_cents": 59.23971176147461,
+        "model_added_position_mae_percent_stroke": 0.5436915755271912,
+        "model_added_pitch_mae_cents": 10.456110954284668,
+        "model_added_pitch_p95_cents": 17.991010665893555,
+        "output_total_pitch_mae_cents": 61.52597427368164,
+        "output_total_pitch_p90_cents": 94.84628295898438,
+        "inherited_pitch_bias_cents": 5.695911884307861,
+        "model_added_pitch_bias_cents": 1.4198672771453857,
+        "output_total_pitch_bias_cents": 7.11577844619751,
+        "net_absolute_change_cents": 2.2862625122070312,
+        "attribution_residual_max_cents": 0.0001220703125,
+        "oracle_input_pass": true,
+        "real_input_transform_pass": true,
+        "connected_output_pass": true,
+        "oracle_loss_weight": 0.35,
+        "predicted_upstream_loss_weight": 0.65
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_position_v4/manifest.json"
+    },
+    {
       "id": "yamabiko_timeline_timbre_v2_final",
       "stage": "Timeline Memory",
       "pass": true,

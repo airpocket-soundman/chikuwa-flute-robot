@@ -105,14 +105,20 @@ class FeedForwardPolicy(nn.Module):
 
 
 class TargetPositionPlanner(nn.Module):
-    """Neural map from remembered acoustic target to normalized actuator aim."""
+    """Neural map from remembered acoustic target to normalized actuator aim.
+
+    The second input channel is a voicing *logit* throughout the connected
+    pipeline.  Convert it to a probability inside the module so upstream
+    confidence magnitude cannot shift the requested physical position.
+    """
 
     def __init__(self, config: StagedConfig = StagedConfig()):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(2, 64), nn.SiLU(), nn.Linear(64, 64), nn.SiLU(), nn.Linear(64, 1))
 
     def forward(self, target: torch.Tensor) -> torch.Tensor:
-        return torch.sigmoid(self.net(target))
+        normalized = torch.cat([target[..., :1], torch.sigmoid(target[..., 1:2])], -1)
+        return torch.sigmoid(self.net(normalized))
 
 
 class MotorInversePolicy(nn.Module):

@@ -135,8 +135,9 @@ def main():
             inherited_mae = pm.get("inherited_pitch_mae_cents", float("nan"))
             added_mae = pm.get("model_added_pitch_mae_cents", float("nan"))
             total_mae = pm.get("output_total_pitch_mae_cents", pm.get("connected_steady_pitch_mae_cents"))
-            pst = "PASS" if transform_pass else "FAIL"
-            beat_cards["planning"].append(f'''<section class="card"><div class="stage"><b>P</b><span class="{pst.lower()}">Planner追加誤差 {pst}</span></div>
+            gate_pass = oracle_pass and transform_pass and output_pass
+            pst = "PASS" if gate_pass else "FAIL"
+            beat_cards["planning"].append(f'''<section class="card"><div class="stage"><b>P</b><span class="{pst.lower()}">Position Gate {pst}</span></div>
             <h2>Position Planner NN</h2><p class="flow">100 Hz音程・発音 → 正規化プランジャ位置</p>
             <div class="listen">{beat_audio(bc['position_before'], 'Timeline入力')}{beat_audio(bc['position_after'], '位置→定常笛音')}</div>
             {figure(bc.get('position_plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — Timeline入力と位置計画後', 'e2e-beat-results/')}
@@ -145,8 +146,9 @@ def main():
             <div><dt>③ 出口の総誤差</dt><dd>{n(total_mae)} cent — {'PASS' if output_pass else 'FAIL'}</dd></div>
             <div><dt>参考: 正解入力時</dt><dd>{n(pm['steady_pitch_mae_cents'])} cent — {'PASS' if oracle_pass else 'FAIL'}</dd></div>
             <div><dt>Planner追加位置MAE</dt><dd>{n(pm.get('model_added_position_mae_percent_stroke'), 3)}%</dd></div>
+            <div><dt>入口からの正味MAE変化</dt><dd>{n(pm.get('net_absolute_change_cents'))} cent</dd></div>
             <div><dt>分解式の最大残差</dt><dd>{n(pm.get('attribution_residual_max_cents'), 6)} cent</dd></div></dl>
-            <p class="note">同一曲・同一フレームで、持ち込み＋Planner追加＝出口総誤差となる符号付き誤差を計算後、各成分のMAEを表示。MAE同士は符号を失うため足し算にはならない。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section>''')
+            <p class="note">判定は正解入力・実Timeline入力でのPlanner固有変換・接続出口の3つを分離。同一曲・同一フレームの符号付き誤差は、持ち込み＋Planner追加＝出口総誤差。MAE同士は符号を失うため足し算にはならない。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section>''')
 
     def history_attempt_card(row):
         attempt_status = "PASS" if row["pass"] else "FAIL"
@@ -264,6 +266,8 @@ def main():
     position_metrics = beat.get("timeline_position", {}) or {}
     position_transform_pass = position_metrics.get("real_input_transform_pass", False)
     position_output_pass = position_metrics.get("connected_output_pass", False)
+    position_gate_pass = (position_metrics.get("oracle_input_pass", False) and
+                          position_transform_pass and position_output_pass)
     perception_flow = [
         flow_node("お手本音声", "neutral", "raw waveform", "#process-1"), flow_arrow(),
         flow_node("Neural Ear", "pass" if s["ear"].get("pass") else "fail", f"MAE {n(s['ear'].get('mae'))} cent", "#process-1"), flow_arrow(),
@@ -273,7 +277,7 @@ def main():
         flow_node("Timeline Memory", "pass" if timeline_metrics.get("pass") else "fail", f"MAE {n(timeline_metrics.get('pitch_mae_cents'))} cent", "#process-2"),
     ]
     performance_flow = [
-        flow_node("Position Planner", "pass" if position_transform_pass else "fail",
+        flow_node("Position Planner", "pass" if position_gate_pass else "fail",
                   f"持込 {n(position_metrics.get('inherited_pitch_mae_cents'))} / 追加 {n(position_metrics.get('model_added_pitch_mae_cents'))} / 出口 {n(position_metrics.get('output_total_pitch_mae_cents'))} cent", "#process-3"),
         flow_arrow("pending", "現行経路は未統合"),
         flow_node("Motor / Flute", "pending", "現行経路未統合・実機未評価", "#process-3"),
@@ -282,22 +286,22 @@ def main():
         flow_node("Error Comparator", "pass" if s["comparator"].get("pass") else "fail", f"error MAE {n(s['comparator'].get('error_mae'))} cent", "#process-4"), flow_arrow("pending"),
         flow_node("Feedback Residual", "pending", "未学習・反復適応も未統合", "#process-4"),
     ]
-    flow_diagram = f'''<section class="flow-overview" aria-labelledby="flow-title"><div class="flow-heading"><div><h2 id="flow-title">全体フローと現在地</h2><p>緑は固定Gate PASS、赤はFAIL、橙は単独PASSだが接続FAIL、灰は未学習・未評価。</p></div><strong>全体 E2E: FAIL / 未完成</strong></div>
+    flow_diagram = f'''<section class="flow-overview" aria-labelledby="flow-title"><div class="flow-heading"><div><h2 id="flow-title">全体フローと現在地</h2><p>緑は固定Gate PASS、赤はFAIL、橙は工程内に未評価部分あり、灰は未学習・未評価。</p></div><strong>全体 E2E: FAIL / 未完成</strong></div>
       <div class="phase-flow" aria-label="採用予定パイプラインの4工程">
         <section class="flow-phase"><header><span>1</span><div><b>聴く・拍を理解する</b><small>お手本から音程、休符、BPM、拍位置を取り出す</small></div><strong class="pass">工程 PASS</strong></header>
           <ol class="system-flow flow-row nodes-3">{''.join(perception_flow)}</ol></section>
         <div class="phase-connector pass"><span>↓</span><b>理解した音程と拍を保存する</b></div>
         <section class="flow-phase"><header><span>2</span><div><b>お手本をTimelineとして覚える</b><small>演奏時刻に沿った音程と休符の地図を保存する</small></div><strong class="pass">工程 PASS</strong></header>
           <ol class="system-flow flow-row nodes-1">{''.join(memory_flow)}</ol></section>
-        <div class="phase-connector fail"><span>↓</span><b>同一フレーム再評価 — 持ち込み {n(position_metrics.get('inherited_pitch_mae_cents'))} ｜ Planner追加 {n(position_metrics.get('model_added_pitch_mae_cents'))} ｜ 出口 {n(position_metrics.get('output_total_pitch_mae_cents'))} cent（各MAEは非加算）</b></div>
-        <section class="flow-phase"><header><span>3</span><div><b>身体で演奏する</b><small>目標音程を笛の位置へ変換し、モータで動かす</small></div><strong class="fail">Planner追加誤差 FAIL / 実機未評価</strong></header>
+        <div class="phase-connector {'pass' if position_gate_pass else 'fail'}"><span>↓</span><b>同一フレーム再評価 — 持ち込み {n(position_metrics.get('inherited_pitch_mae_cents'))} ｜ Planner追加 {n(position_metrics.get('model_added_pitch_mae_cents'))} ｜ 出口 {n(position_metrics.get('output_total_pitch_mae_cents'))} cent（各MAEは非加算）</b></div>
+        <section class="flow-phase"><header><span>3</span><div><b>身体で演奏する</b><small>目標音程を笛の位置へ変換し、モータで動かす</small></div><strong class="partial">Position {'PASS' if position_gate_pass else 'FAIL'} / Motor未評価</strong></header>
           <ol class="system-flow flow-row nodes-2">{''.join(performance_flow)}</ol></section>
         <div class="phase-connector pending"><span>↓</span><b>現行のモータ・笛・自己音経路は未統合</b></div>
         <section class="flow-phase"><header><span>4</span><div><b>自分の音を聴いて直す</b><small>目標との差を測り、次の操作へ補正を返す</small></div><strong class="fail">Comparator FAIL / Feedback未学習</strong></header>
           <ol class="system-flow flow-row nodes-2">{''.join(correction_flow)}</ol></section>
       </div>
       <div class="feedback-return"><b>↩ Feedback loop</b><span>工程4の補正を工程3のPosition / Controllerへ戻す — 未学習</span></div>
-      <p class="flow-caveat">Neural Earは合成・音響乱数化ホールドアウトでのPASSで、実録音は未評価。Position Plannerは正解入力ではPASSだが、同一評価集合で切り分けると実入力に対するPlanner追加誤差がFAIL。したがってモデル単体の接続耐性もPASSではない。</p></section>'''
+      <p class="flow-caveat">Neural Earは合成・音響乱数化ホールドアウトでのPASSで、実録音は未評価。Positionは正解入力・実Timeline入力での固有変換・接続出口を別々に判定する。Motor / Flute以降は未統合のため、PositionがPASSしても全体E2Eは未完成。</p></section>'''
     details = []
     for stage, rows in data["details"].items():
         heads = [k for k in rows[0] if k != "case"]
@@ -332,14 +336,14 @@ def main():
     pipeline_tabs = f'''<section class="pipeline-lab" aria-labelledby="pipeline-tabs-title"><h2 id="pipeline-tabs-title">パイプライン別の結果と試行記録</h2>
     <p>採用予定と代替案を混在させず、同じパイプラインのフロー・結果・WAV・グラフ・失敗試行を一つのタブへまとめた。</p>
     <div class="tab-list" role="tablist" aria-label="パイプライン別結果">
-      <button type="button" role="tab" id="tab-current" aria-controls="pipeline-current" aria-selected="true">採用予定 Timeline <small>19試行 / 全体FAIL</small></button>
+      <button type="button" role="tab" id="tab-current" aria-controls="pipeline-current" aria-selected="true">採用予定 Timeline <small>20試行 / 全体FAIL</small></button>
       <button type="button" role="tab" id="tab-clock" aria-controls="pipeline-clock" aria-selected="false" tabindex="-1">代替A Beat-cell＋Clock <small>26試行 / 接続FAIL</small></button>
       <button type="button" role="tab" id="tab-timing" aria-controls="pipeline-timing" aria-selected="false" tabindex="-1">代替B Duration／Timing <small>10試行 / 全体FAIL</small></button>
       <button type="button" role="tab" id="tab-legacy" aria-controls="pipeline-legacy" aria-selected="false" tabindex="-1">旧 Staged制御 <small>3系統 / 全体FAIL</small></button>
       <button type="button" role="tab" id="tab-raw-e2e" aria-controls="pipeline-raw-e2e" aria-selected="false" tabindex="-1">単一 Raw-audio E2E <small>7記録 / 演奏FAIL</small></button>
     </div>
     <section class="tab-panel" role="tabpanel" id="pipeline-current" aria-labelledby="tab-current">
-      <header class="pipeline-summary adopted"><div><span>採用予定</span><h2>Beat-conditioned Timeline Pipeline</h2></div><strong>Position実入力変換 FAIL / 全体FAIL</strong></header>
+      <header class="pipeline-summary adopted"><div><span>採用予定</span><h2>Beat-conditioned Timeline Pipeline</h2></div><strong>Position {'PASS' if position_gate_pass else 'FAIL'} / Motor以降未完成</strong></header>
       <div class="pipeline-explainer"><h3>この方式は何をしている？</h3>
         <p>お手本を聴いたら、曲を「時間に沿った音程と休符の地図」として丸ごと覚える方式です。演奏中はその地図を先頭から読み、必要な笛の位置へ変換します。</p>
         <dl><div><dt>覚え方</dt><dd>100 Hzの細かなTimeline</dd></div><div><dt>時間の扱い</dt><dd>BPMと拍を手掛かりに地図を保存</dd></div><div><dt>狙い</dt><dd>音符の長さや休符をずらさず再現</dd></div><div><dt>現在の課題</dt><dd>記憶から位置計画へ渡すと誤差が増える</dd></div></dl>

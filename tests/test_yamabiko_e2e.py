@@ -17,7 +17,7 @@ from flute_rl.yamabiko.e2e_stages import E2EStageProbes  # noqa: E402
 from flute_rl.yamabiko.e2e_io import SAMPLE_RATE  # noqa: E402
 from flute_rl.yamabiko.staged_nn import (ErrorComparator, FeedForwardPolicy,
                                          FeedbackResidualPolicy, ReferenceMemory,
-                                         StagedConfig)  # noqa: E402
+                                         StagedConfig, TargetPositionPlanner)  # noqa: E402
 from flute_rl.yamabiko.hw import PITCH_FRAME, SR  # noqa: E402
 from flute_rl.sim import DT  # noqa: E402
 
@@ -177,3 +177,12 @@ def test_separated_neural_stages_have_explicit_boundaries():
                                      torch.zeros(2, 2), state)
     assert corrected.shape == (2, 2) and state.shape == (2, config.control_hidden)
     assert torch.all((-1 <= corrected[:, 0]) & (corrected[:, 0] <= 1))
+
+
+def test_position_planner_treats_voice_input_as_a_logit():
+    torch.manual_seed(23)
+    planner = TargetPositionPlanner().eval()
+    pitch = torch.tensor([[[0.2]]])
+    confident = planner(torch.cat([pitch, torch.tensor([[[6.0]]])], -1))
+    very_confident = planner(torch.cat([pitch, torch.tensor([[[12.0]]])], -1))
+    torch.testing.assert_close(confident, very_confident, atol=1e-4, rtol=1e-4)
