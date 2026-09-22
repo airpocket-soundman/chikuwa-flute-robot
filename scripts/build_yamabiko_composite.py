@@ -15,9 +15,9 @@ from flute_rl.yamabiko.composite import YamabikoComposite  # noqa: E402
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ear", default="runs/yamabiko_e2e_pc_ear_timbre_v2.pt")
-    ap.add_argument("--timeline-position", default="runs/yamabiko_timeline_position_v4.pt")
+    ap.add_argument("--timeline-position", default="runs/yamabiko_timeline_position_v5.pt")
     ap.add_argument("--comparator", default="runs/yamabiko_staged_nn_comparator.pt")
-    ap.add_argument("--physical", default="runs/yamabiko_physical_slow_v1.pt")
+    ap.add_argument("--physical", default="runs/yamabiko_physical_fast_v2.pt")
     ap.add_argument("--out", default="runs/yamabiko_connected_composite_v1.pt")
     ap.add_argument("--report", default="runs/yamabiko_connected_composite_v1_report.json")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")

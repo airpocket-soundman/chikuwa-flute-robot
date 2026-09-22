@@ -48,6 +48,25 @@ def arrays(result):
     return {key: value[0].detach().cpu().numpy() for key, value in result.items() if torch.is_tensor(value) and value.ndim >= 2}
 
 
+def nominal_step_response(plant, device):
+    params = plant.parameters(1, device, spread=0.0)
+    state = plant.initial_state(1, device)
+    speeds, positions = [], []
+    for _ in range(100):
+        state = plant.step(state, torch.ones(1, device=device), params)
+        speeds.append(float(state.velocity[0]) * plant.config.stroke_m * 1000.0)
+        positions.append(float(state.position[0]) * plant.config.stroke_m * 1000.0)
+    maximum = plant.config.max_velocity_strokes_s * plant.config.stroke_m * 1000.0
+    rise = next((10 * (index + 1) for index, speed in enumerate(speeds) if speed >= .9 * maximum), None)
+    travel = next((10 * (index + 1) for index, position in enumerate(positions) if position >= 39.375), None)
+    return {"nominal_max_speed_mm_s": maximum,
+            "nominal_speed_100ms_mm_s": speeds[9],
+            "nominal_speed_200ms_mm_s": speeds[19],
+            "nominal_speed_300ms_mm_s": speeds[29],
+            "nominal_rise_90_ms": rise,
+            "nominal_39_4mm_move_ms": travel}
+
+
 @torch.inference_mode()
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
@@ -98,7 +117,7 @@ def main():
     metrics = evaluate(controller, feedback, plant, 129431,
                        SimpleNamespace(eval_batch=48, eval_steps=520, device=args.device,
                                        practice_repetitions=3))
-    metrics.update({"seed": 129431, "split": "frozen-randomized-deterministic-physical-slow-tempo-v2",
+    metrics.update({"seed": 129431, "split": "frozen-randomized-deterministic-physical-fast-rise-v1",
                     "training": checkpoint.get("metrics", {}).get("training", "adaptive physical control"),
                     "playback_tempo_scale": PLAYBACK_TEMPO_SCALE,
                     "articulation_gap_ms": ARTICULATION_FRAMES * 10,
@@ -107,6 +126,7 @@ def main():
                     "network_received_simulator_internal_state": False, "real_rig_validated": False})
     metrics.update({"motor_physics_pass": True, "linear_flute_pass": True,
                     "motor_audio_world_model": {"pass": world_mae <= 50, "audio_mae_cents": world_mae}})
+    metrics.update(nominal_step_response(plant, args.device))
     attempts = []
     for path in sorted(pathlib.Path("runs").glob("yamabiko_physical_*_report.json")):
         row = json.loads(path.read_text(encoding="utf-8"))

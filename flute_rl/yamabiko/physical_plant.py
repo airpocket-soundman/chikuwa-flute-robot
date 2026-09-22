@@ -18,12 +18,15 @@ class PhysicalPlantConfig:
     stroke_m: float = 0.105
     low_cents: float = 700.0
     high_cents: float = 1900.0
-    torque_gain: float = 5.0
-    torque_tau_s: float = 0.055
+    torque_gain: float = 6.0
+    # Provisional fast-rise actuator contract: the real mechanism is rated at
+    # 150 mm/s.  These values reach 90% of that speed in about 300 ms instead
+    # of the previous ~370 ms, while retaining visible acceleration dynamics.
+    torque_tau_s: float = 0.040
     inertia: float = 1.0
     coulomb_friction: float = 0.38
     viscous_friction: float = 1.25
-    max_velocity_strokes_s: float = 1.35
+    max_velocity_strokes_s: float = 1.4285714285714286  # 150 mm/s over 105 mm
     feedback_limit: float = 0.45
 
     @property

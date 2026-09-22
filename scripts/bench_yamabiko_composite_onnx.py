@@ -14,15 +14,20 @@ def sigmoid(x): return 1.0 / (1.0 + np.exp(-x))
 
 
 class Plant:
-    def __init__(self): self.reset()
+    def __init__(self, config): self.config = config; self.reset()
     def reset(self): self.position = self.velocity = self.torque = 0.0
-    def flute(self, valve): return 700.0 + 1200.0 * self.position, valve >= .5
+    def flute(self, valve):
+        low, high = self.config["low_cents"], self.config["high_cents"]
+        return low + (high - low) * self.position, valve >= .5
     def step(self, pwm):
-        alpha = min(.01 / .055, 1.0)
-        self.torque += alpha * (5.0 * np.clip(pwm, -1, 1) - self.torque)
-        friction = .38 * np.tanh(self.velocity / .015) + 1.25 * self.velocity
-        self.velocity = float(np.clip(self.velocity + .01 * (self.torque - friction), -1.35, 1.35))
-        raw = self.position + .01 * self.velocity
+        cfg = self.config; dt = cfg["dt"]
+        alpha = min(dt / cfg["torque_tau_s"], 1.0)
+        self.torque += alpha * (cfg["torque_gain"] * np.clip(pwm, -1, 1) - self.torque)
+        friction = cfg["coulomb_friction"] * np.tanh(self.velocity / .015) + cfg["viscous_friction"] * self.velocity
+        acceleration = (self.torque - friction) / cfg["inertia"]
+        vmax = cfg["max_velocity_strokes_s"]
+        self.velocity = float(np.clip(self.velocity + dt * acceleration, -vmax, vmax))
+        raw = self.position + dt * self.velocity
         self.position = float(np.clip(raw, 0, 1))
         if (raw <= 0 and self.velocity < 0) or (raw >= 1 and self.velocity > 0): self.velocity = 0.0
 
@@ -59,7 +64,7 @@ def main():
     steps = target.shape[1]; slow = np.zeros((1, manifest["feedback_hidden"]), np.float32)
     takes, all_times = [], []
     for take in range(args.repetitions):
-        plant, renderer = Plant(), Renderer(); pwm = valve = 0.0
+        plant, renderer = Plant(manifest["plant_config"]), Renderer(); pwm = valve = 0.0
         error = heard = np.zeros(1, np.float32)
         controller_state = np.zeros((1, manifest["controller_hidden"]), np.float32)
         feedback_state = np.concatenate([np.zeros_like(slow), slow], 1)

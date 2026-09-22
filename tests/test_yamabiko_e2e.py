@@ -228,6 +228,20 @@ def test_motor_physics_is_deterministic_for_fixed_parameters_and_inputs():
     torch.testing.assert_close(a.torque, b.torque)
 
 
+def test_motor_physics_nominal_rise_matches_150_mm_per_second_contract():
+    plant = DifferentiableMotorFlute()
+    params = plant.parameters(1, "cpu", spread=0.0)
+    state = plant.initial_state(1, "cpu")
+    velocities_mm_s = []
+    for _ in range(60):
+        state = plant.step(state, torch.ones(1), params)
+        velocities_mm_s.append(float(state.velocity) * plant.config.stroke_m * 1000.0)
+    assert plant.config.max_velocity_strokes_s * plant.config.stroke_m * 1000.0 == pytest.approx(150.0)
+    assert velocities_mm_s[9] == pytest.approx(39.8, abs=1.0)
+    rise_90_ms = 10 * next(i + 1 for i, speed in enumerate(velocities_mm_s) if speed >= 135.0)
+    assert 280 <= rise_90_ms <= 320
+
+
 def test_physical_controllers_have_separate_plan_and_feedback_boundaries():
     batch, steps = 3, 12
     planner_executor = MotorTrajectoryController(hidden=8)

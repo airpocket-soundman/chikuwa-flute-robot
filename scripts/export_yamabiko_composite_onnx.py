@@ -149,6 +149,7 @@ def main():
                 "reference_steps": args.reference_steps, "tempo_scale": model.tempo_scale,
                 "controller_hidden": ch, "feedback_hidden": fh,
                 "checkpoint": args.checkpoint, "graphs": {"listen": listen_path.name, "control": step_path.name},
+                "plant_config": checkpoint["plant_config"],
                 "physical_plant": "deterministic NumPy host simulator; replace with MCU I/O on the real rig"}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(manifest, indent=2))

@@ -349,7 +349,12 @@ def main():
         <div><dt>feedforward pitch MAE</dt><dd>{n(metric_value(controller_metrics, 'feedforward_pitch_mae_cents'), 1)} cent</dd></div></dl></section>''',
         f'''<section class="card {physics_state}"><div class="stage"><b>P</b><span class="{physics_state}">{state_label(physics_state)}</span></div>
         <h2>Motor Physics Simulator</h2><p class="flow">PWM → torque rise・摩擦・慣性 → 実変位</p>
-        <p>学習対象NNではなく、遅れ・オーバーシュート・摩擦を再現する訓練環境。乱数化した物理条件で制御器を評価する。</p></section>''',
+        <p>学習対象NNではなく、遅れ・オーバーシュート・摩擦を再現する訓練環境。乱数化した物理条件で制御器を評価する。</p>
+        <dl><div><dt>公称最大速度</dt><dd>{n(physical_summary.get('nominal_max_speed_mm_s'), 1)} mm/s</dd></div>
+        <div><dt>最大速度90%到達</dt><dd>{n(physical_summary.get('nominal_rise_90_ms'), 0)} ms</dd></div>
+        <div><dt>100 ms時の速度</dt><dd>{n(physical_summary.get('nominal_speed_100ms_mm_s'), 1)} mm/s</dd></div>
+        <div><dt>39.4 mm移動</dt><dd>{n(physical_summary.get('nominal_39_4mm_move_ms'), 0)} ms</dd></div></dl>
+        <p class="note">実機未計測の暫定設定。旧設定は最大141.8 mm/s、90%到達370 ms、39.4 mm移動490 ms。</p></section>''',
         f'''<section class="card {flute_state}"><div class="stage"><b>F</b><span class="{flute_state}">{state_label(flute_state)}</span></div>
         <h2>Linear Flute Simulator</h2><p class="flow">実変位 → 線形音程 / valve → 発音ON・OFF</p>
         <p>笛の変位と音程を線形対応させた解析モデル。学習対象ではなく、モータの実変位を評価可能な音へ変換する。</p></section>''',
@@ -542,7 +547,7 @@ def main():
       <div><dt>ピークRSS</dt><dd>{n(uno_q_report.get('peak_rss_kib') / 1024 if uno_q_report.get('peak_rss_kib') else None)} MiB</dd></div>
       <div><dt>ONNX容量</dt><dd>{n((uno_q_report.get('listen_onnx_bytes', 0) + uno_q_report.get('control_onnx_bytes', 0)) / 1048576, 2)} MiB</dd></div>
       <div><dt>反復MAE</dt><dd>{uno_q_take_text} cent</dd></div></dl>
-      <p class="note">実測環境: {html.escape(str(uno_q_report.get('machine', 'unknown')))} / ONNX Runtime {html.escape(str(uno_q_report.get('onnxruntime', 'unknown')))}。マイク・モーターは使わず、物理装置だけを同じUNO Q内の決定論的シミュレータへ置換。したがって、これは実機CPU上の推論速度と接続のPASSであり、実モーター演奏の合格ではない。</p>
+      <p class="note">実測環境: {html.escape(str(uno_q_report.get('machine', 'unknown')))} / ONNX Runtime {html.escape(str(uno_q_report.get('onnxruntime', 'unknown')))}。マイク・モーターは使わず、物理装置だけを同じUNO Q内の決定論的シミュレータへ置換。これは速度調整前モデルの実機CPU計測であり、新しいfast-riseモデルはUNO Qで再測定が必要。実モーター演奏の合格ではない。</p>
     </section>''' if uno_q_report else ''
     hybrid_sample_options = "".join(
         f'<option value="{html.escape(str(sample["id"]))}">{index:02d} {html.escape(str(sample["title"]))}</option>'
@@ -586,7 +591,7 @@ def main():
       <div><dt>全NN接続 演奏MAE</dt><dd>{n(composite_summary.get('neural_e2e_pitch_mae_cents'))} cent</dd></div>
       <div><dt>全NN 無音欠落率</dt><dd>{pct(composite_summary.get('neural_e2e_missing_voice_fraction'))} %</dd></div>
       <div><dt>決定論的診断器 MAE</dt><dd>{n(composite_summary.get('deterministic_e2e_pitch_mae_cents'))} cent</dd></div></dl>
-      <p class="note"><b>接続の存在は確認できたが、性能合格ではない。</b> Position Plannerは線形Flute simulatorへ再較正済み。一方、Motor Controllerは旧Planner出力分布で学習されているため、次は新しい位置計画を入力して再学習する必要がある。結合学習・実機検証も未実施。決定論版はplantの真値を読める診断用oracleで、実機へ搭載する制御器ではない。</p>
+      <p class="note"><b>接続の存在は確認できたが、性能合格ではない。</b> Position Plannerは線形Flute simulatorへ再較正済み。Motor Controllerも150 mm/s・fast-rise物理へ再学習し、単独位置MAEは改善したが固定Gateには未達。全工程の結合学習・実機検証も未実施。決定論版はplantの真値を読める診断用oracleで、実機へ搭載する制御器ではない。</p>
       <p class="note">各工程には決定論的な対応モジュール（FFT Ear、自己相関Tempo、完全Timeline Memory、線形Position、PD Motor Control、差分Comparator、PID Feedback）も実装し、NNの故障箇所を切り分けられる。</p>
     </section>''' if composite_summary else '<p>全工程Compositeの評価記録はまだありません。</p>'
 
