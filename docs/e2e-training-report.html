@@ -17,38 +17,16 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
 <h2>拍グリッド再設計</h2><p>お手本をBPMと拍位相へ割り当て、その拍セル上に連続音程・休符・onset・offset・傾斜を記憶する。BPMラベルは任意秒長の旧データへ後付けせず、BPMから生成した専用データだけで評価する。</p><div class="grid"><section class="card"><div class="stage"><b>B</b><span>PASS</span></div>
         <h2>Tempo / Beat NN</h2><p class="flow">raw reference → BPM・連続beat phase</p>
         <div class="listen"><div class="audio"><span>お手本</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>予測拍click</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_after_clicks.wav"></audio></div></div>
-        <dl><div><dt>tempo median relative error</dt><dd>0.0081</dd></div>
-        <div><dt>phase MAE cycle</dt><dd>0.0399</dd></div></dl>
+        <dl><div><dt>tempo median relative error</dt><dd>0.0113</dd></div>
+        <div><dt>phase MAE cycle</dt><dd>0.0572</dd></div></dl>
         <p class="note">afterはTempo NNの拍だけを鳴らした診断clickで、演奏音ではない。official path: predicted_upstream</p>
-        </section><section class="card"><div class="stage"><b>M</b><span>PASS</span></div>
+        </section><section class="card"><div class="stage"><b>M</b><span>FAIL</span></div>
             <h2>Musical Memory NN</h2><p class="flow">予測beat + 音響表現 → 音程・休符・onset/offsetセル</p>
             <div class="listen"><div class="audio"><span>NNの前</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>記憶から再合成</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_memory_after_recall.wav"></audio></div></div>
-            <dl><div><dt>pitch MAE cents</dt><dd>55.4</dd></div>
-            <div><dt>voice F1</dt><dd>0.976</dd></div><div><dt>onset F1</dt><dd>0.920</dd></div>
-            <div><dt>correlation</dt><dd>0.922</dd></div></dl>
-            <p class="note">raw音声と正解セル数を捨て、予測BPM・予測位相から求めたセル数で再生した診断音。</p></section><section class="card"><div class="stage"><b>A</b><span>PASS</span></div>
-            <h2>Neural Clock / Temporal Aligner</h2><p class="flow">記憶セル + BPM + 100 Hz tick → 時刻付き演奏目標</p>
-            <div class="listen"><div class="audio"><span>拍セル記憶</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_memory_after_recall.wav"></audio></div><div class="audio"><span>100 Hz再現</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_aligner_after_100hz.wav"></audio></div></div>
-            <dl><div><dt>pointer MAE cells</dt><dd>0.072</dd></div>
-            <div><dt>EOS MAE ms</dt><dd>21.0</dd></div>
-            <div><dt>pitch MAE cents</dt><dd>14.6</dd></div>
-            <div><dt>voice F1</dt><dd>0.990</dd></div>
-            <div><dt>onset F1 exact</dt><dd>0.380</dd></div></dl>
-            <p class="note">これはOracle拍セルでの単独Gate。100 Hz tick以外の正解時刻は推論入力に与えていない。afterは診断再合成で、物理演奏ではない。</p></section><section class="card"><div class="stage"><b>T</b><span>FAIL</span></div>
-            <h2>Stored Timing Profile NN</h2><p class="flow">Tempo内部系列 → 単調な絶対セル位置列</p>
-            <div class="listen"><div class="audio"><span>生のお手本</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>保存profile click</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_timing_profile_clicks.wav"></audio></div></div>
-            <dl><div><dt>pointer MAE cells</dt><dd>0.557</dd></div>
-            <div><dt>pointer P95 cells</dt><dd>1.894</dd></div>
-            <div><dt>backward jumps</dt><dd>0</dd></div></dl>
-            <p class="note">afterは保存されたTiming Profileの拍だけを鳴らす診断click。物理演奏音ではない。</p></section><section class="card"><div class="stage"><b>L</b><span>FAIL</span></div>
-            <h2>Beat-conditioned Timeline Memory</h2><p class="flow">Beat内部系列 + Ear → 保存100 Hz profile → 再現</p>
-            <div class="listen"><div class="audio"><span>生のお手本</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>保存tensorから再現</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_timeline_memory_recall.wav"></audio></div></div>
-            <dl><div><dt>pitch MAE cents</dt><dd>78.8</dd></div>
-            <div><dt>correlation</dt><dd>0.914</dd></div>
-            <div><dt>voice F1</dt><dd>0.999</dd></div>
-            <div><dt>rest false positive</dt><dd>0.0003</dd></div>
-            <div><dt>onset F1 30 ms</dt><dd>0.871</dd></div></dl>
-            <p class="note">remember後はraw音声とEar入力を破棄し、保存NN tensorだけでdecode。BPM/セル表現と併存するドリフトなし実行profile。</p></section></div>
+            <dl><div><dt>pitch MAE cents</dt><dd>81.2</dd></div>
+            <div><dt>voice F1</dt><dd>0.957</dd></div><div><dt>onset F1</dt><dd>0.910</dd></div>
+            <div><dt>correlation</dt><dd>0.863</dd></div></dl>
+            <p class="note">raw音声と正解セル数を捨て、予測BPM・予測位相から求めたセル数で再生した診断音。</p></section></div>
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained=false / pass=false（feedback residual training is the next gated stage）。</div>
 <div class="pipeline"><span>raw reference</span><i>→</i><span>Neural Ear</span><i>→</i><span>Reference Memory</span><i>→</i><span>FF Policy</span><i>→</i><span>plant + self audio</span><i>→</i><span>Error Comparator</span><i>→</i><span>Feedback Residual</span></div>
 <div class="grid"><section class="card">
