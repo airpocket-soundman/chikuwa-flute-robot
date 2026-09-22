@@ -578,7 +578,7 @@ def main():
       <div><dt>全NN接続 演奏MAE</dt><dd>{n(composite_summary.get('neural_e2e_pitch_mae_cents'))} cent</dd></div>
       <div><dt>全NN 無音欠落率</dt><dd>{pct(composite_summary.get('neural_e2e_missing_voice_fraction'))} %</dd></div>
       <div><dt>決定論的診断器 MAE</dt><dd>{n(composite_summary.get('deterministic_e2e_pitch_mae_cents'))} cent</dd></div></dl>
-      <p class="note"><b>接続の存在は確認できたが、性能合格ではない。</b> 凍結済みの各NNを1ケースで接続した結果で、結合学習・実機検証は未実施。Position Plannerと物理plantの較正差、Comparatorの学習分布差が残る。決定論版はplantの真値を読める診断用oracleで、実機へ搭載する制御器ではない。</p>
+      <p class="note"><b>接続の存在は確認できたが、性能合格ではない。</b> Position Plannerは線形Flute simulatorへ再較正済み。一方、Motor Controllerは旧Planner出力分布で学習されているため、次は新しい位置計画を入力して再学習する必要がある。結合学習・実機検証も未実施。決定論版はplantの真値を読める診断用oracleで、実機へ搭載する制御器ではない。</p>
       <p class="note">各工程には決定論的な対応モジュール（FFT Ear、自己相関Tempo、完全Timeline Memory、線形Position、PD Motor Control、差分Comparator、PID Feedback）も実装し、NNの故障箇所を切り分けられる。</p>
     </section>''' if composite_summary else '<p>全工程Compositeの評価記録はまだありません。</p>'
 
