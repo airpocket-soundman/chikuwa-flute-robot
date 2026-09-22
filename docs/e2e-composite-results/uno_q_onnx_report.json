@@ -1,0 +1,33 @@
+{
+  "format": "yamabiko-uno-q-onnx-hil-v1",
+  "machine": "aarch64",
+  "onnxruntime": "1.28.0",
+  "listen_ms": 178.7902700016275,
+  "playback_steps": 520,
+  "listen_onnx_bytes": 2245994,
+  "control_onnx_bytes": 499052,
+  "peak_rss_kib": 66588,
+  "step_median_ms": 2.876870014006272,
+  "step_p95_ms": 3.07902711792849,
+  "step_p99_ms": 6.9837230053963255,
+  "realtime_10ms_pass": true,
+  "takes": [
+    {
+      "take": 1,
+      "pitch_mae_cents": 93.70606029243385,
+      "step_p99_ms": 7.58244039781857
+    },
+    {
+      "take": 2,
+      "pitch_mae_cents": 63.1265974629517,
+      "step_p99_ms": 3.2789246196625745
+    },
+    {
+      "take": 3,
+      "pitch_mae_cents": 60.00199281839822,
+      "step_p99_ms": 3.404163579689336
+    }
+  ],
+  "hardware": "deterministic motor/flute simulator on UNO Q Linux",
+  "real_motor_used": false
+}

@@ -94,6 +94,8 @@ def main():
     composite = json.loads(composite_path.read_text(encoding="utf-8")) if composite_path.exists() else {}
     composite_summary = composite.get("summary", {})
     composite_audio = composite.get("audio", {})
+    uno_q_report_path = composite_path.parent / "uno_q_onnx_report.json"
+    uno_q_report = json.loads(uno_q_report_path.read_text(encoding="utf-8")) if uno_q_report_path.exists() else {}
     composite_prefix = ""
     if composite_path.exists():
         try:
@@ -504,6 +506,18 @@ def main():
     ) if src)
     composite_status = "PASS" if composite_summary.get("pass") else "接続済み / 未合格"
     composite_state = "pass" if composite_summary.get("pass") else "fail"
+    uno_q_takes = uno_q_report.get("takes", [])
+    uno_q_take_text = " → ".join(f"{n(row.get('pitch_mae_cents'))}" for row in uno_q_takes)
+    uno_q_card = f'''<section class="card {'pass' if uno_q_report.get('realtime_10ms_pass') else 'fail'}"><div class="stage"><b>UNO Q</b><span class="{'pass' if uno_q_report.get('realtime_10ms_pass') else 'fail'}">ONNX RUNTIME {'PASS' if uno_q_report.get('realtime_10ms_pass') else 'FAIL'}</span></div>
+      <h2>UNO Q実機CPU + Hardware-in-the-loop</h2><p class="flow">ONNX Neural pipeline ↔ 決定論的Motor/Flute simulator（すべてUNO Q Linux上）</p>
+      <dl><div><dt>お手本処理</dt><dd>{n(uno_q_report.get('listen_ms'))} ms / 曲ごと1回</dd></div>
+      <div><dt>100 Hz制御 p99</dt><dd>{n(uno_q_report.get('step_p99_ms'), 3)} ms / 制限10 ms</dd></div>
+      <div><dt>100 Hz制御 median</dt><dd>{n(uno_q_report.get('step_median_ms'), 3)} ms</dd></div>
+      <div><dt>ピークRSS</dt><dd>{n(uno_q_report.get('peak_rss_kib') / 1024 if uno_q_report.get('peak_rss_kib') else None)} MiB</dd></div>
+      <div><dt>ONNX容量</dt><dd>{n((uno_q_report.get('listen_onnx_bytes', 0) + uno_q_report.get('control_onnx_bytes', 0)) / 1048576, 2)} MiB</dd></div>
+      <div><dt>反復MAE</dt><dd>{uno_q_take_text} cent</dd></div></dl>
+      <p class="note">実測環境: {html.escape(str(uno_q_report.get('machine', 'unknown')))} / ONNX Runtime {html.escape(str(uno_q_report.get('onnxruntime', 'unknown')))}。マイク・モーターは使わず、物理装置だけを同じUNO Q内の決定論的シミュレータへ置換。したがって、これは実機CPU上の推論速度と接続のPASSであり、実モーター演奏の合格ではない。</p>
+    </section>''' if uno_q_report else ''
     composite_card = f'''<section class="card {composite_state}"><div class="stage"><b>ALL</b><span class="{composite_state}">{composite_status}</span></div>
       <h2>全工程 Connected Composite</h2>
       <p class="flow">お手本raw音声 → 記憶 → 0.5倍速計画 → PWM → 決定論的実変位・発音 → 自己音raw波形 → 同じNeural Ear → Comparator → Feedback</p>
@@ -533,7 +547,7 @@ def main():
         <dl><div><dt>Feedforward</dt><dd>Position Planner（別Policyは置かない）</dd></div><div><dt>関係学習</dt><dd>PWM履歴 → 可聴音程のWorld Model</dd></div><div><dt>訓練環境</dt><dd>決定論的なtorque rise・摩擦・慣性 + 線形笛</dd></div><div><dt>検証範囲</dt><dd>内部simulationのみ / 実機未検証</dd></div></dl>
       </div>
       <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner (= Feedforward) → Motor Controller → Motor Physics → Linear Flute → deterministic waveform → Neural Ear (self) → Comparator → Adaptive Feedback ↩ PWM<br>学習時: PWM/audio → Motor Audio World Model → Motor Controller</p>
-      {process_results}<h2>全工程を実際に接続した結果</h2>{composite_card}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
+      {process_results}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div><h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
       <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p>{physical_history}
     </section>
     <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">

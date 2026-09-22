@@ -113,7 +113,7 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
       <dl><div><dt>closed-loop pitch MAE</dt><dd>111.8 cent</dd></div>
       <div><dt>improvement</dt><dd>60.6 %</dd></div>
       <div><dt>non-worse rigs</dt><dd>88.5 %</dd></div></dl>
-      <p class="note">評価は乱数化シミュレータ。実機適応と反復練習はまだ検証していない。</p></section></div></section><h2>全工程を実際に接続した結果</h2><section class="card fail"><div class="stage"><b>ALL</b><span class="fail">接続済み / 未合格</span></div>
+      <p class="note">評価は乱数化シミュレータ。実機適応と反復練習はまだ検証していない。</p></section></div></section><h2>全工程を実際に接続した結果</h2><div class="grid"><section class="card fail"><div class="stage"><b>ALL</b><span class="fail">接続済み / 未合格</span></div>
       <h2>全工程 Connected Composite</h2>
       <p class="flow">お手本raw音声 → 記憶 → 0.5倍速計画 → PWM → 決定論的実変位・発音 → 自己音raw波形 → 同じNeural Ear → Comparator → Feedback</p>
       <div class="listen"><div class="audio"><span>元のお手本</span><audio controls preload="none" src="e2e-composite-results/reference.wav"></audio></div><div class="audio"><span>0.5倍速の演奏目標</span><audio controls preload="none" src="e2e-composite-results/target_slow.wav"></audio></div><div class="audio"><span>全NN接続後</span><audio controls preload="none" src="e2e-composite-results/neural_composite.wav"></audio></div><div class="audio"><span>決定論的診断器</span><audio controls preload="none" src="e2e-composite-results/deterministic_composite.wav"></audio></div></div>
@@ -124,7 +124,16 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
       <div><dt>決定論的診断器 MAE</dt><dd>94.8 cent</dd></div></dl>
       <p class="note"><b>接続の存在は確認できたが、性能合格ではない。</b> 凍結済みの各NNを1ケースで接続した結果で、結合学習・実機検証は未実施。Position Plannerと物理plantの較正差、Comparatorの学習分布差が残る。決定論版はplantの真値を読める診断用oracleで、実機へ搭載する制御器ではない。</p>
       <p class="note">各工程には決定論的な対応モジュール（FFT Ear、自己相関Tempo、完全Timeline Memory、線形Position、PD Motor Control、差分Comparator、PID Feedback）も実装し、NNの故障箇所を切り分けられる。</p>
-    </section><h2>知覚・記憶・Positionの試行履歴</h2><p class="history-count">20試行 — PASS 8 / FAIL 12</p><details open><summary>Tempo / Beat — PASS 2 / FAIL 4</summary><div class="attempt-grid"><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
+    </section><section class="card pass"><div class="stage"><b>UNO Q</b><span class="pass">ONNX RUNTIME PASS</span></div>
+      <h2>UNO Q実機CPU + Hardware-in-the-loop</h2><p class="flow">ONNX Neural pipeline ↔ 決定論的Motor/Flute simulator（すべてUNO Q Linux上）</p>
+      <dl><div><dt>お手本処理</dt><dd>178.8 ms / 曲ごと1回</dd></div>
+      <div><dt>100 Hz制御 p99</dt><dd>6.984 ms / 制限10 ms</dd></div>
+      <div><dt>100 Hz制御 median</dt><dd>2.877 ms</dd></div>
+      <div><dt>ピークRSS</dt><dd>65.0 MiB</dd></div>
+      <div><dt>ONNX容量</dt><dd>2.62 MiB</dd></div>
+      <div><dt>反復MAE</dt><dd>93.7 → 63.1 → 60.0 cent</dd></div></dl>
+      <p class="note">実測環境: aarch64 / ONNX Runtime 1.28.0。マイク・モーターは使わず、物理装置だけを同じUNO Q内の決定論的シミュレータへ置換。したがって、これは実機CPU上の推論速度と接続のPASSであり、実モーター演奏の合格ではない。</p>
+    </section></div><h2>知覚・記憶・Positionの試行履歴</h2><p class="history-count">20試行 — PASS 8 / FAIL 12</p><details open><summary>Tempo / Beat — PASS 2 / FAIL 4</summary><div class="attempt-grid"><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
         <h3>yamabiko_tempo_beat_timbre_v2</h3><p>採用候補または合格checkpoint</p><p class="metrics">tempo relative error median 0.011 / tempo relative error p90 0.068 / tempo head relative error median 0.074 / phase circular mae cycle 0.057 / phase confidence mean 0.998 / half double confusion rate 0.000</p>
         <p class="note">split: frozen-heldout-bpm / seed: 14449</p><div class="listen"><div class="audio"><span>before</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>after</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/audio/bpm_137_tempo_after_clicks.wav"></audio></div></div><figure class="pitch-plot"><img loading="lazy" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/plots/bpm_137_tempo_pitch.svg" alt="横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）"><figcaption>横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）</figcaption></figure></article><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
         <h3>yamabiko_tempo_beat_v4_phase</h3><p>採用候補または合格checkpoint</p><p class="metrics">tempo relative error median 0.008 / tempo relative error p90 0.035 / tempo head relative error median 0.045 / phase circular mae cycle 0.040 / phase confidence mean 0.999 / half double confusion rate 0.000</p>
