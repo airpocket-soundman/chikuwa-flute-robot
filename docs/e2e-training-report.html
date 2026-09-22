@@ -28,7 +28,14 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
             <div><dt>voice F1</dt><dd>1.000</dd></div>
             <div><dt>rest false positive</dt><dd>0.0000</dd></div>
             <div><dt>onset F1 30 ms</dt><dd>0.871</dd></div></dl>
-            <p class="note">remember後はraw音声とEar入力を破棄し、保存NN tensorだけでdecode。BPM/セル表現と併存するドリフトなし実行profile。音源別: bird 31.6c / hum 92.8c / recorder 74.5c / whistle 35.1c</p></section></div>
+            <p class="note">remember後はraw音声とEar入力を破棄し、保存NN tensorだけでdecode。BPM/セル表現と併存するドリフトなし実行profile。音源別: bird 31.6c / hum 92.8c / recorder 74.5c / whistle 35.1c</p></section><section class="card"><div class="stage"><b>P</b><span>PASS</span></div>
+            <h2>Position Planner NN</h2><p class="flow">100 Hz音程・発音 → 正規化プランジャ位置</p>
+            <div class="listen"><div class="audio"><span>Timeline入力</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_timeline_memory_recall.wav"></audio></div><div class="audio"><span>位置→定常笛音</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_position_planner.wav"></audio></div></div>
+            <dl><div><dt>oracle position MAE %</dt><dd>0.600</dd></div>
+            <div><dt>oracle steady pitch MAE</dt><dd>11.5</dd></div>
+            <div><dt>connected position MAE %</dt><dd>7.859</dd></div>
+            <div><dt>connected steady pitch MAE</dt><dd>161.9</dd></div></dl>
+            <p class="note">単独GateはOracle音程で判定してPASS。Timeline接続値は前段誤差を含みFAIL。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section></div>
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained=false / pass=false（feedback residual training is the next gated stage）。</div>
 <div class="pipeline"><span>raw reference</span><i>→</i><span>Neural Ear</span><i>→</i><span>Reference Memory</span><i>→</i><span>FF Policy</span><i>→</i><span>plant + self audio</span><i>→</i><span>Error Comparator</span><i>→</i><span>Feedback Residual</span></div>
 <div class="grid"><section class="card">

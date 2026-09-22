@@ -22,6 +22,8 @@ from flute_rl.yamabiko.beat_grid import DirectReferenceTimingProfileNet, Indexed
 from flute_rl.yamabiko.beat_grid import BeatTimelineRecallNet  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from flute_rl.yamabiko.e2e_io import HOP, SAMPLE_RATE, frame_audio_numpy  # noqa: E402
+from flute_rl.yamabiko import RigParams  # noqa: E402
+from flute_rl.yamabiko.staged_nn import StagedConfig, TargetPositionPlanner  # noqa: E402
 
 
 def click_track(phase_xy, confidence, steps):
@@ -67,6 +69,10 @@ def main():
     clock = aligner = None
     timing_profile = None
     timeline_memory = None
+    position_planner = None
+    if ck.get("timeline_position_planner") is not None:
+        position_planner = TargetPositionPlanner(StagedConfig()).to(args.device)
+        position_planner.load_state_dict(ck["timeline_position_planner"]); position_planner.eval()
     if ck.get("timeline_memory_trained"):
         timeline_memory = BeatTimelineRecallNet(cfg, direct_pitch=ck.get("timeline_memory_kind") == "direct-pitch-v1").to(args.device)
         timeline_memory.load_state_dict(ck["timeline_memory"]); timeline_memory.eval()
@@ -116,6 +122,13 @@ def main():
             timeline_after = audio / f"{name}_timeline_memory_recall.wav"; write_wav(timeline_after, timeline_wave, SAMPLE_RATE)
             item["timeline_before"] = item["tempo_before"]
             item["timeline_after"] = str(timeline_after.relative_to(out)).replace("\\", "/")
+            if position_planner is not None:
+                position = position_planner(timeline_out[None, ..., :2])[0, :, 0].cpu().numpy()
+                rig = RigParams.nominal(1); planned_pitch = rig.cents_at(position * rig.stroke[0])
+                planned_wave = synth_self(planned_pitch, timeline_voice, np.random.default_rng(19000 + index), sr=SAMPLE_RATE)
+                planned_after = audio / f"{name}_position_planner.wav"; write_wav(planned_after, planned_wave, SAMPLE_RATE)
+                item["position_before"] = item["timeline_after"]
+                item["position_after"] = str(planned_after.relative_to(out)).replace("\\", "/")
         if ck.get("musical_memory_trained"):
             confident = np.flatnonzero(confidence >= .5); start_frame = int(confident[0]) if len(confident) else 0
             cells = int(np.clip(round((len(example.target) - start_frame) / 100 * predicted_bpm / 60 * cfg.subdivision), 1, 64))
@@ -162,6 +175,7 @@ def main():
                 "timing_profile": ck.get("timing_profile_metrics"),
                 "timeline_memory_trained": bool(ck.get("timeline_memory_trained")),
                 "timeline_memory": ck.get("timeline_memory_metrics"),
+                "timeline_position": ck.get("timeline_position_metrics"),
                 "temporal_connected": ck.get("temporal_connected_metrics"), "cases": cases}
     out.mkdir(parents=True, exist_ok=True); (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"wrote {out / 'manifest.json'}")

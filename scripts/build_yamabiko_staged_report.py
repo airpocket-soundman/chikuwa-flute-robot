@@ -91,6 +91,16 @@ def main():
             <div><dt>rest false positive</dt><dd>{n(lm['rest_false_positive_rate'], 4)}</dd></div>
             <div><dt>onset F1 30 ms</dt><dd>{n(lm['onset_f1_30ms'], 3)}</dd></div></dl>
             <p class="note">remember後はraw音声とEar入力を破棄し、保存NN tensorだけでdecode。BPM/セル表現と併存するドリフトなし実行profile。音源別: {source_note}</p></section>'''
+        if beat.get("timeline_position"):
+            pm = beat["timeline_position"]; pst = "PASS" if pm.get("pass") else "FAIL"
+            beat_section += f'''<section class="card"><div class="stage"><b>P</b><span>{pst}</span></div>
+            <h2>Position Planner NN</h2><p class="flow">100 Hz音程・発音 → 正規化プランジャ位置</p>
+            <div class="listen">{beat_audio(bc['position_before'], 'Timeline入力')}{beat_audio(bc['position_after'], '位置→定常笛音')}</div>
+            <dl><div><dt>oracle position MAE %</dt><dd>{n(pm['position_mae_percent_stroke'], 3)}</dd></div>
+            <div><dt>oracle steady pitch MAE</dt><dd>{n(pm['steady_pitch_mae_cents'])}</dd></div>
+            <div><dt>connected position MAE %</dt><dd>{n(pm['connected_position_mae_percent_stroke'], 3)}</dd></div>
+            <div><dt>connected steady pitch MAE</dt><dd>{n(pm['connected_steady_pitch_mae_cents'])}</dd></div></dl>
+            <p class="note">単独GateはOracle音程で判定してPASS。Timeline接続値は前段誤差を含みFAIL。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section>'''
         beat_section += "</div>"
 
     stages = [
