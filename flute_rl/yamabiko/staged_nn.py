@@ -156,6 +156,54 @@ class MotorInversePolicy(nn.Module):
         return (actions, torch.stack(positions, 1)) if return_position else actions
 
 
+class MotorStateEstimator(nn.Module):
+    """Neural dead reckoner: previous commands -> current position/velocity."""
+
+    def __init__(self, config: StagedConfig = StagedConfig()):
+        super().__init__(); self.config = config
+        self.cell = nn.GRUCell(3, config.control_hidden)
+        self.head = nn.Sequential(nn.Linear(config.control_hidden, 64), nn.SiLU(), nn.Linear(64, 2))
+
+    def initial_state(self, batch, device, dtype=torch.float32):
+        return torch.zeros(batch, self.config.control_hidden, device=device, dtype=dtype)
+
+    def step(self, previous_action: torch.Tensor, state: torch.Tensor, reset=None):
+        if reset is None: reset = torch.zeros(len(previous_action), 1, device=previous_action.device)
+        state = torch.where(reset.bool(), torch.zeros_like(state), state)
+        state = self.cell(torch.cat([previous_action, reset], 1), state)
+        raw = self.head(state)
+        estimate = torch.cat([torch.sigmoid(raw[:, :1]), .2 * torch.tanh(raw[:, 1:2])], 1)
+        return estimate, state
+
+    def forward(self, actions: torch.Tensor):
+        batch, steps = actions.shape[:2]; state = self.initial_state(batch, actions.device, actions.dtype)
+        previous = torch.zeros(batch, 2, device=actions.device, dtype=actions.dtype); outputs = []
+        for t in range(steps):
+            estimate, state = self.step(previous, state, torch.ones(batch, 1, device=actions.device) if t == 0 else None)
+            outputs.append(estimate); previous = actions[:, t]
+        return torch.stack(outputs, 1)
+
+
+class PositionActionController(nn.Module):
+    """Memoryless neural control law from desired and estimated motor state."""
+
+    def __init__(self, config: StagedConfig = StagedConfig()):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(14, config.control_hidden), nn.SiLU(),
+                                 nn.Linear(config.control_hidden, config.control_hidden), nn.SiLU(),
+                                 nn.Linear(config.control_hidden, 2))
+
+    def forward(self, desired: torch.Tensor, target: torch.Tensor, motor_state: torch.Tensor,
+                previous_action: torch.Tensor, t: int):
+        steps = desired.shape[1]; ids = [t, min(t + 5, steps - 1), min(t + 20, steps - 1), min(t + 50, steps - 1)]
+        p = [desired[:, i] for i in ids]; voice = [target[:, i, 1:2] for i in ids[:3]]
+        pos, vel = motor_state[:, :1], motor_state[:, 1:2]
+        x = torch.cat([*p, p[0] - pos, p[1] - pos, p[2] - pos, pos, vel,
+                       *voice, previous_action], 1)
+        raw = self.net(x)
+        return torch.stack([torch.tanh(raw[:, 0]), torch.sigmoid(raw[:, 1])], 1)
+
+
 class ErrorComparator(nn.Module):
     """Estimate signed target-minus-self pitch error from two neural ears."""
 

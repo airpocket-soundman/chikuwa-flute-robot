@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from flute_rl.sim import FluteParams, hz_to_cents, x_for_cents
-from flute_rl.targets import F_HI, F_LO, MAX_LEVEL, from_pitch_track, make_target, sample_level, scale_notes
+from flute_rl.targets import (F_HI, F_LO, MAX_LEVEL, from_pitch_track, make_beat_target,
+                              make_target, sample_level, scale_notes)
 
 
 def test_scale_notes_in_range():
@@ -45,3 +46,14 @@ def test_from_pitch_track_shifts_octaves_into_range():
     assert np.isnan(t[0])
     with pytest.raises(ValueError):
         from_pitch_track([0, np.nan], dt_in=0.01)
+
+
+def test_beat_target_is_generated_from_bpm_without_grid_drift():
+    beat = make_beat_target(np.random.default_rng(7), bpm=97.0, beats=8, subdivision=4)
+    assert beat.bpm == 97.0 and len(beat.cell_pitch) == 32
+    assert beat.target.shape == beat.frame_phase.shape == beat.phase_valid.shape
+    assert not beat.phase_valid[0] and beat.phase_valid[-1]
+    assert np.isfinite(beat.target).any() and np.isnan(beat.target).any()
+    assert np.all((beat.frame_phase >= 0) & (beat.frame_phase < 1))
+    assert np.all(~beat.cell_onset | beat.cell_voice)
+    assert np.all(~beat.cell_offset | beat.cell_voice)

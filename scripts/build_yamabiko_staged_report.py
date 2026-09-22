@@ -15,6 +15,10 @@ def audio(src, label):
     return f'<div class="audio"><span>{html.escape(label)}</span><audio controls preload="none" src="e2e-results/{html.escape(src)}"></audio></div>'
 
 
+def beat_audio(src, label):
+    return f'<div class="audio"><span>{html.escape(label)}</span><audio controls preload="none" src="e2e-beat-results/{html.escape(src)}"></audio></div>'
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--manifest", default="docs/e2e-results/manifest.json")
@@ -22,6 +26,19 @@ def main():
     args = ap.parse_args(); data = json.loads(pathlib.Path(args.manifest).read_text(encoding="utf-8"))
     s, examples = data["summary"], data["audio"]
     representative = next((x for x in examples if x["case"] == "step_up_down"), examples[0])
+    beat_path = pathlib.Path(args.manifest).parent.parent / "e2e-beat-results" / "manifest.json"
+    beat_section = "<p>Tempo/Beat Gateは未実行です。</p>"
+    if beat_path.exists():
+        beat = json.loads(beat_path.read_text(encoding="utf-8")); bm = beat["tempo_beat"]
+        bc = next((x for x in beat["cases"] if x["case"] == "bpm_137"), beat["cases"][0])
+        status = "PASS" if bm.get("pass") else "FAIL"
+        beat_section = f'''<div class="grid"><section class="card"><div class="stage"><b>B</b><span>{status}</span></div>
+        <h2>Tempo / Beat NN</h2><p class="flow">raw reference → BPM・連続beat phase</p>
+        <div class="listen">{beat_audio(bc['tempo_before'], 'お手本')}{beat_audio(bc['tempo_after'], '予測拍click')}</div>
+        <dl><div><dt>tempo median relative error</dt><dd>{n(bm['tempo_relative_error_median'], 4)}</dd></div>
+        <div><dt>phase MAE cycle</dt><dd>{n(bm['phase_circular_mae_cycle'], 4)}</dd></div></dl>
+        <p class="note">afterはTempo NNの拍だけを鳴らした診断clickで、演奏音ではない。official path: {html.escape(beat['official_path'])}</p>
+        </section></div>'''
 
     stages = [
         ("1", "Neural Ear", "生の20 ms波形 → 音程・発音状態", s["ear"],
@@ -87,6 +104,7 @@ footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padd
 </style></head><body><main>
 <p class="eyebrow">PHYSICAL AI / OBJECTIVE GATED DEVELOPMENT</p><h1>お手本は、<br>本当に演奏になったか。</h1>
 <p class="lead">単一の総合スコアで隠さず、聴覚・記憶・フィードフォワード演奏・誤差判定を独立したNNに分け、未知の固定課題で評価した。各カードの音声は同じ <code>step_up_down</code> 課題の「NN前 / NN後」である。</p>
+<h2>拍グリッド再設計</h2><p>お手本をBPMと拍位相へ割り当て、その拍セル上に連続音程・休符・onset・offset・傾斜を記憶する。BPMラベルは任意秒長の旧データへ後付けせず、BPMから生成した専用データだけで評価する。</p>{beat_section}
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained={str(feedback['trained']).lower()} / pass={str(feedback['pass']).lower()}（{html.escape(feedback['reason'])}）。</div>
 <div class="pipeline"><span>raw reference</span><i>→</i><span>Neural Ear</span><i>→</i><span>Reference Memory</span><i>→</i><span>FF Policy</span><i>→</i><span>plant + self audio</span><i>→</i><span>Error Comparator</span><i>→</i><span>Feedback Residual</span></div>
 <div class="grid">{''.join(cards)}</div>

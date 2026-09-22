@@ -21,8 +21,8 @@ from flute_rl.yamabiko.e2e_io import SAMPLE_RATE, frame_audio_numpy  # noqa: E40
 from flute_rl.yamabiko.session import HOME_STEPS  # noqa: E402
 from flute_rl.yamabiko.staged_nn import (ErrorComparator, FeedForwardPolicy,
                                          FeedbackResidualPolicy, MotorInversePolicy,
-                                         ReferenceMemory, StagedConfig,
-                                         TargetPositionPlanner)  # noqa: E402
+                                         MotorStateEstimator, PositionActionController,
+                                         ReferenceMemory, StagedConfig, TargetPositionPlanner)  # noqa: E402
 
 CENTER, SCALE = 1300.0, 600.0
 
@@ -58,7 +58,12 @@ def load_stages(path, device):
         planner, motor = TargetPositionPlanner(config).to(device), MotorInversePolicy(config).to(device)
         planner.load_state_dict(ck["position_planner"]); motor.load_state_dict(ck["motor_inverse"])
         planner.eval(); motor.eval()
-    return ck, modules, planner, motor
+    state_net = controller = None
+    if "motor_state" in ck and "position_controller" in ck:
+        state_net, controller = MotorStateEstimator(config).to(device), PositionActionController(config).to(device)
+        state_net.load_state_dict(ck["motor_state"]); controller.load_state_dict(ck["position_controller"])
+        state_net.eval(); controller.eval()
+    return ck, modules, planner, motor, state_net, controller
 
 
 def corr(a, b):
@@ -108,7 +113,7 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); out = pathlib.Path(args.out); audio_dir = out / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
-    ck, (memory, ff, comparator, feedback), position_planner, motor_inverse = load_stages(args.model, args.device)
+    ck, (memory, ff, comparator, feedback), position_planner, motor_inverse, motor_state, position_controller = load_stages(args.model, args.device)
     ear_path = ck["ear_checkpoint"]
     ear_model = E2EImitator.from_checkpoint(torch.load(ear_path, map_location=args.device), args.device).eval()
     rng = np.random.default_rng(args.seed)
@@ -123,7 +128,16 @@ def main():
         mem_pitch = decoded[:, 0].cpu().numpy(); mem_voice = (decoded[:, 1] >= 0).cpu().numpy()
         if position_planner is not None:
             planned_position = position_planner(decoded[None])
-            actions = motor_inverse(planned_position, decoded[None], length)[0].cpu().numpy()
+            if motor_state is not None:
+                state = motor_state.initial_state(1, args.device); previous = torch.zeros(1, 2, device=args.device)
+                sequence = []
+                for t in range(len(target)):
+                    estimate, state = motor_state.step(previous, state, torch.ones(1, 1, device=args.device) if t == 0 else None)
+                    previous = position_controller(planned_position, decoded[None], estimate, previous, t)
+                    sequence.append(previous[0])
+                actions = torch.stack(sequence).cpu().numpy()
+            else:
+                actions = motor_inverse(planned_position, decoded[None], length)[0].cpu().numpy()
         else:
             actions = ff(decoded[None], length)[0].cpu().numpy()
         rig = Rig(RigParams.nominal(1), np.random.default_rng(args.seed + 100 + case_index))

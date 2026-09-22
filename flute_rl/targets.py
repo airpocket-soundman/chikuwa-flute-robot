@@ -5,6 +5,8 @@ NaN marks a rest (the flute must be silent).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from .sim import DT, hz_to_cents
@@ -19,6 +21,82 @@ LEVEL_NAMES = {
     3: "short melody",
     4: "melody with vibrato",
 }
+
+
+@dataclass(frozen=True)
+class BeatTarget:
+    """A metrical reference plus cell-level supervision used only in training."""
+
+    target: np.ndarray
+    bpm: float
+    beat0_s: float
+    subdivision: int
+    frame_phase: np.ndarray
+    phase_valid: np.ndarray
+    cell_pitch: np.ndarray
+    cell_voice: np.ndarray
+    cell_onset: np.ndarray
+    cell_offset: np.ndarray
+    cell_slope: np.ndarray
+
+
+def make_beat_target(rng: np.random.Generator, *, bpm: float | None = None, beats: int = 8,
+                     subdivision: int = 4, lead_s: float = 0.5, dt: float = DT) -> BeatTarget:
+    """Generate rhythm *from BPM first*, then render it onto the 100 Hz timeline.
+
+    This is deliberately separate from :func:`make_target`: assigning a BPM
+    after arbitrary-duration notes would create an unidentifiable training
+    label.  Downbeats carry pitch/rhythm structure so the canonical beat is
+    acoustically identifiable rather than an annotation-only convention.
+    """
+    bpm = float(rng.uniform(60.0, 180.0) if bpm is None else bpm)
+    cells = int(beats * subdivision)
+    notes = scale_notes(key=int(rng.integers(12)))
+    cell_pitch = np.zeros(cells, np.float32)
+    cell_voice = np.zeros(cells, bool)
+    cell_slope = np.zeros(cells, np.float32)
+    patterns = (
+        np.array([1, 1, 1, 1], bool), np.array([1, 1, 0, 1], bool),
+        np.array([1, 0, 1, 0], bool), np.array([1, 1, 1, 0], bool),
+        np.array([1, 0, 0, 1], bool),
+    )
+    pitch_index = int(rng.integers(len(notes)))
+    for beat in range(beats):
+        # Pitch changes on the downbeat make the intended beat level
+        # distinguishable from its half/double alternatives.
+        choices = [i for i in range(max(0, pitch_index - 2), min(len(notes), pitch_index + 3))]
+        pitch_index = int(rng.choice(choices)); base = float(notes[pitch_index])
+        pattern = patterns[int(rng.integers(len(patterns)))]
+        start = beat * subdivision
+        for j in range(subdivision):
+            k = start + j
+            if j < len(pattern) and pattern[j]:
+                cell_voice[k] = True; cell_pitch[k] = base
+        # Some beats contain a continuous intra-beat glide.  It remains a
+        # cent-valued contour and is never quantised to a MIDI note.
+        if rng.random() < .2:
+            slope = float(rng.uniform(-120.0, 120.0))
+            cell_slope[start:start + subdivision] = slope
+    cell_onset = cell_voice & np.r_[True, ~cell_voice[:-1]]
+    # A downbeat pitch change is an articulation even when no rest precedes it.
+    for k in range(subdivision, cells, subdivision):
+        if cell_voice[k] and cell_pitch[k] != cell_pitch[k - 1]: cell_onset[k] = True
+    cell_offset = cell_voice & np.r_[~cell_voice[1:], True]
+    duration = lead_s + beats * 60.0 / bpm
+    time = np.arange(max(1, int(np.ceil(duration / dt))), dtype=float) * dt
+    beat_position = (time - lead_s) * bpm / 60.0
+    cell_index = np.floor(beat_position * subdivision).astype(int)
+    active = (cell_index >= 0) & (cell_index < cells)
+    clipped = np.clip(cell_index, 0, cells - 1)
+    voice = active & cell_voice[clipped]
+    within_cell = np.mod(beat_position * subdivision, 1.0)
+    pitch = cell_pitch[clipped] + cell_slope[clipped] * (within_cell - .5)
+    target = np.where(voice, pitch, np.nan)
+    phase = np.mod(beat_position, 1.0).astype(np.float32)
+    # Silence before the first metrical event contains no observable phase.
+    phase_valid = time >= lead_s
+    return BeatTarget(target, bpm, lead_s, subdivision, phase, phase_valid,
+                      cell_pitch, cell_voice, cell_onset, cell_offset, cell_slope)
 
 
 def scale_notes(key: int = 0, f_lo: float = F_LO, f_hi: float = F_HI) -> np.ndarray:
