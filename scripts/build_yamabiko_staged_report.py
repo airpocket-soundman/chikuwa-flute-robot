@@ -59,6 +59,17 @@ def main():
             <div><dt>voice F1</dt><dd>{n(am['voice_f1'], 3)}</dd></div>
             <div><dt>onset F1 exact</dt><dd>{n(am['onset_f1_exact_frame'], 3)}</dd></div></dl>
             <p class="note">これはOracle拍セルでの単独Gate。100 Hz tick以外の正解時刻は推論入力に与えていない。afterは診断再合成で、物理演奏ではない。</p></section>'''
+            if beat.get("temporal_connected"):
+                cm = beat["temporal_connected"]; cst = "PASS" if cm.get("pass") else "FAIL"
+                beat_section += f'''<section class="card"><div class="stage"><b>E</b><span>{cst}</span></div>
+                <h2>Connected audio → 100 Hz Gate</h2><p class="flow">raw audio → Ear → Beat → Memory → Clock → Aligner</p>
+                <div class="listen">{beat_audio(bc['tempo_before'], '生のお手本')}{beat_audio(bc['aligner_after'], '全段後の再現')}</div>
+                <dl><div><dt>pitch MAE cents</dt><dd>{n(cm['pitch_mae_cents'])}</dd></div>
+                <div><dt>correlation</dt><dd>{n(cm['trajectory_correlation'], 3)}</dd></div>
+                <div><dt>voice F1</dt><dd>{n(cm['voice_f1'], 3)}</dd></div>
+                <div><dt>rest false positive</dt><dd>{n(cm['rest_false_positive_rate'], 3)}</dd></div>
+                <div><dt>onset F1 30 ms</dt><dd>{n(cm['onset_f1_30ms'], 3)}</dd></div></dl>
+                <p class="note">正解BPM・正解セル・正解時刻を使わない frozen predicted-upstream 最終試験。単独PASSでも接続誤差が累積するため、現在はFAIL。</p></section>'''
         beat_section += "</div>"
 
     stages = [

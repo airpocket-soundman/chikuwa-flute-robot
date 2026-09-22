@@ -114,7 +114,8 @@ def main():
                 "musical_memory_trained": bool(ck.get("musical_memory_trained")),
                 "musical_memory": ck.get("musical_memory_metrics"),
                 "temporal_aligner_trained": bool(ck.get("temporal_aligner_trained")),
-                "temporal_aligner": ck.get("temporal_aligner_metrics"), "cases": cases}
+                "temporal_aligner": ck.get("temporal_aligner_metrics"),
+                "temporal_connected": ck.get("temporal_connected_metrics"), "cases": cases}
     out.mkdir(parents=True, exist_ok=True); (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"wrote {out / 'manifest.json'}")
 

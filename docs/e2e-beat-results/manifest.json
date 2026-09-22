@@ -1,6 +1,6 @@
 {
   "format": "yamabiko-beat-audio-v1",
-  "checkpoint": "runs/yamabiko_temporal_aligner_final.pt",
+  "checkpoint": "runs/yamabiko_temporal_connected.pt",
   "seed": 15551,
   "official_path": "predicted_upstream",
   "audio_kind": "tempo_after is diagnostic click track, not physical performance",
@@ -64,6 +64,21 @@
     "seed": 918431,
     "split": "frozen-final-oracle-grid-unknown-bpm",
     "official_path": "oracle_memory"
+  },
+  "temporal_connected": {
+    "clock_pointer_mae_cells": 0.37904077768325806,
+    "clock_backward_jumps": 0,
+    "clock_eos_mae_ms": 79.47916666666667,
+    "pitch_mae_cents": 128.43394470214844,
+    "trajectory_correlation": 0.7987004928294392,
+    "voice_f1": 0.879126787185669,
+    "rest_false_positive_rate": 0.19084244966506958,
+    "onset_f1_30ms": 0.5373101491985358,
+    "offset_f1_30ms": 0.6045423886461894,
+    "pass": false,
+    "seed": 938431,
+    "split": "frozen-final-predicted-upstream",
+    "official_path": "raw_audio_to_100hz_target"
   },
   "cases": [
     {
