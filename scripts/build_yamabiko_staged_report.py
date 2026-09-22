@@ -98,6 +98,15 @@ def main():
     uno_q_report = json.loads(uno_q_report_path.read_text(encoding="utf-8")) if uno_q_report_path.exists() else {}
     hybrid_lab_path = composite_path.parent / "hybrid-lab.json"
     hybrid_lab = json.loads(hybrid_lab_path.read_text(encoding="utf-8")) if hybrid_lab_path.exists() else {}
+    if hybrid_lab.get("samples"):
+        hybrid_samples = hybrid_lab["samples"]
+    elif hybrid_lab.get("combinations"):
+        hybrid_samples = [{"id": "legacy", "title": hybrid_lab.get("sample", "4音ステップ"),
+                           "description": "従来の単一評価サンプル",
+                           "reference_wav": "e2e-composite-results/reference.wav",
+                           "combinations": hybrid_lab["combinations"]}]
+    else:
+        hybrid_samples = []
     composite_prefix = ""
     if composite_path.exists():
         try:
@@ -520,10 +529,14 @@ def main():
       <div><dt>反復MAE</dt><dd>{uno_q_take_text} cent</dd></div></dl>
       <p class="note">実測環境: {html.escape(str(uno_q_report.get('machine', 'unknown')))} / ONNX Runtime {html.escape(str(uno_q_report.get('onnxruntime', 'unknown')))}。マイク・モーターは使わず、物理装置だけを同じUNO Q内の決定論的シミュレータへ置換。したがって、これは実機CPU上の推論速度と接続のPASSであり、実モーター演奏の合格ではない。</p>
     </section>''' if uno_q_report else ''
+    hybrid_sample_options = "".join(
+        f'<option value="{html.escape(str(sample["id"]))}">{index:02d} {html.escape(str(sample["title"]))}</option>'
+        for index, sample in enumerate(hybrid_samples, 1))
+    first_hybrid_sample = hybrid_samples[0] if hybrid_samples else {}
     hybrid_lab_html = f'''<section class="hybrid-lab" id="hybrid-lab">
-      <header><div><span>INTERACTIVE PIPELINE</span><h2>NN／決定論モジュール交換ラボ</h2></div><strong>16構成を実モデルで事前評価</strong></header>
-      <p>同じサンプルを使い、各工程でNNか決定論モジュールを選ぶ。選んだ工程の出力が共通pitch／voice／position契約で次工程へ渡り、下流の音とグラフも作り直される。</p>
-      <div class="hybrid-sample"><b>サンプル</b><span>{html.escape(str(hybrid_lab.get('sample', '4音ステップ')))}</span><audio controls preload="none" src="e2e-composite-results/reference.wav"></audio></div>
+      <header><div><span>INTERACTIVE PIPELINE</span><h2>NN／決定論モジュール交換ラボ</h2></div><strong>{len(hybrid_samples)}サンプル × 各16構成</strong></header>
+      <p>10種類のお手本を切り替え、各工程でNNか決定論モジュールを選ぶ。選んだ工程の出力が共通pitch／voice／position契約で次工程へ渡り、下流の音とグラフも作り直される。</p>
+      <div class="hybrid-sample"><label><b>お手本サンプル</b><select data-hybrid-sample>{hybrid_sample_options}</select></label><span data-hybrid-description>{html.escape(str(first_hybrid_sample.get('description', '')))}</span><audio controls preload="none" data-hybrid-reference src="{html.escape(str(first_hybrid_sample.get('reference_wav', '')))}"></audio></div>
       <div class="hybrid-controls" aria-label="工程ごとの方式選択">
         <label><span>1 聴覚</span><select data-hybrid-stage="ear"><option value="nn">NN Neural Ear</option><option value="det">決定論 FFT Ear</option></select><small>raw波形 → 音程・発音</small></label><i>→</i>
         <label><span>2 記憶</span><select data-hybrid-stage="memory"><option value="nn">NN Timeline Memory</option><option value="det">決定論 Exact Memory</option></select><small>音程・発音 → 0.5倍Timeline</small></label><i>→</i>
@@ -540,7 +553,7 @@ def main():
         <section><b>4 最終演奏</b><small>選択した制御器による物理simulation音</small><audio controls preload="none" data-hybrid-audio="performance"></audio></section>
       </div>
       <p class="note">{html.escape(str(hybrid_lab.get('note', '')))} 音源は選択済み評価列からブラウザ内で合成する。これは自由な未評価組合せを推測した表示ではない。</p>
-    </section>''' if hybrid_lab else ''
+    </section>''' if hybrid_samples else ''
     composite_card = f'''<section class="card {composite_state}"><div class="stage"><b>ALL</b><span class="{composite_state}">{composite_status}</span></div>
       <h2>全工程 Connected Composite</h2>
       <p class="flow">お手本raw音声 → 記憶 → 0.5倍速計画 → PWM → 決定論的実変位・発音 → 自己音raw波形 → 同じNeural Ear → Comparator → Feedback</p>
@@ -638,6 +651,7 @@ main{{max-width:1120px;margin:auto;padding:48px 20px 80px}}h1{{font-size:clamp(2
 .process-section{{margin:46px 0;scroll-margin-top:20px}}.process-section>header,.history-process>header{{display:flex;gap:14px;align-items:center;margin-bottom:16px}}.process-section>header>span,.history-process>header>b{{display:grid;place-items:center;flex:0 0 44px;height:44px;border-radius:12px;background:var(--cyan);color:#071016;font-size:1.15rem}}.process-section>header p,.history-process>header p{{margin:0;color:var(--muted)}}.history-process{{margin:26px 0;padding:18px;border-left:3px solid var(--line);background:#0a141d;border-radius:0 14px 14px 0}}
 .pipeline-lab{{margin:42px 0}}.tab-list{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px;margin:18px 0}}.tab-list button{{min-height:58px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0b1620;color:var(--ink);font:inherit;font-weight:750;text-align:left;cursor:pointer}}.tab-list button small{{display:block;color:var(--muted);font-weight:500}}.tab-list button[aria-selected="true"]{{border-color:var(--cyan);background:#12303a;box-shadow:inset 0 -3px 0 var(--cyan)}}.tab-panel{{padding:22px;border:1px solid var(--line);border-radius:16px;background:#09131c;scroll-margin-top:18px}}.tab-panel[hidden]{{display:none}}.pipeline-summary{{display:flex;justify-content:space-between;gap:18px;align-items:start;padding-bottom:14px;border-bottom:1px solid var(--line)}}.pipeline-summary span{{color:var(--cyan);font-size:.78rem;font-weight:900;letter-spacing:.08em}}.pipeline-summary strong{{padding:7px 10px;border-radius:8px;white-space:nowrap}}.pipeline-summary.adopted strong{{color:#ffc96b;border:1px solid #d69c3b}}.pipeline-summary.alternative strong{{color:#ffc96b;border:1px solid #d69c3b}}.pipeline-summary.rejected strong,.pipeline-summary.legacy-summary strong,.pipeline-summary.research strong{{color:var(--red);border:1px solid var(--red)}}.pipeline-explainer{{margin:18px 0;padding:18px;border:1px solid #315065;border-radius:14px;background:linear-gradient(135deg,#102333,#0c1924)}}.pipeline-explainer h3{{margin:0 0 6px;color:var(--cyan)}}.pipeline-explainer>p{{margin:.3rem 0 1rem;font-size:1.02rem;color:#d8e5eb}}.pipeline-explainer dl{{margin:0}}.pipeline-explainer dd{{font-size:.9rem}}.pipeline-route{{padding:12px 14px;border-radius:10px;background:#101d29;color:var(--cyan);font-family:ui-monospace,monospace;overflow-wrap:anywhere}}.history-count{{color:var(--muted);font-weight:700}}.raw-e2e-grid{{padding:0}}
 .hybrid-lab{{margin:46px 0;padding:22px;border:1px solid #315065;border-radius:16px;background:linear-gradient(145deg,#102333,#09131c)}}.hybrid-lab>header{{display:flex;justify-content:space-between;gap:18px;align-items:start;border-bottom:1px solid var(--line);padding-bottom:12px}}.hybrid-lab>header span{{color:var(--cyan);font-size:.75rem;font-weight:900;letter-spacing:.08em}}.hybrid-lab>header strong{{color:#70f0ac;border:1px solid #46c987;border-radius:8px;padding:6px 9px}}.hybrid-sample{{display:grid;grid-template-columns:auto minmax(140px,1fr) minmax(240px,1fr);align-items:center;gap:12px;margin:16px 0;padding:12px;background:#0a141d;border-radius:10px}}.hybrid-sample span{{color:var(--muted)}}.hybrid-controls{{display:grid;grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr);gap:7px;align-items:stretch}}.hybrid-controls label{{display:flex;flex-direction:column;gap:6px;padding:12px;background:#0a141d;border:1px solid var(--line);border-radius:10px}}.hybrid-controls label>span{{font-weight:800;color:var(--cyan)}}.hybrid-controls label>small,.hybrid-outputs small{{color:var(--muted)}}.hybrid-controls select{{width:100%;padding:8px;border:1px solid #526675;border-radius:7px;background:#101d29;color:var(--ink);font:inherit}}.hybrid-controls>i{{display:grid;place-items:center;color:var(--cyan);font-size:1.4rem;font-style:normal}}.hybrid-run{{display:block;margin:16px 0 12px;padding:10px 16px;border:0;border-radius:9px;background:var(--cyan);color:#071016;font:inherit;font-weight:850;cursor:pointer}}.hybrid-live{{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:12px 0}}.hybrid-live>b{{color:var(--cyan);font-family:ui-monospace,monospace}}.hybrid-live span{{padding:5px 8px;background:#0a141d;border-radius:7px}}.hybrid-chart{{display:block;width:100%;height:310px;border:1px solid var(--line);border-radius:10px;background:#07111a}}.hybrid-outputs{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}}.hybrid-outputs section{{display:grid;gap:5px;min-width:0;padding:10px;background:#0a141d;border-radius:10px}}.hybrid-outputs audio{{width:100%}}
+.hybrid-sample{{grid-template-columns:minmax(180px,.8fr) minmax(180px,1fr) minmax(240px,1fr)}}.hybrid-sample label{{display:grid;gap:5px}}.hybrid-sample select{{width:100%;padding:8px;border:1px solid #526675;border-radius:7px;background:#101d29;color:var(--ink);font:inherit}}
 .table{{overflow:auto}}table{{border-collapse:collapse;width:100%;font-size:.82rem}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:right;white-space:nowrap}}th:first-child{{text-align:left}}code{{color:var(--cyan)}}
 details{{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:#0b1620}}summary{{cursor:pointer;padding:14px 18px;color:var(--cyan);font-weight:700}}.attempt-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px;padding:0 12px 12px}}.attempt{{background:#101d29;border:1px solid var(--line);border-radius:12px;padding:14px}}.attempt h3{{font-size:.95rem;overflow-wrap:anywhere;margin:.5rem 0}}.attempt .metrics{{font-size:.78rem;color:#c7d6df}}summary:focus-visible,a:focus-visible,audio:focus-visible,.tab-list button:focus-visible{{outline:3px solid #ffc96b;outline-offset:3px}}
 footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:860px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}.flow-heading,.pipeline-summary,.hybrid-lab>header{{display:block}}.flow-heading strong,.pipeline-summary strong,.hybrid-lab>header strong{{display:inline-block;margin-top:8px;white-space:normal}}.flow-row.nodes-4,.flow-row.nodes-3,.flow-row.nodes-2,.flow-row.nodes-1,.hybrid-controls{{grid-template-columns:1fr}}.flow-arrow{{min-width:0;min-height:42px}}.flow-arrow i,.hybrid-controls>i{{transform:rotate(90deg)}}.flow-phase>header{{grid-template-columns:42px minmax(0,1fr)}}.flow-phase>header strong{{grid-column:1/-1;justify-self:start}}.audio,.hybrid-sample{{grid-template-columns:1fr}}.hybrid-outputs{{grid-template-columns:repeat(2,minmax(0,1fr))}}.tab-panel{{padding:14px}}}}@media(max-width:540px){{.hybrid-outputs{{grid-template-columns:1fr}}.hybrid-chart{{height:260px}}}}
@@ -728,6 +742,11 @@ window.addEventListener('hashchange', activateHash); activateHash();
   const root = document.getElementById('hybrid-lab');
   if (!root || !data) return;
   const stages = ['ear', 'memory', 'planner', 'control'];
+  const samples = data.samples || [{{id:'legacy', title:data.sample || '4音ステップ',
+    description:'従来の単一評価サンプル', reference_wav:'e2e-composite-results/reference.wav',
+    combinations:data.combinations}}];
+  const sampleSelect = root.querySelector('[data-hybrid-sample]');
+  const referenceAudio = root.querySelector('[data-hybrid-reference]');
   const selects = Object.fromEntries(stages.map(name => [name, root.querySelector(`[data-hybrid-stage="${{name}}"]`)]));
   const audios = Object.fromEntries(stages.map((name, index) => [stages[index], root.querySelector(`[data-hybrid-audio="${{stages[index] === 'control' ? 'performance' : stages[index]}}"]`)]));
   const urls = {{}};
@@ -783,16 +802,31 @@ window.addEventListener('hashchange', activateHash); activateHash();
 
   function render() {{
     const choice = Object.fromEntries(stages.map(name => [name,selects[name].value]));
-    const key = stages.map(name => choice[name]).join('-'), entry = data.combinations[key];
+    const key = stages.map(name => choice[name]).join('-');
+    const sample = samples.find(item => item.id === sampleSelect.value) || samples[0];
+    let entry;
+    if (sample.outputs) {{
+      const memoryKey = `${{choice.ear}}-${{choice.memory}}`;
+      const plannerKey = `${{memoryKey}}-${{choice.planner}}`;
+      const performance = sample.outputs.performance[key];
+      entry = {{ear:sample.outputs.ear[choice.ear], memory:sample.outputs.memory[memoryKey],
+        planner:sample.outputs.planner[plannerKey], performance, metrics:performance.metrics}};
+    }} else {{
+      entry = sample.combinations[key];
+    }}
     if (!entry) return;
     current = entry;
+    root.querySelector('[data-hybrid-description]').textContent = sample.description || '';
+    if (referenceAudio.getAttribute('src') !== sample.reference_wav) referenceAudio.src = sample.reference_wav;
     root.querySelector('[data-hybrid-route]').textContent = stages.map(name => label[choice[name]]).join(' → ');
     root.querySelector('[data-hybrid-mae]').textContent = entry.metrics.final_pitch_mae_cents == null ? '—' : entry.metrics.final_pitch_mae_cents.toFixed(1);
     root.querySelector('[data-hybrid-voice]').textContent = (100*entry.metrics.voiced_fraction).toFixed(1) + '%';
     updateAudio('ear', entry.ear); updateAudio('memory', entry.memory);
-    updateAudio('planner', {{pitch_cents:entry.planner.nominal_cents,voice:entry.planner.voice}});
+    updateAudio('planner', {{pitch_cents:entry.planner.pitch_cents || entry.planner.nominal_cents,
+                            voice:entry.planner.voice}});
     updateAudio('control', entry.performance); draw(entry);
   }}
+  sampleSelect.addEventListener('change', render);
   stages.forEach(name => selects[name].addEventListener('change', render));
   root.querySelector('.hybrid-run').addEventListener('click', render);
   window.addEventListener('resize', () => current && draw(current)); render();
