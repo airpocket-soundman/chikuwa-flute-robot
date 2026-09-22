@@ -58,6 +58,7 @@ def main():
     beat_path = pathlib.Path(args.manifest).parent.parent / "e2e-beat-results" / "manifest.json"
     beat = {}
     beat_cards = {"perception": [], "memory": [], "planning": [], "feedback": []}
+    legacy_cards = []
     if beat_path.exists():
         beat = json.loads(beat_path.read_text(encoding="utf-8")); bm = beat["tempo_beat"]
         bc = next((x for x in beat["cases"] if x["case"] == "bpm_137"), beat["cases"][0])
@@ -138,53 +139,53 @@ def main():
             <div><dt>connected steady pitch MAE</dt><dd>{n(pm['connected_steady_pitch_mae_cents'])}</dd></div></dl>
             <p class="note">単独GateはOracle音程で判定してPASS。Timeline接続値は前段誤差を含みFAIL。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section>''')
 
-    history_section = "<p>試行履歴はまだ生成されていません。</p>"
-    if history:
-        failed = sum(not row["pass"] for row in history); passed = len(history) - failed
-        history_processes = (
-            ("1", "聞く・拍を取る", "音声からBPMと連続拍位相を推定", ("Tempo / Beat",)),
-            ("2", "現行の記憶", "拍条件付き100 Hz Timelineを保存して再生", ("Timeline Memory",)),
-            ("3", "位置へ変換", "音程・発音列からプランジャ位置を計画", ("Position Planner",)),
-            ("R", "不採用・研究中の時間方式", "セル記憶、Clock、Aligner、Timing Profileと接続失敗を保存", ("Musical Memory", "Duration Clock", "Temporal Aligner", "Timing Profile", "Connected Temporal")),
-        )
-        process_blocks = []
-        for process_number, process_title, process_note, process_stages in history_processes:
-            stage_groups = []
-            for stage in process_stages:
-                rows = sorted((row for row in history if row["stage"] == stage),
-                              key=lambda row: (not row["pass"], row["id"]))
-                if not rows: continue
-                cards_history = []
-                for row in rows:
-                    attempt_status = "PASS" if row["pass"] else "FAIL"
-                    metric_text = " / ".join(f"{html.escape(k.replace('_', ' '))} {n(v, 3)}" for k, v in list(row["metrics"].items())[:6])
-                    listening = ""
-                    if row.get("audio_manifest"):
-                        manifest_path = docs_root / row["audio_manifest"]
-                        if manifest_path.exists():
-                            am = json.loads(manifest_path.read_text(encoding="utf-8")); case = am["cases"][0]
-                            pairs = (("position_before", "position_after", "position_plot"),
-                                     ("timeline_before", "timeline_after", "timeline_plot"),
-                                     ("timing_before", "timing_after", "timing_plot"),
-                                     ("aligner_before", "aligner_after", "aligner_plot"),
-                                     ("memory_before", "memory_after", "memory_plot"),
-                                     ("tempo_before", "tempo_after", "tempo_plot"))
-                            pair = next((p for p in pairs if p[0] in case and p[1] in case), None)
-                            if pair:
-                                prefix = pathlib.PurePosixPath(row["audio_manifest"]).parent.as_posix() + "/"
-                                plot_caption = ("横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: before / 橙: after"
-                                                if pair[2] not in ("tempo_plot", "timing_plot") else
-                                                "横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）")
-                                listening = (f'<div class="listen">{doc_audio(prefix + case[pair[0]], "before")}'
-                                             f'{doc_audio(prefix + case[pair[1]], "after")}</div>'
-                                             f'{figure(case.get(pair[2]), plot_caption, prefix)}')
-                    cards_history.append(f'''<article class="attempt"><div class="stage"><b>試</b><span class="{attempt_status.lower()}">{attempt_status}</span></div>
-                    <h3>{html.escape(row['id'])}</h3><p>{html.escape(row['reason'])}</p><p class="metrics">{metric_text or '数値なし'}</p>
-                    <p class="note">split: {html.escape(str(row['split']))} / seed: {html.escape(str(row.get('seed')))}</p>{listening}</article>''')
-                stage_passed = sum(row["pass"] for row in rows)
-                stage_groups.append(f'''<details {'open' if stage_passed else ''}><summary>{html.escape(stage)} — PASS {stage_passed} / FAIL {len(rows)-stage_passed}</summary><div class="attempt-grid">{''.join(cards_history)}</div></details>''')
-            process_blocks.append(f'''<section class="history-process"><header><b>{process_number}</b><div><h3>工程 {process_number}: {process_title}</h3><p>{process_note}</p></div></header>{''.join(stage_groups)}</section>''')
-        history_section = f'''<p>全 {len(history)} 試行（PASS {passed} / FAIL {failed}）。現行工程と不採用方式を分け、FAILも削除せず掲載する。</p>{''.join(process_blocks)}'''
+    def history_attempt_card(row):
+        attempt_status = "PASS" if row["pass"] else "FAIL"
+        metric_text = " / ".join(f"{html.escape(k.replace('_', ' '))} {n(v, 3)}" for k, v in list(row["metrics"].items())[:6])
+        listening = ""
+        if row.get("audio_manifest"):
+            manifest_path = docs_root / row["audio_manifest"]
+            if manifest_path.exists():
+                am = json.loads(manifest_path.read_text(encoding="utf-8")); case = am["cases"][0]
+                pairs = (("position_before", "position_after", "position_plot"),
+                         ("timeline_before", "timeline_after", "timeline_plot"),
+                         ("timing_before", "timing_after", "timing_plot"),
+                         ("aligner_before", "aligner_after", "aligner_plot"),
+                         ("memory_before", "memory_after", "memory_plot"),
+                         ("tempo_before", "tempo_after", "tempo_plot"))
+                pair = next((p for p in pairs if p[0] in case and p[1] in case), None)
+                if pair:
+                    prefix = pathlib.PurePosixPath(row["audio_manifest"]).parent.as_posix() + "/"
+                    plot_caption = ("横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: before / 橙: after"
+                                    if pair[2] not in ("tempo_plot", "timing_plot") else
+                                    "横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）")
+                    listening = (f'<div class="listen">{doc_audio(prefix + case[pair[0]], "before")}'
+                                 f'{doc_audio(prefix + case[pair[1]], "after")}</div>'
+                                 f'{figure(case.get(pair[2]), plot_caption, prefix)}')
+        return f'''<article class="attempt"><div class="stage"><b>試</b><span class="{attempt_status.lower()}">{attempt_status}</span></div>
+        <h3>{html.escape(row['id'])}</h3><p>{html.escape(row['reason'])}</p><p class="metrics">{metric_text or '数値なし'}</p>
+        <p class="note">split: {html.escape(str(row['split']))} / seed: {html.escape(str(row.get('seed')))}</p>{listening}</article>'''
+
+    def render_history(selected):
+        rows = [row for row in history if selected(row)]
+        if not rows: return "<p>該当する試行記録はありません。</p>"
+        stage_order = ("Tempo / Beat", "Musical Memory", "Duration Clock", "Temporal Aligner",
+                       "Timing Profile", "Timeline Memory", "Position Planner", "Connected Temporal")
+        groups = []
+        for stage in stage_order:
+            stage_rows = sorted((row for row in rows if row["stage"] == stage),
+                                key=lambda row: (not row["pass"], row["id"]))
+            if not stage_rows: continue
+            passed = sum(row["pass"] for row in stage_rows)
+            groups.append(f'''<details {'open' if passed else ''}><summary>{html.escape(stage)} — PASS {passed} / FAIL {len(stage_rows)-passed}</summary><div class="attempt-grid">{''.join(history_attempt_card(row) for row in stage_rows)}</div></details>''')
+        passed = sum(row["pass"] for row in rows)
+        return f'''<p class="history-count">{len(rows)}試行 — PASS {passed} / FAIL {len(rows)-passed}</p>{''.join(groups)}'''
+
+    current_history = render_history(lambda row: row["stage"] in ("Tempo / Beat", "Timeline Memory", "Position Planner"))
+    clock_history = render_history(lambda row: (row["stage"] in ("Musical Memory", "Temporal Aligner") or
+                                                   (row["stage"] == "Connected Temporal" and "profile" not in row["id"])))
+    timing_history = render_history(lambda row: (row["stage"] in ("Duration Clock", "Timing Profile") or
+                                                  (row["stage"] == "Connected Temporal" and "profile" in row["id"])))
 
     stages = [
         ("1", "Neural Ear", "生の20 ms波形 → 音程・発音状態", s["ear"],
@@ -217,7 +218,12 @@ def main():
           <div class="listen">{audio(before, "NNの前")}{audio(after, "NNの後")}</div>{stage_plot}
           <dl>{''.join(metric_lines)}</dl><p class="note">{note}</p>
         </section>'''
-        beat_cards[bucket].insert(0, card_html) if number == "1" else beat_cards[bucket].append(card_html)
+        if number in ("2", "3"):
+            legacy_cards.append(card_html)
+        elif number == "1":
+            beat_cards[bucket].insert(0, card_html)
+        else:
+            beat_cards[bucket].append(card_html)
     beat_cards["planning"].append('''<section class="card pending"><div class="stage"><b>4</b><span class="pending">未評価</span></div>
       <h2>Motor / Controller / Flute</h2><p class="flow">目標位置 → モータ動特性 → バルブ → 笛</p>
       <p>現行Timeline→Position経路とは未統合。現在のafter WAVは定常位置からの診断再合成で、モータ動特性や実機を通していない。</p></section>''')
@@ -277,6 +283,60 @@ def main():
         <h2>{html.escape(attempt_manifest.parent.name)}</h2>
         <p>MAE {n(ff['mae'])} cent / correlation {n(ff['correlation'], 3)} / direction {n(ff['direction'], 3)} / gain {n(ff['gain'], 3)}</p>
         <div class="listen">{audio(prefix + sample['ff_before'], "お手本")}{audio(prefix + sample['ff_after'], "試行後")}</div></section>''')
+
+    raw_e2e_cards = []
+    for report_path in sorted((docs_root.parent / "runs").glob("yamabiko_e2e*_report.json")):
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        flags = [bool(value) for key, value in report.items() if key.endswith("_pass")]
+        report_pass = bool(flags) and all(flags)
+        report_status = "PASS" if report_pass else "FAIL"
+        metrics = [(key, value) for key, value in report.items() if isinstance(value, (int, float)) and not isinstance(value, bool)]
+        metric_text = " / ".join(f"{html.escape(key.replace('_', ' '))} {n(value, 3)}" for key, value in metrics[:6])
+        raw_e2e_cards.append(f'''<article class="attempt"><div class="stage"><b>E2E</b><span class="{report_status.lower()}">{report_status}</span></div>
+        <h3>{html.escape(report_path.stem.removesuffix('_report'))}</h3><p class="metrics">{metric_text}</p>
+        <p class="note">補助Gateの記録。最終演奏Gate 3は3試行すべてFAIL。</p></article>''')
+
+    pipeline_tabs = f'''<section class="pipeline-lab" aria-labelledby="pipeline-tabs-title"><h2 id="pipeline-tabs-title">パイプライン別の結果と試行記録</h2>
+    <p>採用予定と代替案を混在させず、同じパイプラインのフロー・結果・WAV・グラフ・失敗試行を一つのタブへまとめた。</p>
+    <div class="tab-list" role="tablist" aria-label="パイプライン別結果">
+      <button type="button" role="tab" id="tab-current" aria-controls="pipeline-current" aria-selected="true">採用予定 Timeline <small>18試行 / 全体FAIL</small></button>
+      <button type="button" role="tab" id="tab-clock" aria-controls="pipeline-clock" aria-selected="false" tabindex="-1">代替A Beat-cell＋Clock <small>26試行 / 接続FAIL</small></button>
+      <button type="button" role="tab" id="tab-timing" aria-controls="pipeline-timing" aria-selected="false" tabindex="-1">代替B Duration／Timing <small>10試行 / 全体FAIL</small></button>
+      <button type="button" role="tab" id="tab-legacy" aria-controls="pipeline-legacy" aria-selected="false" tabindex="-1">旧 Staged制御 <small>3系統 / 全体FAIL</small></button>
+      <button type="button" role="tab" id="tab-raw-e2e" aria-controls="pipeline-raw-e2e" aria-selected="false" tabindex="-1">単一 Raw-audio E2E <small>7記録 / 演奏FAIL</small></button>
+    </div>
+    <section class="tab-panel" role="tabpanel" id="pipeline-current" aria-labelledby="tab-current">
+      <header class="pipeline-summary adopted"><div><span>採用予定</span><h2>Beat-conditioned Timeline Pipeline</h2></div><strong>単独3 Gate PASS / 接続FAIL</strong></header>
+      <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner → Motor/Flute → Comparator → Feedback</p>
+      {process_results}<h2>このパイプラインの試行履歴</h2>{current_history}
+    </section>
+    <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">
+      <header class="pipeline-summary alternative"><div><span>代替案 A</span><h2>Beat-cell + Neural Clock / Aligner</h2></div><strong>単独PASS / 接続FAIL</strong></header>
+      <p class="pipeline-route">shared Ear/Tempo → Musical Memory cells → Neural Clock → Temporal Aligner → 100 Hz target</p>
+      <p>Memory、Clock、AlignerはOracle条件の単独GateでPASSしたが、predicted-upstream接続では誤差が累積したため採用予定から外している。</p>
+      {clock_history}
+    </section>
+    <section class="tab-panel" role="tabpanel" id="pipeline-timing" aria-labelledby="tab-timing">
+      <header class="pipeline-summary rejected"><div><span>代替案 B</span><h2>Duration-conditioned / Stored Timing Profile</h2></div><strong>全体 FAIL</strong></header>
+      <p class="pipeline-route">Beat-cell memory → duration-conditioned clock または stored absolute pointer → Aligner</p>
+      <p>演奏時間または絶対セル位置を記憶する案。Duration単独にはPASSがあるが接続はFAIL、Timing Profileは単独・接続ともFAIL。</p>
+      {timing_history}
+    </section>
+    <section class="tab-panel" role="tabpanel" id="pipeline-legacy" aria-labelledby="tab-legacy">
+      <header class="pipeline-summary legacy-summary"><div><span>旧方式</span><h2>Fixed 100 Hz Staged Control</h2></div><strong>全体 FAIL</strong></header>
+      <p class="pipeline-route">raw audio → Neural Ear → Reference Memory → Feed-forward/Motor inverse → Plant → Comparator → Feedback</p>
+      <div class="grid">{''.join(legacy_cards)}</div>
+      <h2>旧Physical Feed-forward試行</h2><p>root checkpointと2つの派生試行を分けて保存。いずれも物理演奏GateはFAIL。</p>
+      <div class="grid">{''.join(attempts) if attempts else '<p>派生試行なし</p>'}</div>
+    </section>
+    <section class="tab-panel" role="tabpanel" id="pipeline-raw-e2e" aria-labelledby="tab-raw-e2e">
+      <header class="pipeline-summary research"><div><span>研究中</span><h2>Single Raw-audio E2EImitator</h2></div><strong>演奏 Gate 3: 0 / 3 PASS</strong></header>
+      <p class="pipeline-route">reference raw + self raw → shared CNN / GRU memory / attention / control GRU → PWM・valve・done</p>
+      <p>単一forward graphとして最もE2Eだが、演奏誤差237〜268 centで未合格。補助知覚Gateの成功と最終演奏成功を分けて表示する。</p>
+      <div class="attempt-grid raw-e2e-grid">{''.join(raw_e2e_cards)}</div>
+      <p><a href="e2e.md">単一E2Eの構造・複数take評価を読む</a></p>
+    </section>
+    </section>'''
     old = {"mae": 264.1299841855391, "corr": -0.995092265219766,
            "direction": 1.0, "explanation": "旧方向指標は300 ms以内の微小な符号一致で1.0となるため無効化"}
     doc = f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -292,16 +352,16 @@ main{{max-width:1120px;margin:auto;padding:48px 20px 80px}}h1{{font-size:clamp(2
 .pitch-plot{{margin:14px 0 18px}}.pitch-plot img{{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px;background:#0b1620}}.pitch-plot figcaption{{margin-top:7px;color:var(--muted);font-size:.78rem}}.stage span.pass{{color:#70f0ac}}.stage span.fail{{color:#ff8c78}}.stage span.partial{{color:#ffc96b}}.stage span.pending{{color:#9eb2c0}}.legacy{{border-style:dashed;opacity:.86}}.pending{{border-color:#526675}}
 .flow-overview{{margin:28px 0;padding:24px;background:#0b1620;border:1px solid var(--line);border-radius:18px}}.flow-heading{{display:flex;justify-content:space-between;gap:20px;align-items:start}}.flow-heading strong{{color:var(--red);border:1px solid var(--red);padding:8px 12px;border-radius:9px;white-space:nowrap}}.system-flow{{list-style:none;margin:18px 0;padding:0}}.flow-row{{display:grid;grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr);align-items:stretch;gap:8px}}.flow-node{{min-width:0;display:flex;flex-direction:column;border:2px solid var(--line);border-radius:12px;background:#101d29}}.flow-node>span,.flow-node>b,.flow-node>small{{margin-left:14px;margin-right:14px}}.flow-node>a{{display:flex;flex:1;flex-direction:column;gap:6px;padding:14px;color:inherit;text-decoration:none}}.flow-node>a span,.flow-node>span{{font-size:.72rem;font-weight:900}}.flow-node small{{color:var(--muted)}}.flow-node em{{margin-top:auto;padding-top:8px;color:var(--cyan);font-size:.75rem;font-style:normal}}.flow-node.pass{{border-color:#46c987}}.flow-node.pass span{{color:#70f0ac}}.flow-node.fail{{border-color:var(--red)}}.flow-node.fail span{{color:#ff8c78}}.flow-node.partial{{border-color:#d69c3b}}.flow-node.partial span{{color:#ffc96b}}.flow-node.pending,.flow-node.neutral{{border-color:#526675}}.flow-node.pending span,.flow-node.neutral span{{color:#b3c0c8}}.flow-arrow{{min-width:0;display:grid;place-items:center;align-content:center;text-align:center;color:var(--muted)}}.flow-arrow i{{font-size:1.6rem;font-style:normal}}.flow-arrow small{{font-size:.68rem}}.flow-arrow.fail,.flow-turn.fail{{color:var(--red)}}.flow-arrow.pass{{color:#70f0ac}}.flow-arrow.pending{{color:#9eb2c0}}.flow-turn{{display:flex;justify-content:center;gap:12px;align-items:center;margin:4px 0;font-size:.82rem}}.flow-turn span{{font-size:1.5rem}}.feedback-return{{display:flex;gap:12px;align-items:center;border:1px dashed #526675;border-radius:10px;padding:10px 14px;color:var(--muted)}}.feedback-return b{{color:#9eb2c0}}.flow-caveat{{color:var(--muted);font-size:.88rem}}
 .process-section{{margin:46px 0;scroll-margin-top:20px}}.process-section>header,.history-process>header{{display:flex;gap:14px;align-items:center;margin-bottom:16px}}.process-section>header>span,.history-process>header>b{{display:grid;place-items:center;flex:0 0 44px;height:44px;border-radius:12px;background:var(--cyan);color:#071016;font-size:1.15rem}}.process-section>header p,.history-process>header p{{margin:0;color:var(--muted)}}.history-process{{margin:26px 0;padding:18px;border-left:3px solid var(--line);background:#0a141d;border-radius:0 14px 14px 0}}
+.pipeline-lab{{margin:42px 0}}.tab-list{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px;margin:18px 0}}.tab-list button{{min-height:58px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0b1620;color:var(--ink);font:inherit;font-weight:750;text-align:left;cursor:pointer}}.tab-list button small{{display:block;color:var(--muted);font-weight:500}}.tab-list button[aria-selected="true"]{{border-color:var(--cyan);background:#12303a;box-shadow:inset 0 -3px 0 var(--cyan)}}.tab-panel{{padding:22px;border:1px solid var(--line);border-radius:16px;background:#09131c;scroll-margin-top:18px}}.tab-panel[hidden]{{display:none}}.pipeline-summary{{display:flex;justify-content:space-between;gap:18px;align-items:start;padding-bottom:14px;border-bottom:1px solid var(--line)}}.pipeline-summary span{{color:var(--cyan);font-size:.78rem;font-weight:900;letter-spacing:.08em}}.pipeline-summary strong{{padding:7px 10px;border-radius:8px;white-space:nowrap}}.pipeline-summary.adopted strong{{color:#ffc96b;border:1px solid #d69c3b}}.pipeline-summary.alternative strong{{color:#ffc96b;border:1px solid #d69c3b}}.pipeline-summary.rejected strong,.pipeline-summary.legacy-summary strong,.pipeline-summary.research strong{{color:var(--red);border:1px solid var(--red)}}.pipeline-route{{padding:12px 14px;border-radius:10px;background:#101d29;color:var(--cyan);font-family:ui-monospace,monospace;overflow-wrap:anywhere}}.history-count{{color:var(--muted);font-weight:700}}.raw-e2e-grid{{padding:0}}
 .table{{overflow:auto}}table{{border-collapse:collapse;width:100%;font-size:.82rem}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:right;white-space:nowrap}}th:first-child{{text-align:left}}code{{color:var(--cyan)}}
-details{{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:#0b1620}}summary{{cursor:pointer;padding:14px 18px;color:var(--cyan);font-weight:700}}.attempt-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px;padding:0 12px 12px}}.attempt{{background:#101d29;border:1px solid var(--line);border-radius:12px;padding:14px}}.attempt h3{{font-size:.95rem;overflow-wrap:anywhere;margin:.5rem 0}}.attempt .metrics{{font-size:.78rem;color:#c7d6df}}summary:focus-visible,a:focus-visible,audio:focus-visible{{outline:3px solid #ffc96b;outline-offset:3px}}
-footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:860px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}.flow-heading{{display:block}}.flow-heading strong{{display:inline-block;margin-top:8px}}.flow-row{{grid-template-columns:1fr}}.flow-arrow{{min-width:0;min-height:42px}}.flow-arrow i{{transform:rotate(90deg)}}.flow-turn{{border-block:1px dashed #526675;padding:8px}}.audio{{grid-template-columns:1fr}}}}
+details{{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:#0b1620}}summary{{cursor:pointer;padding:14px 18px;color:var(--cyan);font-weight:700}}.attempt-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px;padding:0 12px 12px}}.attempt{{background:#101d29;border:1px solid var(--line);border-radius:12px;padding:14px}}.attempt h3{{font-size:.95rem;overflow-wrap:anywhere;margin:.5rem 0}}.attempt .metrics{{font-size:.78rem;color:#c7d6df}}summary:focus-visible,a:focus-visible,audio:focus-visible,.tab-list button:focus-visible{{outline:3px solid #ffc96b;outline-offset:3px}}
+footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:860px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}.flow-heading,.pipeline-summary{{display:block}}.flow-heading strong,.pipeline-summary strong{{display:inline-block;margin-top:8px;white-space:normal}}.flow-row{{grid-template-columns:1fr}}.flow-arrow{{min-width:0;min-height:42px}}.flow-arrow i{{transform:rotate(90deg)}}.flow-turn{{border-block:1px dashed #526675;padding:8px}}.audio{{grid-template-columns:1fr}}.tab-panel{{padding:14px}}}}
 </style></head><body><main>
 <p class="eyebrow">PHYSICAL AI / OBJECTIVE GATED DEVELOPMENT</p><h1>お手本は、<br>本当に演奏になったか。</h1>
 <p class="lead">単一の総合スコアで隠さず、聴覚・記憶・フィードフォワード演奏・誤差判定を独立したNNに分け、未知の固定課題で評価した。各カードの音声は同じ <code>step_up_down</code> 課題の「NN前 / NN後」である。</p>
 {flow_diagram}
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained={str(feedback['trained']).lower()} / pass={str(feedback['pass']).lower()}（{html.escape(feedback['reason'])}）。</div>
-<h2>工程別の最新結果</h2><p>現行の採用経路と旧方式をカード内で明記し、入力→出力の順に並べた。</p>{process_results}
-<h2>全試行履歴（失敗モデルを含む）</h2>{history_section}
+{pipeline_tabs}
 <h2>評価を厳格化した理由</h2><p>旧一体モデルはMAE {old['mae']:.1f} cent、軌跡相関 {old['corr']:.3f} で実際には逆方向へ追従した。一方、旧方向指標だけは {old['direction']:.1f} だった。{old['explanation']}。新評価は発音できない目標区間へ1200 cent罰を与え、P90、発音率、休符漏れ、遷移ゲイン、整定誤差をケース別に残す。</p>
 <h2>学習の分離と再統合</h2><p>前段が合格したら凍結して次段を学習する。FFは名目rig・自己音なしから開始し、同じ参照でもrigごとに異なるOracle操作を回帰する不可能問題を避けた。次に閉ループDAggerでFeedback Residualを学習し、最後に未知rigと複数takeのRig Adapterを追加する。最終配備時は各NNを一つのforward graphとcheckpointへ束ねられるため、分離評価とE2E推論は両立する。</p>
 <h2>今後の実装計画</h2>
@@ -335,10 +395,50 @@ footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padd
     <p><a href="improvisation-extension-plan.html">HTML詳細計画</a> / <a href="improvisation-extension-plan.md">Markdown原文</a></p>
   </section>
 </div>
-<h2>工程3・旧Physical Feed-forward試行</h2><p>現行Position Planner以前の物理シミュレーション試行。改善しなかった結果も、同じ固定課題のWAVと指標を残す。</p><div class="grid">{''.join(attempts) if attempts else '<p>まだ記録なし</p>'}</div>
 <h2>全ケース詳細</h2>{''.join(details)}
 <footer>seed {data['seed']} / checkpoint {html.escape(data['checkpoint'])}<br>{html.escape(data['sonification_note'])}</footer>
-</main></body></html>'''
+</main><script>
+(() => {{
+  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  const panels = tabs.map(tab => document.getElementById(tab.getAttribute('aria-controls')));
+  if (!tabs.length) return;
+  document.documentElement.classList.add('tabs-ready');
+  const activate = (index, updateHash = false) => {{
+    tabs.forEach((tab, i) => {{
+      const selected = i === index;
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      panels[i].hidden = !selected;
+    }});
+    if (updateHash) history.replaceState(null, '', '#' + panels[index].id);
+  }};
+  const indexForHash = () => {{
+    const id = location.hash.slice(1);
+    if (!id) return 0;
+    const target = document.getElementById(id);
+    const index = panels.findIndex(panel => panel.id === id || (target && panel.contains(target)));
+    return index < 0 ? 0 : index;
+  }};
+  tabs.forEach((tab, index) => {{
+    tab.addEventListener('click', () => activate(index, true));
+    tab.addEventListener('keydown', event => {{
+      let next = index;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % tabs.length;
+      else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = tabs.length - 1;
+      else return;
+      event.preventDefault(); activate(next, true); tabs[next].focus();
+    }});
+  }});
+  const activateHash = () => {{
+    const index = indexForHash(); activate(index, false);
+    const target = document.getElementById(location.hash.slice(1));
+    if (target && target !== panels[index]) requestAnimationFrame(() => target.scrollIntoView());
+  }};
+  window.addEventListener('hashchange', activateHash); activateHash();
+}})();
+</script></body></html>'''
     path = pathlib.Path(args.out); path.parent.mkdir(parents=True, exist_ok=True); path.write_text(doc, encoding="utf-8")
     print(f"wrote {path}")
 
