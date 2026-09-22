@@ -96,6 +96,8 @@ def main():
     composite_audio = composite.get("audio", {})
     uno_q_report_path = composite_path.parent / "uno_q_onnx_report.json"
     uno_q_report = json.loads(uno_q_report_path.read_text(encoding="utf-8")) if uno_q_report_path.exists() else {}
+    hybrid_lab_path = composite_path.parent / "hybrid-lab.json"
+    hybrid_lab = json.loads(hybrid_lab_path.read_text(encoding="utf-8")) if hybrid_lab_path.exists() else {}
     composite_prefix = ""
     if composite_path.exists():
         try:
@@ -518,6 +520,27 @@ def main():
       <div><dt>反復MAE</dt><dd>{uno_q_take_text} cent</dd></div></dl>
       <p class="note">実測環境: {html.escape(str(uno_q_report.get('machine', 'unknown')))} / ONNX Runtime {html.escape(str(uno_q_report.get('onnxruntime', 'unknown')))}。マイク・モーターは使わず、物理装置だけを同じUNO Q内の決定論的シミュレータへ置換。したがって、これは実機CPU上の推論速度と接続のPASSであり、実モーター演奏の合格ではない。</p>
     </section>''' if uno_q_report else ''
+    hybrid_lab_html = f'''<section class="hybrid-lab" id="hybrid-lab">
+      <header><div><span>INTERACTIVE PIPELINE</span><h2>NN／決定論モジュール交換ラボ</h2></div><strong>16構成を実モデルで事前評価</strong></header>
+      <p>同じサンプルを使い、各工程でNNか決定論モジュールを選ぶ。選んだ工程の出力が共通pitch／voice／position契約で次工程へ渡り、下流の音とグラフも作り直される。</p>
+      <div class="hybrid-sample"><b>サンプル</b><span>{html.escape(str(hybrid_lab.get('sample', '4音ステップ')))}</span><audio controls preload="none" src="e2e-composite-results/reference.wav"></audio></div>
+      <div class="hybrid-controls" aria-label="工程ごとの方式選択">
+        <label><span>1 聴覚</span><select data-hybrid-stage="ear"><option value="nn">NN Neural Ear</option><option value="det">決定論 FFT Ear</option></select><small>raw波形 → 音程・発音</small></label><i>→</i>
+        <label><span>2 記憶</span><select data-hybrid-stage="memory"><option value="nn">NN Timeline Memory</option><option value="det">決定論 Exact Memory</option></select><small>音程・発音 → 0.5倍Timeline</small></label><i>→</i>
+        <label><span>3 計画</span><select data-hybrid-stage="planner"><option value="nn">NN Position Planner</option><option value="det">決定論 Linear Planner</option></select><small>Timeline → 位置</small></label><i>→</i>
+        <label><span>4 制御</span><select data-hybrid-stage="control"><option value="nn">NN Controller＋Feedback</option><option value="det">決定論 PD＋PID</option></select><small>位置・自己音 → PWM・演奏</small></label>
+      </div>
+      <button type="button" class="hybrid-run">この構成で出力を作る</button>
+      <div class="hybrid-live" aria-live="polite"><b data-hybrid-route></b><span>最終音程MAE <strong data-hybrid-mae>—</strong> cent</span><span>発音率 <strong data-hybrid-voice>—</strong></span></div>
+      <canvas class="hybrid-chart" role="img" aria-label="選択したパイプラインの時間対音程グラフ"></canvas>
+      <div class="hybrid-outputs">
+        <section><b>1 聴覚の出力</b><small>音程・発音を次の記憶へ</small><audio controls preload="none" data-hybrid-audio="ear"></audio></section>
+        <section><b>2 記憶の出力</b><small>0.5倍Timelineを次の計画へ</small><audio controls preload="none" data-hybrid-audio="memory"></audio></section>
+        <section><b>3 計画の出力</b><small>位置を名目笛音へ変換した診断音</small><audio controls preload="none" data-hybrid-audio="planner"></audio></section>
+        <section><b>4 最終演奏</b><small>選択した制御器による物理simulation音</small><audio controls preload="none" data-hybrid-audio="performance"></audio></section>
+      </div>
+      <p class="note">{html.escape(str(hybrid_lab.get('note', '')))} 音源は選択済み評価列からブラウザ内で合成する。これは自由な未評価組合せを推測した表示ではない。</p>
+    </section>''' if hybrid_lab else ''
     composite_card = f'''<section class="card {composite_state}"><div class="stage"><b>ALL</b><span class="{composite_state}">{composite_status}</span></div>
       <h2>全工程 Connected Composite</h2>
       <p class="flow">お手本raw音声 → 記憶 → 0.5倍速計画 → PWM → 決定論的実変位・発音 → 自己音raw波形 → 同じNeural Ear → Comparator → Feedback</p>
@@ -547,7 +570,7 @@ def main():
         <dl><div><dt>Feedforward</dt><dd>Position Planner（別Policyは置かない）</dd></div><div><dt>関係学習</dt><dd>PWM履歴 → 可聴音程のWorld Model</dd></div><div><dt>訓練環境</dt><dd>決定論的なtorque rise・摩擦・慣性 + 線形笛</dd></div><div><dt>検証範囲</dt><dd>内部simulationのみ / 実機未検証</dd></div></dl>
       </div>
       <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner (= Feedforward) → Motor Controller → Motor Physics → Linear Flute → deterministic waveform → Neural Ear (self) → Comparator → Adaptive Feedback ↩ PWM<br>学習時: PWM/audio → Motor Audio World Model → Motor Controller</p>
-      {process_results}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div><h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
+      {process_results}{hybrid_lab_html}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div><h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
       <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p>{physical_history}
     </section>
     <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">
@@ -598,6 +621,7 @@ def main():
     verdict_detail = (f"Physical simulationはMotor Controller {state_label(controller_state)} / "
                       f"Feedback Residual {state_label(residual_state)}。実機検証は"
                       f"{'済み' if physical_summary.get('real_rig_validated') else '未実施'}。")
+    hybrid_data_json = json.dumps(hybrid_lab, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/") if hybrid_lab else "null"
     doc = f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Yamabiko E2E 分離NN 学習レポート</title>
 <style>
@@ -613,9 +637,10 @@ main{{max-width:1120px;margin:auto;padding:48px 20px 80px}}h1{{font-size:clamp(2
 .flow-overview{{margin:28px 0;padding:24px;background:#0b1620;border:1px solid var(--line);border-radius:18px}}.flow-heading{{display:flex;justify-content:space-between;gap:20px;align-items:start}}.flow-heading strong{{color:var(--red);border:1px solid var(--red);padding:8px 12px;border-radius:9px;white-space:nowrap}}.phase-flow{{display:grid;gap:0;margin:22px 0}}.flow-phase{{padding:16px;border:1px solid var(--line);border-radius:14px;background:#0d1923}}.flow-phase>header{{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:center}}.flow-phase>header>span{{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--cyan);color:#071016;font-size:1.1rem;font-weight:900}}.flow-phase>header div{{display:grid}}.flow-phase>header small{{color:var(--muted)}}.flow-phase>header strong{{padding:5px 9px;border-radius:8px;font-size:.8rem}}.flow-phase>header strong.pass{{color:#70f0ac;border:1px solid #46c987}}.flow-phase>header strong.fail{{color:#ff8c78;border:1px solid var(--red)}}.flow-phase>header strong.partial{{color:#ffc96b;border:1px solid #d69c3b}}.system-flow{{list-style:none;margin:14px 0 0;padding:0}}.flow-row{{display:grid;align-items:stretch;gap:8px}}.flow-row.nodes-4{{grid-template-columns:minmax(0,1fr) 42px minmax(0,1fr) 42px minmax(0,1fr) 42px minmax(0,1fr)}}.flow-row.nodes-3{{grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr)}}.flow-row.nodes-2{{grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr)}}.flow-row.nodes-1{{grid-template-columns:minmax(0,1fr)}}.flow-node{{min-width:0;display:flex;flex-direction:column;border:2px solid var(--line);border-radius:12px;background:#101d29}}.flow-node>span,.flow-node>b,.flow-node>small{{margin-left:14px;margin-right:14px}}.flow-node>a{{display:flex;flex:1;flex-direction:column;gap:6px;padding:14px;color:inherit;text-decoration:none}}.flow-node>a span,.flow-node>span{{font-size:.72rem;font-weight:900}}.flow-node small{{color:var(--muted)}}.flow-node em{{margin-top:auto;padding-top:8px;color:var(--cyan);font-size:.75rem;font-style:normal}}.flow-node.pass{{border-color:#46c987}}.flow-node.pass span{{color:#70f0ac}}.flow-node.fail{{border-color:var(--red)}}.flow-node.fail span{{color:#ff8c78}}.flow-node.partial{{border-color:#d69c3b}}.flow-node.partial span{{color:#ffc96b}}.flow-node.pending,.flow-node.neutral{{border-color:#526675}}.flow-node.pending span,.flow-node.neutral span{{color:#b3c0c8}}.flow-arrow{{min-width:0;display:grid;place-items:center;align-content:center;text-align:center;color:var(--muted)}}.flow-arrow i{{font-size:1.6rem;font-style:normal}}.flow-arrow small{{font-size:.68rem}}.flow-arrow.fail,.phase-connector.fail{{color:var(--red)}}.flow-arrow.pass,.phase-connector.pass{{color:#70f0ac}}.flow-arrow.pending,.phase-connector.pending{{color:#9eb2c0}}.phase-connector{{display:flex;justify-content:center;gap:12px;align-items:center;min-height:58px;text-align:center;font-size:.85rem}}.phase-connector span{{font-size:1.6rem}}.feedback-return{{display:flex;gap:12px;align-items:center;border:1px dashed #526675;border-radius:10px;padding:10px 14px;color:var(--muted)}}.feedback-return b{{color:#9eb2c0}}.flow-caveat{{color:var(--muted);font-size:.88rem}}
 .process-section{{margin:46px 0;scroll-margin-top:20px}}.process-section>header,.history-process>header{{display:flex;gap:14px;align-items:center;margin-bottom:16px}}.process-section>header>span,.history-process>header>b{{display:grid;place-items:center;flex:0 0 44px;height:44px;border-radius:12px;background:var(--cyan);color:#071016;font-size:1.15rem}}.process-section>header p,.history-process>header p{{margin:0;color:var(--muted)}}.history-process{{margin:26px 0;padding:18px;border-left:3px solid var(--line);background:#0a141d;border-radius:0 14px 14px 0}}
 .pipeline-lab{{margin:42px 0}}.tab-list{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px;margin:18px 0}}.tab-list button{{min-height:58px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0b1620;color:var(--ink);font:inherit;font-weight:750;text-align:left;cursor:pointer}}.tab-list button small{{display:block;color:var(--muted);font-weight:500}}.tab-list button[aria-selected="true"]{{border-color:var(--cyan);background:#12303a;box-shadow:inset 0 -3px 0 var(--cyan)}}.tab-panel{{padding:22px;border:1px solid var(--line);border-radius:16px;background:#09131c;scroll-margin-top:18px}}.tab-panel[hidden]{{display:none}}.pipeline-summary{{display:flex;justify-content:space-between;gap:18px;align-items:start;padding-bottom:14px;border-bottom:1px solid var(--line)}}.pipeline-summary span{{color:var(--cyan);font-size:.78rem;font-weight:900;letter-spacing:.08em}}.pipeline-summary strong{{padding:7px 10px;border-radius:8px;white-space:nowrap}}.pipeline-summary.adopted strong{{color:#ffc96b;border:1px solid #d69c3b}}.pipeline-summary.alternative strong{{color:#ffc96b;border:1px solid #d69c3b}}.pipeline-summary.rejected strong,.pipeline-summary.legacy-summary strong,.pipeline-summary.research strong{{color:var(--red);border:1px solid var(--red)}}.pipeline-explainer{{margin:18px 0;padding:18px;border:1px solid #315065;border-radius:14px;background:linear-gradient(135deg,#102333,#0c1924)}}.pipeline-explainer h3{{margin:0 0 6px;color:var(--cyan)}}.pipeline-explainer>p{{margin:.3rem 0 1rem;font-size:1.02rem;color:#d8e5eb}}.pipeline-explainer dl{{margin:0}}.pipeline-explainer dd{{font-size:.9rem}}.pipeline-route{{padding:12px 14px;border-radius:10px;background:#101d29;color:var(--cyan);font-family:ui-monospace,monospace;overflow-wrap:anywhere}}.history-count{{color:var(--muted);font-weight:700}}.raw-e2e-grid{{padding:0}}
+.hybrid-lab{{margin:46px 0;padding:22px;border:1px solid #315065;border-radius:16px;background:linear-gradient(145deg,#102333,#09131c)}}.hybrid-lab>header{{display:flex;justify-content:space-between;gap:18px;align-items:start;border-bottom:1px solid var(--line);padding-bottom:12px}}.hybrid-lab>header span{{color:var(--cyan);font-size:.75rem;font-weight:900;letter-spacing:.08em}}.hybrid-lab>header strong{{color:#70f0ac;border:1px solid #46c987;border-radius:8px;padding:6px 9px}}.hybrid-sample{{display:grid;grid-template-columns:auto minmax(140px,1fr) minmax(240px,1fr);align-items:center;gap:12px;margin:16px 0;padding:12px;background:#0a141d;border-radius:10px}}.hybrid-sample span{{color:var(--muted)}}.hybrid-controls{{display:grid;grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr);gap:7px;align-items:stretch}}.hybrid-controls label{{display:flex;flex-direction:column;gap:6px;padding:12px;background:#0a141d;border:1px solid var(--line);border-radius:10px}}.hybrid-controls label>span{{font-weight:800;color:var(--cyan)}}.hybrid-controls label>small,.hybrid-outputs small{{color:var(--muted)}}.hybrid-controls select{{width:100%;padding:8px;border:1px solid #526675;border-radius:7px;background:#101d29;color:var(--ink);font:inherit}}.hybrid-controls>i{{display:grid;place-items:center;color:var(--cyan);font-size:1.4rem;font-style:normal}}.hybrid-run{{display:block;margin:16px 0 12px;padding:10px 16px;border:0;border-radius:9px;background:var(--cyan);color:#071016;font:inherit;font-weight:850;cursor:pointer}}.hybrid-live{{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:12px 0}}.hybrid-live>b{{color:var(--cyan);font-family:ui-monospace,monospace}}.hybrid-live span{{padding:5px 8px;background:#0a141d;border-radius:7px}}.hybrid-chart{{display:block;width:100%;height:310px;border:1px solid var(--line);border-radius:10px;background:#07111a}}.hybrid-outputs{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}}.hybrid-outputs section{{display:grid;gap:5px;min-width:0;padding:10px;background:#0a141d;border-radius:10px}}.hybrid-outputs audio{{width:100%}}
 .table{{overflow:auto}}table{{border-collapse:collapse;width:100%;font-size:.82rem}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:right;white-space:nowrap}}th:first-child{{text-align:left}}code{{color:var(--cyan)}}
 details{{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:#0b1620}}summary{{cursor:pointer;padding:14px 18px;color:var(--cyan);font-weight:700}}.attempt-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px;padding:0 12px 12px}}.attempt{{background:#101d29;border:1px solid var(--line);border-radius:12px;padding:14px}}.attempt h3{{font-size:.95rem;overflow-wrap:anywhere;margin:.5rem 0}}.attempt .metrics{{font-size:.78rem;color:#c7d6df}}summary:focus-visible,a:focus-visible,audio:focus-visible,.tab-list button:focus-visible{{outline:3px solid #ffc96b;outline-offset:3px}}
-footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:860px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}.flow-heading,.pipeline-summary{{display:block}}.flow-heading strong,.pipeline-summary strong{{display:inline-block;margin-top:8px;white-space:normal}}.flow-row.nodes-4,.flow-row.nodes-3,.flow-row.nodes-2,.flow-row.nodes-1{{grid-template-columns:1fr}}.flow-arrow{{min-width:0;min-height:42px}}.flow-arrow i{{transform:rotate(90deg)}}.flow-phase>header{{grid-template-columns:42px minmax(0,1fr)}}.flow-phase>header strong{{grid-column:1/-1;justify-self:start}}.audio{{grid-template-columns:1fr}}.tab-panel{{padding:14px}}}}
+footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:860px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}.flow-heading,.pipeline-summary,.hybrid-lab>header{{display:block}}.flow-heading strong,.pipeline-summary strong,.hybrid-lab>header strong{{display:inline-block;margin-top:8px;white-space:normal}}.flow-row.nodes-4,.flow-row.nodes-3,.flow-row.nodes-2,.flow-row.nodes-1,.hybrid-controls{{grid-template-columns:1fr}}.flow-arrow{{min-width:0;min-height:42px}}.flow-arrow i,.hybrid-controls>i{{transform:rotate(90deg)}}.flow-phase>header{{grid-template-columns:42px minmax(0,1fr)}}.flow-phase>header strong{{grid-column:1/-1;justify-self:start}}.audio,.hybrid-sample{{grid-template-columns:1fr}}.hybrid-outputs{{grid-template-columns:repeat(2,minmax(0,1fr))}}.tab-panel{{padding:14px}}}}@media(max-width:540px){{.hybrid-outputs{{grid-template-columns:1fr}}.hybrid-chart{{height:260px}}}}
 </style></head><body><main>
 <p class="eyebrow">PHYSICAL AI / OBJECTIVE GATED DEVELOPMENT</p><h1>お手本は、<br>本当に演奏になったか。</h1>
 <p class="lead">単一の総合スコアで隠さず、聴覚・記憶・フィードフォワード・状態推定・モータ制御・誤差補正を分けて評価する。Position Plannerが音楽的フィードフォワードを担い、Motor PhysicsとLinear Fluteは学習用シミュレータとして実変位と音を作る。</p>
@@ -696,7 +721,81 @@ footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padd
     const target = document.getElementById(location.hash.slice(1));
     if (target && target !== panels[index]) requestAnimationFrame(() => target.scrollIntoView());
   }};
-  window.addEventListener('hashchange', activateHash); activateHash();
+window.addEventListener('hashchange', activateHash); activateHash();
+}})();
+(() => {{
+  const data = {hybrid_data_json};
+  const root = document.getElementById('hybrid-lab');
+  if (!root || !data) return;
+  const stages = ['ear', 'memory', 'planner', 'control'];
+  const selects = Object.fromEntries(stages.map(name => [name, root.querySelector(`[data-hybrid-stage="${{name}}"]`)]));
+  const audios = Object.fromEntries(stages.map((name, index) => [stages[index], root.querySelector(`[data-hybrid-audio="${{stages[index] === 'control' ? 'performance' : stages[index]}}"]`)]));
+  const urls = {{}};
+  let current = null;
+  const label = {{nn:'NN', det:'決定論'}};
+
+  function wavBlob(track) {{
+    const sr = 16000, perFrame = 160, count = track.pitch_cents.length * perFrame;
+    const buffer = new ArrayBuffer(44 + count * 2), view = new DataView(buffer);
+    const text = (offset, value) => [...value].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
+    text(0,'RIFF'); view.setUint32(4,36 + count*2,true); text(8,'WAVE'); text(12,'fmt ');
+    view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,1,true);
+    view.setUint32(24,sr,true); view.setUint32(28,sr*2,true); view.setUint16(32,2,true); view.setUint16(34,16,true);
+    text(36,'data'); view.setUint32(40,count*2,true);
+    let phase = 0, cursor = 44;
+    for (let frame=0; frame<track.pitch_cents.length; frame++) {{
+      const frequency = 440 * Math.pow(2, track.pitch_cents[frame] / 1200);
+      const step = 2 * Math.PI * frequency / sr, sounding = Boolean(track.voice[frame]);
+      for (let i=0; i<perFrame; i++) {{
+        const sample = sounding ? .22*Math.sin(phase) + .045*Math.sin(2*phase) : 0;
+        view.setInt16(cursor, Math.max(-32767,Math.min(32767,Math.round(sample*32767))), true);
+        cursor += 2; phase = (phase + step) % (2*Math.PI);
+      }}
+    }}
+    return new Blob([buffer], {{type:'audio/wav'}});
+  }}
+
+  function updateAudio(name, track) {{
+    if (urls[name]) URL.revokeObjectURL(urls[name]);
+    urls[name] = URL.createObjectURL(wavBlob(track)); audios[name].src = urls[name];
+  }}
+
+  function draw(entry) {{
+    const canvas = root.querySelector('.hybrid-chart'), rect = canvas.getBoundingClientRect();
+    if (!rect.width) return;
+    const dpr = window.devicePixelRatio || 1, width = rect.width, height = rect.height;
+    canvas.width = Math.round(width*dpr); canvas.height = Math.round(height*dpr);
+    const ctx = canvas.getContext('2d'); ctx.scale(dpr,dpr);
+    const styles = getComputedStyle(document.documentElement), ink = styles.getPropertyValue('--ink').trim();
+    const muted = styles.getPropertyValue('--muted').trim(), line = styles.getPropertyValue('--line').trim();
+    const cyan = styles.getPropertyValue('--cyan').trim(), orange = '#ffc96b';
+    ctx.clearRect(0,0,width,height); const m={{l:58,r:18,t:34,b:42}}, lo=600, hi=2000;
+    const x = i => m.l + i*(width-m.l-m.r)/Math.max(1,entry.memory.pitch_cents.length-1);
+    const y = value => m.t + (hi-value)*(height-m.t-m.b)/(hi-lo);
+    ctx.font='12px system-ui'; ctx.fillStyle=muted; ctx.strokeStyle=line; ctx.lineWidth=1;
+    [600,900,1200,1500,1800].forEach(v=>{{ctx.beginPath();ctx.moveTo(m.l,y(v));ctx.lineTo(width-m.r,y(v));ctx.stroke();ctx.fillText(String(v),8,y(v)+4);}});
+    ctx.fillText('音程 [cent]',8,18); ctx.fillText(`時間 [s]  0 — ${{(entry.memory.pitch_cents.length/100).toFixed(1)}}`,m.l,height-12);
+    const plot = (track,color,dash=[]) => {{ctx.strokeStyle=color;ctx.lineWidth=2;ctx.setLineDash(dash);ctx.beginPath();let open=false;track.pitch_cents.forEach((v,i)=>{{if(!track.voice[i]){{open=false;return;}}const px=x(i),py=y(v);if(!open){{ctx.moveTo(px,py);open=true;}}else ctx.lineTo(px,py);}});ctx.stroke();ctx.setLineDash([]);}};
+    plot(entry.memory,cyan); plot(entry.performance,orange,[6,4]);
+    ctx.fillStyle=cyan;ctx.fillText('— 記憶Timeline（制御目標）',m.l,19);ctx.fillStyle=orange;ctx.fillText('--- 最終演奏',m.l+205,19);
+    ctx.strokeStyle=ink;ctx.strokeRect(m.l,m.t,width-m.l-m.r,height-m.t-m.b);
+  }}
+
+  function render() {{
+    const choice = Object.fromEntries(stages.map(name => [name,selects[name].value]));
+    const key = stages.map(name => choice[name]).join('-'), entry = data.combinations[key];
+    if (!entry) return;
+    current = entry;
+    root.querySelector('[data-hybrid-route]').textContent = stages.map(name => label[choice[name]]).join(' → ');
+    root.querySelector('[data-hybrid-mae]').textContent = entry.metrics.final_pitch_mae_cents == null ? '—' : entry.metrics.final_pitch_mae_cents.toFixed(1);
+    root.querySelector('[data-hybrid-voice]').textContent = (100*entry.metrics.voiced_fraction).toFixed(1) + '%';
+    updateAudio('ear', entry.ear); updateAudio('memory', entry.memory);
+    updateAudio('planner', {{pitch_cents:entry.planner.nominal_cents,voice:entry.planner.voice}});
+    updateAudio('control', entry.performance); draw(entry);
+  }}
+  stages.forEach(name => selects[name].addEventListener('change', render));
+  root.querySelector('.hybrid-run').addEventListener('click', render);
+  window.addEventListener('resize', () => current && draw(current)); render();
 }})();
 </script></body></html>'''
     path = pathlib.Path(args.out); path.parent.mkdir(parents=True, exist_ok=True); path.write_text(doc, encoding="utf-8")
