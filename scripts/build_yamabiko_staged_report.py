@@ -19,6 +19,10 @@ def beat_audio(src, label):
     return f'<div class="audio"><span>{html.escape(label)}</span><audio controls preload="none" src="e2e-beat-results/{html.escape(src)}"></audio></div>'
 
 
+def doc_audio(src, label):
+    return f'<div class="audio"><span>{html.escape(label)}</span><audio controls preload="none" src="{html.escape(src)}"></audio></div>'
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--manifest", default="docs/e2e-results/manifest.json")
@@ -103,6 +107,35 @@ def main():
             <p class="note">単独GateはOracle音程で判定してPASS。Timeline接続値は前段誤差を含みFAIL。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section>'''
         beat_section += "</div>"
 
+    history_path = pathlib.Path(args.manifest).parent.parent / "e2e-beat-results" / "attempt-history.json"
+    history_section = "<p>試行履歴はまだ生成されていません。</p>"
+    if history_path.exists():
+        history = json.loads(history_path.read_text(encoding="utf-8"))["attempts"]
+        failed = sum(not row["pass"] for row in history); passed = len(history) - failed; groups = []
+        for stage in dict.fromkeys(row["stage"] for row in history):
+            rows = [row for row in history if row["stage"] == stage]
+            cards_history = []
+            for row in rows:
+                status = "PASS" if row["pass"] else "FAIL"
+                metric_text = " / ".join(f"{html.escape(k.replace('_', ' '))} {n(v, 3)}" for k, v in list(row["metrics"].items())[:6])
+                listening = ""
+                if row.get("audio_manifest"):
+                    manifest_path = pathlib.Path(args.manifest).parent.parent / row["audio_manifest"]
+                    if manifest_path.exists():
+                        am = json.loads(manifest_path.read_text(encoding="utf-8")); case = am["cases"][0]
+                        pairs = (("position_before", "position_after"), ("timeline_before", "timeline_after"),
+                                 ("timing_before", "timing_after"), ("aligner_before", "aligner_after"),
+                                 ("memory_before", "memory_after"), ("tempo_before", "tempo_after"))
+                        pair = next((p for p in pairs if p[0] in case and p[1] in case), None)
+                        if pair:
+                            prefix = pathlib.PurePosixPath(row["audio_manifest"]).parent.as_posix() + "/"
+                            listening = f'<div class="listen">{doc_audio(prefix + case[pair[0]], "before")}{doc_audio(prefix + case[pair[1]], "after")}</div>'
+                cards_history.append(f'''<article class="attempt"><div class="stage"><b>試</b><span>{status}</span></div>
+                <h3>{html.escape(row['id'])}</h3><p>{html.escape(row['reason'])}</p><p class="metrics">{metric_text or '数値なし'}</p>
+                <p class="note">split: {html.escape(str(row['split']))} / seed: {html.escape(str(row.get('seed')))}</p>{listening}</article>''')
+            groups.append(f'''<details {'open' if stage in ('Temporal Aligner', 'Timeline Memory') else ''}><summary>{html.escape(stage)} — {len(rows)}試行</summary><div class="attempt-grid">{''.join(cards_history)}</div></details>''')
+        history_section = f'''<p>全 {len(history)} 試行（PASS {passed} / FAIL {failed}）。FAILも削除せず、固定レポート値と残存checkpointの代表WAVを掲載する。</p>{''.join(groups)}'''
+
     stages = [
         ("1", "Neural Ear", "生の20 ms波形 → 音程・発音状態", s["ear"],
          representative["ear_before"], representative["ear_after"],
@@ -163,12 +196,14 @@ main{{max-width:1120px;margin:auto;padding:48px 20px 80px}}h1{{font-size:clamp(2
 .listen{{display:grid;gap:10px;margin:18px 0}}.audio{{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:8px}}audio{{width:100%;height:36px}}dl{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}dl div{{background:#0a141d;padding:9px;border-radius:8px}}dt{{font-size:.72rem;color:var(--muted)}}dd{{margin:0;font-size:1.05rem}}.note{{color:var(--muted);font-size:.9rem}}
 .pipeline{{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0}}.pipeline span{{border:1px solid var(--line);padding:8px 12px;border-radius:999px}}.pipeline i{{color:var(--cyan);font-style:normal;padding:8px 0}}
 .table{{overflow:auto}}table{{border-collapse:collapse;width:100%;font-size:.82rem}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:right;white-space:nowrap}}th:first-child{{text-align:left}}code{{color:var(--cyan)}}
+details{{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:#0b1620}}summary{{cursor:pointer;padding:14px 18px;color:var(--cyan);font-weight:700}}.attempt-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;padding:0 12px 12px}}.attempt{{background:#101d29;border:1px solid var(--line);border-radius:12px;padding:14px}}.attempt h3{{font-size:.95rem;overflow-wrap:anywhere;margin:.5rem 0}}.attempt .metrics{{font-size:.78rem;color:#c7d6df}}
 footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:600px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}}}
 </style></head><body><main>
 <p class="eyebrow">PHYSICAL AI / OBJECTIVE GATED DEVELOPMENT</p><h1>お手本は、<br>本当に演奏になったか。</h1>
 <p class="lead">単一の総合スコアで隠さず、聴覚・記憶・フィードフォワード演奏・誤差判定を独立したNNに分け、未知の固定課題で評価した。各カードの音声は同じ <code>step_up_down</code> 課題の「NN前 / NN後」である。</p>
 <h2>拍グリッド再設計</h2><p>お手本をBPMと拍位相へ割り当て、その拍セル上に連続音程・休符・onset・offset・傾斜を記憶する。BPMラベルは任意秒長の旧データへ後付けせず、BPMから生成した専用データだけで評価する。</p>{beat_section}
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained={str(feedback['trained']).lower()} / pass={str(feedback['pass']).lower()}（{html.escape(feedback['reason'])}）。</div>
+<h2>全試行履歴（失敗モデルを含む）</h2>{history_section}
 <div class="pipeline"><span>raw reference</span><i>→</i><span>Neural Ear</span><i>→</i><span>Reference Memory</span><i>→</i><span>FF Policy</span><i>→</i><span>plant + self audio</span><i>→</i><span>Error Comparator</span><i>→</i><span>Feedback Residual</span></div>
 <div class="grid">{''.join(cards)}</div>
 <h2>評価を厳格化した理由</h2><p>旧一体モデルはMAE {old['mae']:.1f} cent、軌跡相関 {old['corr']:.3f} で実際には逆方向へ追従した。一方、旧方向指標だけは {old['direction']:.1f} だった。{old['explanation']}。新評価は発音できない目標区間へ1200 cent罰を与え、P90、発音率、休符漏れ、遷移ゲイン、整定誤差をケース別に残す。</p>

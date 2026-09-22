@@ -53,6 +53,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", default="runs/yamabiko_tempo_beat.pt")
     ap.add_argument("--out", default="docs/e2e-beat-results"); ap.add_argument("--seed", type=int, default=15551)
+    ap.add_argument("--demo-bpms", type=float, nargs="+", default=[73.0, 97.0, 137.0, 173.0])
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); ck = torch.load(args.model, map_location=args.device)
     cfg = BeatGridConfig(**ck["config"]); tempo = TempoBeatNet(cfg).to(args.device); tempo.load_state_dict(ck["tempo_beat"]); tempo.eval()
@@ -89,7 +90,7 @@ def main():
     ear = E2EImitator.from_checkpoint(torch.load(ck["ear_checkpoint"], map_location=args.device), args.device).eval()
     out = pathlib.Path(args.out); audio = out / "audio"; audio.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed); cases = []; tempo_errors = []; phase_errors = []
-    for index, bpm in enumerate((73.0, 97.0, 137.0, 173.0)):
+    for index, bpm in enumerate(args.demo_bpms):
         example = make_beat_target(rng, bpm=bpm); wave, _ = synth_source(example.target, "recorder", rng, sr=SAMPLE_RATE)
         wave = room(wave, SAMPLE_RATE, rng); frames = frame_audio_numpy(wave, len(example.target))
         features = ear.audio_features(torch.from_numpy(frames).to(args.device))[None]

@@ -1,0 +1,71 @@
+{
+  "format": "yamabiko-beat-audio-v1",
+  "checkpoint": "runs\\yamabiko_musical_memory_timbre_v2.pt",
+  "seed": 15551,
+  "official_path": "predicted_upstream",
+  "audio_kind": "tempo_after is diagnostic click track, not physical performance",
+  "tempo_beat": {
+    "tempo_relative_error_median": 0.011321211233735085,
+    "tempo_relative_error_p90": 0.06789593398571014,
+    "tempo_head_relative_error_median": 0.07439912110567093,
+    "phase_circular_mae_cycle": 0.05717724934220314,
+    "phase_confidence_mean": 0.9980171322822571,
+    "half_double_confusion_rate": 0.0,
+    "pass": true,
+    "seed": 14449,
+    "split": "frozen-heldout-bpm",
+    "heldout_bpms": [
+      73,
+      97,
+      113,
+      137,
+      157,
+      173
+    ],
+    "official_path": "predicted_upstream"
+  },
+  "demo_metrics": {
+    "tempo_relative_error_median": 0.015705192176094892,
+    "tempo_relative_error_p90": 0.015705192176094892,
+    "phase_circular_mae_cycle": 0.02225515805184841,
+    "pass": true
+  },
+  "musical_memory_trained": true,
+  "musical_memory": {
+    "pitch_mae_cents": 81.15629577636719,
+    "pitch_p90_cents": 199.9368133544922,
+    "trajectory_correlation": 0.8629833435065369,
+    "voice_f1": 0.9566473988439307,
+    "onset_f1": 0.9102025219717234,
+    "offset_f1": 0.88113413304253,
+    "slope_mae_cents_per_cell": 29.97978401184082,
+    "ear_grid_upper_bound_mae_cents": 51.582740783691406,
+    "ear_grid_upper_bound_correlation": 0.8650925110686875,
+    "pass": false,
+    "seed": 16673,
+    "split": "frozen-unknown-bpm",
+    "official_path": "predicted_upstream"
+  },
+  "temporal_aligner_trained": false,
+  "temporal_aligner": null,
+  "timing_profile_trained": false,
+  "timing_profile": null,
+  "timeline_memory_trained": false,
+  "timeline_memory": null,
+  "timeline_position": null,
+  "temporal_connected": null,
+  "cases": [
+    {
+      "case": "bpm_137",
+      "true_bpm": 137.0,
+      "predicted_bpm": 134.848388671875,
+      "tempo_relative_error": 0.015705192176094892,
+      "phase_circular_mae_cycle": 0.02225515805184841,
+      "detected_beats": 8,
+      "tempo_before": "audio/bpm_137_tempo_before_reference.wav",
+      "tempo_after": "audio/bpm_137_tempo_after_clicks.wav",
+      "memory_before": "audio/bpm_137_tempo_before_reference.wav",
+      "memory_after": "audio/bpm_137_memory_after_recall.wav"
+    }
+  ]
+}

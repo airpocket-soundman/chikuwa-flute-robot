@@ -1,0 +1,69 @@
+{
+  "format": "yamabiko-beat-audio-v1",
+  "checkpoint": "runs\\yamabiko_musical_memory_aligned_v6.pt",
+  "seed": 15551,
+  "official_path": "predicted_upstream",
+  "audio_kind": "tempo_after is diagnostic click track, not physical performance",
+  "tempo_beat": {
+    "tempo_relative_error_median": 0.008117146790027618,
+    "tempo_relative_error_p90": 0.03545817732810974,
+    "tempo_head_relative_error_median": 0.04481380805373192,
+    "phase_circular_mae_cycle": 0.03991597145795822,
+    "phase_confidence_mean": 0.9994564652442932,
+    "half_double_confusion_rate": 0.0,
+    "pass": true,
+    "seed": 14449,
+    "split": "frozen-heldout-bpm",
+    "heldout_bpms": [
+      73,
+      97,
+      113,
+      137,
+      157,
+      173
+    ],
+    "official_path": "predicted_upstream"
+  },
+  "demo_metrics": {
+    "tempo_relative_error_median": 0.01683902044365876,
+    "tempo_relative_error_p90": 0.01683902044365876,
+    "phase_circular_mae_cycle": 0.01746511086821556,
+    "pass": true
+  },
+  "musical_memory_trained": true,
+  "musical_memory": {
+    "pitch_mae_cents": 54.441864013671875,
+    "pitch_p90_cents": 89.05425262451172,
+    "trajectory_correlation": 0.9222772785461806,
+    "voice_f1": 0.9764365440264572,
+    "onset_f1": 0.9216730038022813,
+    "offset_f1": 0.9272529858849077,
+    "slope_mae_cents_per_cell": 28.432504653930664,
+    "pass": false,
+    "seed": 16673,
+    "split": "frozen-unknown-bpm",
+    "official_path": "predicted_upstream"
+  },
+  "temporal_aligner_trained": false,
+  "temporal_aligner": null,
+  "timing_profile_trained": false,
+  "timing_profile": null,
+  "timeline_memory_trained": false,
+  "timeline_memory": null,
+  "timeline_position": null,
+  "temporal_connected": null,
+  "cases": [
+    {
+      "case": "bpm_137",
+      "true_bpm": 137.0,
+      "predicted_bpm": 134.69305419921875,
+      "tempo_relative_error": 0.01683902044365876,
+      "phase_circular_mae_cycle": 0.01746511086821556,
+      "detected_beats": 8,
+      "tempo_before": "audio/bpm_137_tempo_before_reference.wav",
+      "tempo_after": "audio/bpm_137_tempo_after_clicks.wav",
+      "memory_before": "audio/bpm_137_tempo_before_reference.wav",
+      "memory_after": "audio/bpm_137_memory_after_recall.wav"
+    }
+  ]
+}

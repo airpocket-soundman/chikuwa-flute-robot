@@ -1,0 +1,1012 @@
+{
+  "format": "yamabiko-attempt-history-v1",
+  "attempts": [
+    {
+      "id": "yamabiko_musical_memory_aligned",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 90.4629898071289,
+        "pitch_p90_cents": 172.8550567626953,
+        "trajectory_correlation": 0.9259979868122843,
+        "voice_f1": 0.9764754436648783,
+        "onset_f1": 0.9156987635818659,
+        "offset_f1": 0.9216639654240951,
+        "slope_mae_cents_per_cell": 39.11885452270508
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_musical_memory_aligned_v2",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 79.04096984863281,
+        "pitch_p90_cents": 156.69131469726562,
+        "trajectory_correlation": 0.9140705616821913,
+        "voice_f1": 0.977851376526599,
+        "onset_f1": 0.9233117130866082,
+        "offset_f1": 0.9409166206515737,
+        "slope_mae_cents_per_cell": 26.167938232421875
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_musical_memory_aligned_v3",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 60.50958251953125,
+        "pitch_p90_cents": 101.07683563232422,
+        "trajectory_correlation": 0.9244763565489499,
+        "voice_f1": 0.9749794913863823,
+        "onset_f1": 0.9125560538116592,
+        "offset_f1": 0.9143161255987228,
+        "slope_mae_cents_per_cell": 30.51375389099121
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_musical_memory_aligned_v3/manifest.json"
+    },
+    {
+      "id": "yamabiko_musical_memory_aligned_v4",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u56fa\u5b9aBPM clock\u306e\u7d2f\u7a4d\u30c9\u30ea\u30d5\u30c8",
+      "metrics": {
+        "pitch_mae_cents": 108.98632049560547,
+        "pitch_p90_cents": 316.60345458984375,
+        "trajectory_correlation": 0.8528625108329013,
+        "voice_f1": 0.9615305492696976,
+        "onset_f1": 0.9042232277526395,
+        "offset_f1": 0.8762006403415155,
+        "slope_mae_cents_per_cell": 28.27959632873535
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_musical_memory_aligned_v4/manifest.json"
+    },
+    {
+      "id": "yamabiko_musical_memory_aligned_v5",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "PLL\u304c\u5c40\u6240\u4f4d\u76f8\u8aa4\u5dee\u3092\u5897\u5e45",
+      "metrics": {
+        "pitch_mae_cents": 108.01021575927734,
+        "pitch_p90_cents": 308.188232421875,
+        "trajectory_correlation": 0.8478031767331774,
+        "voice_f1": 0.9750669688852256,
+        "onset_f1": 0.9265321659687857,
+        "offset_f1": 0.9239189928845101,
+        "slope_mae_cents_per_cell": 31.555980682373047
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_musical_memory_aligned_v5/manifest.json"
+    },
+    {
+      "id": "yamabiko_musical_memory_aligned_v6",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 54.441864013671875,
+        "pitch_p90_cents": 89.05425262451172,
+        "trajectory_correlation": 0.9222772785461806,
+        "voice_f1": 0.9764365440264572,
+        "onset_f1": 0.9216730038022813,
+        "offset_f1": 0.9272529858849077,
+        "slope_mae_cents_per_cell": 28.432504653930664
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_musical_memory_aligned_v6/manifest.json"
+    },
+    {
+      "id": "yamabiko_musical_memory_aligned_v7_diag",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 55.380088806152344,
+        "pitch_p90_cents": 85.30511474609375,
+        "trajectory_correlation": 0.9217180425994549,
+        "voice_f1": 0.9755895738518825,
+        "onset_f1": 0.9203606311044328,
+        "offset_f1": 0.927038626609442,
+        "slope_mae_cents_per_cell": 26.491308212280273,
+        "ear_grid_upper_bound_mae_cents": 37.9720573425293,
+        "ear_grid_upper_bound_correlation": 0.9273063144344887
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_musical_memory_aligned_v7_pass",
+      "stage": "Musical Memory",
+      "pass": true,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "pitch_mae_cents": 55.380088806152344,
+        "pitch_p90_cents": 85.30511474609375,
+        "trajectory_correlation": 0.9217180425994549,
+        "voice_f1": 0.9755895738518825,
+        "onset_f1": 0.9203606311044328,
+        "offset_f1": 0.927038626609442,
+        "slope_mae_cents_per_cell": 26.491308212280273,
+        "ear_grid_upper_bound_mae_cents": 37.9720573425293,
+        "ear_grid_upper_bound_correlation": 0.9273063144344887
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_musical_memory_aligned_v7",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 55.380088806152344,
+        "pitch_p90_cents": 85.30511474609375,
+        "trajectory_correlation": 0.9217180425994549,
+        "voice_f1": 0.9755895738518825,
+        "onset_f1": 0.9203606311044328,
+        "offset_f1": 0.927038626609442,
+        "slope_mae_cents_per_cell": 26.491308212280273
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_musical_memory",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 87.60063934326172,
+        "pitch_p90_cents": 183.80210876464844,
+        "trajectory_correlation": 0.9180044046776424,
+        "voice_f1": 0.8599146294140474,
+        "onset_f1": 0.650575357844513,
+        "offset_f1": 0.6242821985233798,
+        "slope_mae_cents_per_cell": 20.815364837646484
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_musical_memory_strict",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 132.20814514160156,
+        "pitch_p90_cents": 288.8876647949219,
+        "trajectory_correlation": 0.8672667278059667,
+        "voice_f1": 0.7763913646266587,
+        "onset_f1": 0.5423347398030942,
+        "offset_f1": 0.4103194103194103,
+        "slope_mae_cents_per_cell": 25.777908325195312
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_musical_memory_timbre_v2",
+      "stage": "Musical Memory",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 16673,
+      "reason": "\u97f3\u8272\u518d\u5b66\u7fd2\u7cfb\u3002\u30bb\u30ebMemory\u306f\u5931\u6557\u3001Timeline\u306f\u6539\u5584",
+      "metrics": {
+        "pitch_mae_cents": 81.15629577636719,
+        "pitch_p90_cents": 199.9368133544922,
+        "trajectory_correlation": 0.8629833435065369,
+        "voice_f1": 0.9566473988439307,
+        "onset_f1": 0.9102025219717234,
+        "offset_f1": 0.88113413304253,
+        "slope_mae_cents_per_cell": 29.97978401184082,
+        "ear_grid_upper_bound_mae_cents": 51.582740783691406,
+        "ear_grid_upper_bound_correlation": 0.8650925110686875
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_musical_memory_timbre_v2/manifest.json"
+    },
+    {
+      "id": "yamabiko_tempo_beat",
+      "stage": "Tempo / Beat",
+      "pass": false,
+      "split": "frozen-heldout-bpm",
+      "seed": 14449,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "tempo_relative_error_median": 0.03742057830095291,
+        "tempo_relative_error_p90": 0.11859090626239777,
+        "phase_circular_mae_cycle": 0.06479696929454803,
+        "phase_confidence_mean": 0.994213342666626,
+        "half_double_confusion_rate": 0.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_tempo_beat_timbre_v2",
+      "stage": "Tempo / Beat",
+      "pass": true,
+      "split": "frozen-heldout-bpm",
+      "seed": 14449,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "tempo_relative_error_median": 0.011321211233735085,
+        "tempo_relative_error_p90": 0.06789593398571014,
+        "tempo_head_relative_error_median": 0.07439912110567093,
+        "phase_circular_mae_cycle": 0.05717724934220314,
+        "phase_confidence_mean": 0.9980171322822571,
+        "half_double_confusion_rate": 0.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_tempo_beat_v2",
+      "stage": "Tempo / Beat",
+      "pass": false,
+      "split": "frozen-heldout-bpm",
+      "seed": 14449,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "tempo_relative_error_median": 0.0357576347887516,
+        "tempo_relative_error_p90": 0.09440474957227707,
+        "phase_circular_mae_cycle": 0.05632995069026947,
+        "phase_confidence_mean": 0.9983506798744202,
+        "half_double_confusion_rate": 0.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_tempo_beat_v3",
+      "stage": "Tempo / Beat",
+      "pass": false,
+      "split": "frozen-heldout-bpm",
+      "seed": 14449,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "tempo_relative_error_median": 0.06029070168733597,
+        "tempo_relative_error_p90": 0.15141591429710388,
+        "phase_circular_mae_cycle": 0.0540626086294651,
+        "phase_confidence_mean": 0.9972657561302185,
+        "half_double_confusion_rate": 0.02083333395421505
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_tempo_beat_v4_phase",
+      "stage": "Tempo / Beat",
+      "pass": true,
+      "split": "frozen-heldout-bpm",
+      "seed": 14449,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "tempo_relative_error_median": 0.008117146790027618,
+        "tempo_relative_error_p90": 0.03545817732810974,
+        "tempo_head_relative_error_median": 0.04481380805373192,
+        "phase_circular_mae_cycle": 0.03991597145795822,
+        "phase_confidence_mean": 0.9994564652442932,
+        "half_double_confusion_rate": 0.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_tempo_beat_v4",
+      "stage": "Tempo / Beat",
+      "pass": false,
+      "split": "frozen-heldout-bpm",
+      "seed": 14449,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "tempo_relative_error_median": 0.04481380805373192,
+        "tempo_relative_error_p90": 0.12231279909610748,
+        "phase_circular_mae_cycle": 0.03991597145795822,
+        "phase_confidence_mean": 0.9994564652442932,
+        "half_double_confusion_rate": 0.010416666977107525
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_aligner_final",
+      "stage": "Temporal Aligner",
+      "pass": true,
+      "split": "frozen-final-oracle-grid-unknown-bpm",
+      "seed": 918431,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.047833919525146484,
+        "clock_pointer_p95_cells": 0.13315963745117188,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 58.75000000000001,
+        "pitch_mae_cents": 14.342459678649902,
+        "trajectory_correlation": 0.9962195189139076,
+        "voice_f1": 0.9909511208534241,
+        "rest_false_positive_rate": 0.006061906460672617,
+        "onset_f1_exact_frame": 0.37681159377098083,
+        "offset_f1_exact_frame": 0.4050343334674835,
+        "onset_f1_30ms": 0.9221601489757915,
+        "offset_f1_30ms": 0.9994353472614342
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_aligner",
+      "stage": "Temporal Aligner",
+      "pass": false,
+      "split": "frozen-oracle-grid-unknown-bpm",
+      "seed": 18431,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.07756879925727844,
+        "clock_pointer_p95_cells": 0.18897247314453125,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 166.14583333333331,
+        "pitch_mae_cents": 19.49104118347168,
+        "trajectory_correlation": 0.9959003402343236,
+        "voice_f1": 0.9834054112434387,
+        "rest_false_positive_rate": 0.031331177800893784,
+        "onset_f1_exact_frame": 0.35749250650405884,
+        "offset_f1_exact_frame": 0.41722431778907776
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_temporal_aligner/manifest.json"
+    },
+    {
+      "id": "yamabiko_temporal_aligner_v2",
+      "stage": "Temporal Aligner",
+      "pass": false,
+      "split": "frozen-oracle-grid-unknown-bpm",
+      "seed": 18431,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.06676400452852249,
+        "clock_pointer_p95_cells": 0.11341243982315063,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 41.041666666666664,
+        "pitch_mae_cents": 18.883100509643555,
+        "trajectory_correlation": 0.9967154967431813,
+        "voice_f1": 0.9791202545166016,
+        "rest_false_positive_rate": 0.03350474312901497,
+        "onset_f1_exact_frame": 0.32369598746299744,
+        "offset_f1_exact_frame": 0.45345574617385864,
+        "onset_f1_30ms": 0.8094279965507329,
+        "offset_f1_30ms": 0.9404106159238859
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_temporal_aligner_v2/manifest.json"
+    },
+    {
+      "id": "yamabiko_temporal_aligner_v3",
+      "stage": "Temporal Aligner",
+      "pass": false,
+      "split": "frozen-oracle-grid-unknown-bpm",
+      "seed": 18431,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.04528269171714783,
+        "clock_pointer_p95_cells": 0.11808395385742188,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 58.22916666666667,
+        "pitch_mae_cents": 23.048311233520508,
+        "trajectory_correlation": 0.9972952935509292,
+        "voice_f1": 0.9851471781730652,
+        "rest_false_positive_rate": 0.01441976334899664,
+        "onset_f1_exact_frame": 0.3590395450592041,
+        "offset_f1_exact_frame": 0.32573777437210083,
+        "onset_f1_30ms": 0.8316529178124045,
+        "offset_f1_30ms": 0.9431472081218274
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_aligner_v4",
+      "stage": "Temporal Aligner",
+      "pass": false,
+      "split": "frozen-oracle-grid-unknown-bpm",
+      "seed": 18431,
+      "reason": "\u92ed\u3044\u533a\u9593attention\u3067Clock\u307e\u3067\u5d29\u58ca",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.1274627298116684,
+        "clock_pointer_p95_cells": 0.3660430908203125,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 52.083333333333336,
+        "pitch_mae_cents": 19.134519577026367,
+        "trajectory_correlation": 0.9930977273271799,
+        "voice_f1": 0.9526179432868958,
+        "rest_false_positive_rate": 0.06292742490768433,
+        "onset_f1_exact_frame": 0.2562125027179718,
+        "offset_f1_exact_frame": 0.2551995515823364,
+        "onset_f1_30ms": 0.7224611313264968,
+        "offset_f1_30ms": 0.8436170212765958
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_temporal_aligner_v4/manifest.json"
+    },
+    {
+      "id": "yamabiko_temporal_aligner_v5",
+      "stage": "Temporal Aligner",
+      "pass": false,
+      "split": "frozen-oracle-grid-unknown-bpm",
+      "seed": 18431,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.04528269171714783,
+        "clock_pointer_p95_cells": 0.11808395385742188,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 58.22916666666667,
+        "pitch_mae_cents": 15.768815040588379,
+        "trajectory_correlation": 0.9953509731169361,
+        "voice_f1": 0.9907696843147278,
+        "rest_false_positive_rate": 0.00524836964905262,
+        "onset_f1_exact_frame": 0.5086843967437744,
+        "offset_f1_exact_frame": 0.5632473230361938,
+        "onset_f1_30ms": 0.8379471228615863,
+        "offset_f1_30ms": 0.997874601487779
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_aligner_v6",
+      "stage": "Temporal Aligner",
+      "pass": false,
+      "split": "frozen-oracle-grid-unknown-bpm",
+      "seed": 18431,
+      "reason": "\u5e73\u5766\u306aevent\u6559\u5e2b\u3067onset\u30d4\u30fc\u30af\u304c\u66d6\u6627",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.04528269171714783,
+        "clock_pointer_p95_cells": 0.11808395385742188,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 58.22916666666667,
+        "pitch_mae_cents": 18.1407470703125,
+        "trajectory_correlation": 0.9950792737314093,
+        "voice_f1": 0.9911739826202393,
+        "rest_false_positive_rate": 0.008429199457168579,
+        "onset_f1_exact_frame": 0.22249539196491241,
+        "offset_f1_exact_frame": 0.2588202953338623,
+        "onset_f1_30ms": 0.7667780920545127,
+        "offset_f1_30ms": 0.9941768131286395
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_temporal_aligner_v6/manifest.json"
+    },
+    {
+      "id": "yamabiko_temporal_aligner_v7",
+      "stage": "Temporal Aligner",
+      "pass": true,
+      "split": "frozen-oracle-grid-unknown-bpm",
+      "seed": 18431,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.04528269171714783,
+        "clock_pointer_p95_cells": 0.11808395385742188,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 58.22916666666667,
+        "pitch_mae_cents": 14.787281036376953,
+        "trajectory_correlation": 0.9957623781777165,
+        "voice_f1": 0.9909536242485046,
+        "rest_false_positive_rate": 0.006149604916572571,
+        "onset_f1_exact_frame": 0.38334372639656067,
+        "offset_f1_exact_frame": 0.4131104350090027,
+        "onset_f1_30ms": 0.918136908962597,
+        "offset_f1_30ms": 0.9994678020223523
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_connected_attention_diag",
+      "stage": "Connected Temporal",
+      "pass": false,
+      "split": "diagnostic-attention-timing-profile",
+      "seed": 50473,
+      "reason": "predicted-upstream\u63a5\u7d9a\u3067\u6642\u523b\u8aa4\u5dee\u304c\u7d2f\u7a4d",
+      "metrics": {
+        "clock_pointer_mae_cells": 27993.720703125,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 57.083333333333336,
+        "pitch_mae_cents": 88.29595947265625,
+        "trajectory_correlation": 0.8415581900928933,
+        "voice_f1": 0.8889450430870056,
+        "rest_false_positive_rate": 0.03238684684038162,
+        "onset_f1_30ms": 0.6914758273355558,
+        "offset_f1_30ms": 0.7629052687686051
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_connected_attention_diag_v2",
+      "stage": "Connected Temporal",
+      "pass": false,
+      "split": "diagnostic-monotone-attention-timing",
+      "seed": 50473,
+      "reason": "predicted-upstream\u63a5\u7d9a\u3067\u6642\u523b\u8aa4\u5dee\u304c\u7d2f\u7a4d",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.30879390239715576,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 57.083333333333336,
+        "pitch_mae_cents": 73.05000305175781,
+        "trajectory_correlation": 0.8701448339399455,
+        "voice_f1": 0.9295287132263184,
+        "rest_false_positive_rate": 0.0367782823741436,
+        "onset_f1_30ms": 0.7205503837593409,
+        "offset_f1_30ms": 0.8007733765380286
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_connected_profile_diag",
+      "stage": "Connected Temporal",
+      "pass": false,
+      "split": "diagnostic-stored-timing-profile",
+      "seed": 50473,
+      "reason": "predicted-upstream\u63a5\u7d9a\u3067\u6642\u523b\u8aa4\u5dee\u304c\u7d2f\u7a4d",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.5567135810852051,
+        "clock_backward_jumps": 618,
+        "clock_eos_mae_ms": 57.083333333333336,
+        "pitch_mae_cents": 73.1325454711914,
+        "trajectory_correlation": 0.86985972891053,
+        "voice_f1": 0.9120553731918335,
+        "rest_false_positive_rate": 0.1117321252822876,
+        "onset_f1_30ms": 0.7068187599920329,
+        "offset_f1_30ms": 0.7853612177327515
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_connected_profile_diag_v2",
+      "stage": "Connected Temporal",
+      "pass": false,
+      "split": "diagnostic-monotone-timing-profile",
+      "seed": 50473,
+      "reason": "predicted-upstream\u63a5\u7d9a\u3067\u6642\u523b\u8aa4\u5dee\u304c\u7d2f\u7a4d",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.48014193773269653,
+        "clock_backward_jumps": 10,
+        "clock_eos_mae_ms": 57.083333333333336,
+        "pitch_mae_cents": 75.01312255859375,
+        "trajectory_correlation": 0.868304120274058,
+        "voice_f1": 0.8584347367286682,
+        "rest_false_positive_rate": 0.2928788959980011,
+        "onset_f1_30ms": 0.7049549619227427,
+        "offset_f1_30ms": 0.7934794774794837
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_connected",
+      "stage": "Connected Temporal",
+      "pass": false,
+      "split": "frozen-final-predicted-upstream",
+      "seed": 938431,
+      "reason": "predicted-upstream\u63a5\u7d9a\u3067\u6642\u523b\u8aa4\u5dee\u304c\u7d2f\u7a4d",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.37904077768325806,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 79.47916666666667,
+        "pitch_mae_cents": 128.43394470214844,
+        "trajectory_correlation": 0.7987004928294392,
+        "voice_f1": 0.879126787185669,
+        "rest_false_positive_rate": 0.19084244966506958,
+        "onset_f1_30ms": 0.5373101491985358,
+        "offset_f1_30ms": 0.6045423886461894
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_temporal_connected/manifest.json"
+    },
+    {
+      "id": "yamabiko_temporal_connected_tuned_dev",
+      "stage": "Connected Temporal",
+      "pass": false,
+      "split": "development-predicted-upstream",
+      "seed": 30473,
+      "reason": "predicted-upstream\u63a5\u7d9a\u3067\u6642\u523b\u8aa4\u5dee\u304c\u7d2f\u7a4d",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.3843650221824646,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 41.875,
+        "pitch_mae_cents": 74.37360382080078,
+        "trajectory_correlation": 0.9156196250453525,
+        "voice_f1": 0.8839994668960571,
+        "rest_false_positive_rate": 0.09471331536769867,
+        "onset_f1_30ms": 0.62884747177032,
+        "offset_f1_30ms": 0.6266336085648951
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_connected_tuned_v2_dev",
+      "stage": "Connected Temporal",
+      "pass": false,
+      "split": "development-predicted-upstream-v2",
+      "seed": 50473,
+      "reason": "predicted-upstream\u63a5\u7d9a\u3067\u6642\u523b\u8aa4\u5dee\u304c\u7d2f\u7a4d",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.3719504475593567,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 57.083333333333336,
+        "pitch_mae_cents": 80.28606414794922,
+        "trajectory_correlation": 0.8649152491592297,
+        "voice_f1": 0.8858004808425903,
+        "rest_false_positive_rate": 0.10135236382484436,
+        "onset_f1_30ms": 0.6215758393748883,
+        "offset_f1_30ms": 0.6518235495615444
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_connected_tuned_v2_oracle_clock",
+      "stage": "Connected Temporal",
+      "pass": false,
+      "split": "diagnostic-oracle-clock-predicted-memory",
+      "seed": 50473,
+      "reason": "predicted-upstream\u63a5\u7d9a\u3067\u6642\u523b\u8aa4\u5dee\u304c\u7d2f\u7a4d",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.0,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 57.083333333333336,
+        "pitch_mae_cents": 74.36200714111328,
+        "trajectory_correlation": 0.8721929675265455,
+        "voice_f1": 0.9349443912506104,
+        "rest_false_positive_rate": 0.02330455556511879,
+        "onset_f1_30ms": 0.8219100268730904,
+        "offset_f1_30ms": 0.8510718253805661
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_duration_connected",
+      "stage": "Duration Clock",
+      "pass": false,
+      "split": "frozen-final-predicted-upstream",
+      "seed": 1038431,
+      "reason": "predicted-upstream\u63a5\u7d9a\u3067\u6642\u523b\u8aa4\u5dee\u304c\u7d2f\u7a4d",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.318279504776001,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 35.729166666666664,
+        "pitch_mae_cents": 128.36256408691406,
+        "trajectory_correlation": 0.7360614748282726,
+        "voice_f1": 0.8923311829566956,
+        "rest_false_positive_rate": 0.17889711260795593,
+        "onset_f1_30ms": 0.568608938400949,
+        "offset_f1_30ms": 0.6573842643542941
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_duration_final",
+      "stage": "Duration Clock",
+      "pass": true,
+      "split": "frozen-final-duration-clock-unknown-bpm",
+      "seed": 1018431,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.07155017554759979,
+        "clock_pointer_p95_cells": 0.17454910278320312,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 21.041666666666668,
+        "pitch_mae_cents": 14.575359344482422,
+        "trajectory_correlation": 0.9953429164021529,
+        "voice_f1": 0.9902867078781128,
+        "rest_false_positive_rate": 0.005430060904473066,
+        "onset_f1_exact_frame": 0.37993526458740234,
+        "offset_f1_exact_frame": 0.40795791149139404,
+        "onset_f1_30ms": 0.9284116331096197,
+        "offset_f1_30ms": 0.9994397759103641
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_duration_v1",
+      "stage": "Duration Clock",
+      "pass": false,
+      "split": "development-oracle-grid-unknown-bpm",
+      "seed": 118431,
+      "reason": "\u53c2\u7167\u9577\u8ffd\u52a0\u3060\u3051\u3067\u306fClock\u672a\u53ce\u675f",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.16833294928073883,
+        "clock_pointer_p95_cells": 0.44548797607421875,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 103.64583333333334,
+        "pitch_mae_cents": 17.016735076904297,
+        "trajectory_correlation": 0.9938302730092498,
+        "voice_f1": 0.9523146748542786,
+        "rest_false_positive_rate": 0.07549170404672623,
+        "onset_f1_exact_frame": 0.26609310507774353,
+        "offset_f1_exact_frame": 0.3206422030925751,
+        "onset_f1_30ms": 0.7936507936507936,
+        "offset_f1_30ms": 0.8591473286562331
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_temporal_duration_v2",
+      "stage": "Duration Clock",
+      "pass": true,
+      "split": "development-oracle-grid-unknown-bpm",
+      "seed": 118431,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "clock_pointer_mae_cells": 0.07316595315933228,
+        "clock_pointer_p95_cells": 0.16405105590820312,
+        "clock_backward_jumps": 0,
+        "clock_eos_mae_ms": 24.16666666666667,
+        "pitch_mae_cents": 15.453484535217285,
+        "trajectory_correlation": 0.9949575859399213,
+        "voice_f1": 0.9898810386657715,
+        "rest_false_positive_rate": 0.006891798693686724,
+        "onset_f1_exact_frame": 0.383634090423584,
+        "offset_f1_exact_frame": 0.4126565456390381,
+        "onset_f1_30ms": 0.9187853107344632,
+        "offset_f1_30ms": 1.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_timeline_memory_direct_v1",
+      "stage": "Timeline Memory",
+      "pass": false,
+      "split": "development-direct-pitch",
+      "seed": 171817,
+      "reason": "Ear skip\u9664\u53bb\u3067hum\u97f3\u6e90\u306e\u7d76\u5bfe\u97f3\u7a0b\u304c\u60aa\u5316",
+      "metrics": {
+        "pitch_mae_cents": 78.82645416259766,
+        "trajectory_correlation": 0.9135898682203007,
+        "voice_f1": 0.9992709755897522,
+        "rest_false_positive_rate": 0.00032448218553327024,
+        "onset_f1_30ms": 0.8705363270582838,
+        "offset_f1_30ms": 1.0
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_memory_direct_v1/manifest.json"
+    },
+    {
+      "id": "yamabiko_timeline_memory_final",
+      "stage": "Timeline Memory",
+      "pass": false,
+      "split": "frozen-final-unknown-bpm",
+      "seed": 1131817,
+      "reason": "\u672a\u77e5\u97f3\u6e90\u3067\u97f3\u7a0b\u4e00\u822c\u5316\u4e0d\u8db3",
+      "metrics": {
+        "pitch_mae_cents": 67.55818176269531,
+        "trajectory_correlation": 0.8078026149181018,
+        "voice_f1": 0.9998518228530884,
+        "rest_false_positive_rate": 0.00010541851224843413,
+        "onset_f1_30ms": 0.8868068309771031,
+        "offset_f1_30ms": 1.0
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_memory_final/manifest.json"
+    },
+    {
+      "id": "yamabiko_timeline_memory",
+      "stage": "Timeline Memory",
+      "pass": true,
+      "split": "development-unknown-bpm",
+      "seed": 131817,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "pitch_mae_cents": 48.79496765136719,
+        "trajectory_correlation": 0.9044813673178683,
+        "voice_f1": 0.9998342394828796,
+        "rest_false_positive_rate": 0.0001606769801583141,
+        "onset_f1_30ms": 0.8893033984452534,
+        "offset_f1_30ms": 1.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_timeline_memory_v2",
+      "stage": "Timeline Memory",
+      "pass": false,
+      "split": "development-unknown-bpm-v2",
+      "seed": 141817,
+      "reason": "\u97f3\u7a0bMAE\u306f\u6539\u5584\u3057\u305f\u304c\u8ecc\u8de1\u76f8\u95a2\u4e0d\u8db3",
+      "metrics": {
+        "pitch_mae_cents": 56.910682678222656,
+        "trajectory_correlation": 0.8676409178139943,
+        "voice_f1": 0.9998915791511536,
+        "rest_false_positive_rate": 5.1977753173559904e-05,
+        "onset_f1_30ms": 0.8931108605930865,
+        "offset_f1_30ms": 1.0
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_memory_v2/manifest.json"
+    },
+    {
+      "id": "yamabiko_timeline_memory_v3",
+      "stage": "Timeline Memory",
+      "pass": false,
+      "split": "development-unknown-bpm-v3",
+      "seed": 151817,
+      "reason": "\u5408\u683c\u95be\u5024\u76f4\u524d\u3060\u304c\u672a\u9054",
+      "metrics": {
+        "pitch_mae_cents": 60.64207458496094,
+        "trajectory_correlation": 0.8920605988172602,
+        "voice_f1": 0.9997624158859253,
+        "rest_false_positive_rate": 0.0005556481773965061,
+        "onset_f1_30ms": 0.8880071493465027,
+        "offset_f1_30ms": 0.9994292237442922
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_memory_v3/manifest.json"
+    },
+    {
+      "id": "yamabiko_timeline_memory_v4_final",
+      "stage": "Timeline Memory",
+      "pass": false,
+      "split": "frozen-final-unknown-bpm-v4",
+      "seed": 1161817,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 67.45426940917969,
+        "trajectory_correlation": 0.9071396849399411,
+        "voice_f1": 0.9998866319656372,
+        "rest_false_positive_rate": 5.3633681091014296e-05,
+        "onset_f1_30ms": 0.8901316026405162,
+        "offset_f1_30ms": 1.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_timeline_memory_v4",
+      "stage": "Timeline Memory",
+      "pass": true,
+      "split": "development-unknown-bpm-v4",
+      "seed": 161817,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "pitch_mae_cents": 52.21089553833008,
+        "trajectory_correlation": 0.9674666138364745,
+        "voice_f1": 0.9999210238456726,
+        "rest_false_positive_rate": 0.0,
+        "onset_f1_30ms": 0.8997029393169704,
+        "offset_f1_30ms": 1.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_timeline_memory_v4_stratified",
+      "stage": "Timeline Memory",
+      "pass": false,
+      "split": "diagnostic-final-stratified",
+      "seed": 1161817,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pitch_mae_cents": 67.45426940917969,
+        "trajectory_correlation": 0.9071396849399411,
+        "voice_f1": 0.9998866319656372,
+        "rest_false_positive_rate": 5.3633681091014296e-05,
+        "onset_f1_30ms": 0.8901316026405162,
+        "offset_f1_30ms": 1.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_timeline_position",
+      "stage": "Position Planner",
+      "pass": false,
+      "split": "frozen-unknown-bpm",
+      "seed": 123611,
+      "reason": "\u5358\u72ec\u3068predicted-upstream\u7d50\u5408\u3092\u5206\u96e2\u8a55\u4fa1",
+      "metrics": {
+        "position_mae_percent_stroke": 3.496258020401001,
+        "position_p95_percent_stroke": 13.903060913085938,
+        "steady_pitch_mae_cents": 64.96876525878906
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_timeline_position_v2",
+      "stage": "Position Planner",
+      "pass": true,
+      "split": "frozen-unknown-bpm",
+      "seed": 123611,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "position_mae_percent_stroke": 0.5998721122741699,
+        "position_p95_percent_stroke": 1.5337765216827393,
+        "steady_pitch_mae_cents": 11.52153491973877,
+        "connected_position_mae_percent_stroke": 7.858829021453857,
+        "connected_steady_pitch_mae_cents": 161.86196899414062
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_timeline_timbre_v2_final",
+      "stage": "Timeline Memory",
+      "pass": true,
+      "split": "frozen-final-timbre-v2-timeline",
+      "seed": 1191817,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "pitch_mae_cents": 57.50166702270508,
+        "trajectory_correlation": 0.9000954035535202,
+        "voice_f1": 0.9999544024467468,
+        "rest_false_positive_rate": 0.0,
+        "onset_f1_30ms": 0.8711306561463894,
+        "offset_f1_30ms": 1.0
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_timeline_timbre_v2",
+      "stage": "Timeline Memory",
+      "pass": true,
+      "split": "development-timbre-v2-timeline",
+      "seed": 191817,
+      "reason": "\u63a1\u7528\u5019\u88dc\u307e\u305f\u306f\u5408\u683ccheckpoint",
+      "metrics": {
+        "pitch_mae_cents": 53.106529235839844,
+        "trajectory_correlation": 0.9189674337357294,
+        "voice_f1": 0.9995222091674805,
+        "rest_false_positive_rate": 0.0007688505575060844,
+        "onset_f1_30ms": 0.8786715155730213,
+        "offset_f1_30ms": 0.9994635193133048
+      },
+      "audio_manifest": null
+    },
+    {
+      "id": "yamabiko_timing_profile_direct_v1",
+      "stage": "Timing Profile",
+      "pass": false,
+      "split": "development-unknown-bpm",
+      "seed": 127491,
+      "reason": "\u7d76\u5bfe\u4f4d\u7f6e\u76f4\u63a5\u56de\u5e30\u304c\u672a\u77e5\u66f2\u3078\u4e00\u822c\u5316\u305b\u305a",
+      "metrics": {
+        "pointer_mae_cells": 0.5570245981216431,
+        "pointer_p95_cells": 1.8938273191452026,
+        "backward_jumps": 0
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timing_profile_direct_v1/manifest.json"
+    },
+    {
+      "id": "yamabiko_timing_profile_indexed_v1",
+      "stage": "Timing Profile",
+      "pass": false,
+      "split": "development-unknown-bpm",
+      "seed": 127491,
+      "reason": "frame index\u8ffd\u52a0\u5f8c\u3082\u7a4d\u5206\u8aa4\u5dee\u304c\u6b8b\u5b58",
+      "metrics": {
+        "pointer_mae_cells": 0.41051435470581055,
+        "pointer_p95_cells": 1.1126407384872437,
+        "backward_jumps": 0
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timing_profile_indexed_v1/manifest.json"
+    },
+    {
+      "id": "yamabiko_timing_profile",
+      "stage": "Timing Profile",
+      "pass": false,
+      "split": "development-unknown-bpm",
+      "seed": 127491,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pointer_mae_cells": 0.4753463864326477,
+        "pointer_p95_cells": 1.4858710765838623,
+        "backward_jumps": 0
+      },
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timing_profile/manifest.json"
+    },
+    {
+      "id": "yamabiko_timing_profile_v2",
+      "stage": "Timing Profile",
+      "pass": false,
+      "split": "development-unknown-bpm",
+      "seed": 127491,
+      "reason": "\u56fa\u5b9aGate\u306e\u5c11\u306a\u304f\u3068\u30821\u6307\u6a19\u3092\u6e80\u305f\u3055\u305a\u4e0d\u63a1\u7528",
+      "metrics": {
+        "pointer_mae_cells": 0.3705501854419708,
+        "pointer_p95_cells": 1.0188629627227783,
+        "backward_jumps": 0
+      },
+      "audio_manifest": null
+    }
+  ]
+}
