@@ -1,0 +1,93 @@
+{
+  "format": "yamabiko-beat-audio-v1",
+  "checkpoint": "runs/yamabiko_temporal_duration_v2.pt",
+  "seed": 15551,
+  "official_path": "predicted_upstream",
+  "audio_kind": "tempo_after is diagnostic click track, not physical performance",
+  "tempo_beat": {
+    "tempo_relative_error_median": 0.008117146790027618,
+    "tempo_relative_error_p90": 0.03545817732810974,
+    "tempo_head_relative_error_median": 0.04481380805373192,
+    "phase_circular_mae_cycle": 0.03991597145795822,
+    "phase_confidence_mean": 0.9994564652442932,
+    "half_double_confusion_rate": 0.0,
+    "pass": true,
+    "seed": 14449,
+    "split": "frozen-heldout-bpm",
+    "heldout_bpms": [
+      73,
+      97,
+      113,
+      137,
+      157,
+      173
+    ],
+    "official_path": "predicted_upstream"
+  },
+  "demo_metrics": {
+    "tempo_relative_error_median": 0.01680493876881843,
+    "tempo_relative_error_p90": 0.01680493876881843,
+    "phase_circular_mae_cycle": 0.01746440678834915,
+    "pass": true
+  },
+  "musical_memory_trained": true,
+  "musical_memory": {
+    "pitch_mae_cents": 55.380088806152344,
+    "pitch_p90_cents": 85.30511474609375,
+    "trajectory_correlation": 0.9217180425994549,
+    "voice_f1": 0.9755895738518825,
+    "onset_f1": 0.9203606311044328,
+    "offset_f1": 0.927038626609442,
+    "slope_mae_cents_per_cell": 26.491308212280273,
+    "ear_grid_upper_bound_mae_cents": 37.9720573425293,
+    "ear_grid_upper_bound_correlation": 0.9273063144344887,
+    "pass": true,
+    "seed": 16673,
+    "split": "frozen-unknown-bpm",
+    "official_path": "predicted_upstream"
+  },
+  "temporal_aligner_trained": true,
+  "temporal_aligner": {
+    "clock_pointer_mae_cells": 0.07316595315933228,
+    "clock_pointer_p95_cells": 0.16405105590820312,
+    "clock_backward_jumps": 0,
+    "clock_eos_mae_ms": 24.16666666666667,
+    "pitch_mae_cents": 15.453484535217285,
+    "trajectory_correlation": 0.9949575859399213,
+    "voice_f1": 0.9898810386657715,
+    "rest_false_positive_rate": 0.006891798693686724,
+    "onset_f1_exact_frame": 0.383634090423584,
+    "offset_f1_exact_frame": 0.4126565456390381,
+    "onset_f1_30ms": 0.9187853107344632,
+    "offset_f1_30ms": 1.0,
+    "pass": true,
+    "seed": 118431,
+    "split": "development-oracle-grid-unknown-bpm",
+    "official_path": "oracle_memory"
+  },
+  "timing_profile_trained": false,
+  "timing_profile": null,
+  "timeline_memory_trained": false,
+  "timeline_memory": null,
+  "timeline_position": null,
+  "temporal_connected": null,
+  "cases": [
+    {
+      "case": "bpm_137",
+      "true_bpm": 137.0,
+      "predicted_bpm": 134.69772338867188,
+      "tempo_relative_error": 0.01680493876881843,
+      "phase_circular_mae_cycle": 0.01746440678834915,
+      "detected_beats": 8,
+      "tempo_before": "audio/bpm_137_tempo_before_reference.wav",
+      "tempo_after": "audio/bpm_137_tempo_after_clicks.wav",
+      "tempo_plot": "plots/bpm_137_tempo_pitch.svg",
+      "memory_before": "audio/bpm_137_tempo_before_reference.wav",
+      "memory_after": "audio/bpm_137_memory_after_recall.wav",
+      "memory_plot": "plots/bpm_137_memory_pitch.svg",
+      "aligner_before": "audio/bpm_137_memory_after_recall.wav",
+      "aligner_after": "audio/bpm_137_aligner_after_100hz.wav",
+      "aligner_plot": "plots/bpm_137_aligner_pitch.svg"
+    }
+  ]
+}

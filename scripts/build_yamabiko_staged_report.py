@@ -23,6 +23,13 @@ def doc_audio(src, label):
     return f'<div class="audio"><span>{html.escape(label)}</span><audio controls preload="none" src="{html.escape(src)}"></audio></div>'
 
 
+def figure(src, caption, prefix=""):
+    if not src:
+        return ""
+    return (f'<figure class="pitch-plot"><img loading="lazy" src="{html.escape(prefix + src)}" '
+            f'alt="{html.escape(caption)}"><figcaption>{html.escape(caption)}</figcaption></figure>')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--manifest", default="docs/e2e-results/manifest.json")
@@ -36,27 +43,30 @@ def main():
         beat = json.loads(beat_path.read_text(encoding="utf-8")); bm = beat["tempo_beat"]
         bc = next((x for x in beat["cases"] if x["case"] == "bpm_137"), beat["cases"][0])
         status = "PASS" if bm.get("pass") else "FAIL"
-        beat_section = f'''<div class="grid"><section class="card"><div class="stage"><b>B</b><span>{status}</span></div>
+        beat_section = f'''<div class="grid"><section class="card"><div class="stage"><b>B</b><span class="{status.lower()}">{status}</span></div>
         <h2>Tempo / Beat NN</h2><p class="flow">raw reference → BPM・連続beat phase</p>
         <div class="listen">{beat_audio(bc['tempo_before'], 'お手本')}{beat_audio(bc['tempo_after'], '予測拍click')}</div>
+        {figure(bc.get('tempo_plot'), '横軸: 時間 / 縦軸: 音程。橙の縦線は予測拍（このNNは音程列を出力しない）', 'e2e-beat-results/')}
         <dl><div><dt>tempo median relative error</dt><dd>{n(bm['tempo_relative_error_median'], 4)}</dd></div>
         <div><dt>phase MAE cycle</dt><dd>{n(bm['phase_circular_mae_cycle'], 4)}</dd></div></dl>
         <p class="note">afterはTempo NNの拍だけを鳴らした診断clickで、演奏音ではない。official path: {html.escape(beat['official_path'])}</p>
         </section>'''
         if beat.get("musical_memory_trained") and beat.get("musical_memory"):
             mm = beat["musical_memory"]; ms = "PASS" if mm.get("pass") else "FAIL"
-            beat_section += f'''<section class="card"><div class="stage"><b>M</b><span>{ms}</span></div>
+            beat_section += f'''<section class="card"><div class="stage"><b>M</b><span class="{ms.lower()}">{ms}</span></div>
             <h2>Musical Memory NN</h2><p class="flow">予測beat + 音響表現 → 音程・休符・onset/offsetセル</p>
             <div class="listen">{beat_audio(bc['memory_before'], 'NNの前')}{beat_audio(bc['memory_after'], '記憶から再合成')}</div>
+            {figure(bc.get('memory_plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — お手本と記憶出力', 'e2e-beat-results/')}
             <dl><div><dt>pitch MAE cents</dt><dd>{n(mm['pitch_mae_cents'])}</dd></div>
             <div><dt>voice F1</dt><dd>{n(mm['voice_f1'], 3)}</dd></div><div><dt>onset F1</dt><dd>{n(mm['onset_f1'], 3)}</dd></div>
             <div><dt>correlation</dt><dd>{n(mm['trajectory_correlation'], 3)}</dd></div></dl>
             <p class="note">raw音声と正解セル数を捨て、予測BPM・予測位相から求めたセル数で再生した診断音。</p></section>'''
         if beat.get("temporal_aligner_trained") and beat.get("temporal_aligner"):
             am = beat["temporal_aligner"]; ast = "PASS" if am.get("pass") else "FAIL"
-            beat_section += f'''<section class="card"><div class="stage"><b>A</b><span>{ast}</span></div>
+            beat_section += f'''<section class="card"><div class="stage"><b>A</b><span class="{ast.lower()}">{ast}</span></div>
             <h2>Neural Clock / Temporal Aligner</h2><p class="flow">記憶セル + BPM + 100 Hz tick → 時刻付き演奏目標</p>
             <div class="listen">{beat_audio(bc['aligner_before'], '拍セル記憶')}{beat_audio(bc['aligner_after'], '100 Hz再現')}</div>
+            {figure(bc.get('aligner_plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — 記憶セルと100 Hz再現', 'e2e-beat-results/')}
             <dl><div><dt>pointer MAE cells</dt><dd>{n(am['clock_pointer_mae_cells'], 3)}</dd></div>
             <div><dt>EOS MAE ms</dt><dd>{n(am['clock_eos_mae_ms'])}</dd></div>
             <div><dt>pitch MAE cents</dt><dd>{n(am['pitch_mae_cents'])}</dd></div>
@@ -65,7 +75,7 @@ def main():
             <p class="note">これはOracle拍セルでの単独Gate。100 Hz tick以外の正解時刻は推論入力に与えていない。afterは診断再合成で、物理演奏ではない。</p></section>'''
             if beat.get("temporal_connected"):
                 cm = beat["temporal_connected"]; cst = "PASS" if cm.get("pass") else "FAIL"
-                beat_section += f'''<section class="card"><div class="stage"><b>E</b><span>{cst}</span></div>
+                beat_section += f'''<section class="card"><div class="stage"><b>E</b><span class="{cst.lower()}">{cst}</span></div>
                 <h2>Connected audio → 100 Hz Gate</h2><p class="flow">raw audio → Ear → Beat → Memory → Clock → Aligner</p>
                 <div class="listen">{beat_audio(bc['tempo_before'], '生のお手本')}{beat_audio(bc['aligner_after'], '全段後の再現')}</div>
                 <dl><div><dt>pitch MAE cents</dt><dd>{n(cm['pitch_mae_cents'])}</dd></div>
@@ -76,9 +86,10 @@ def main():
                 <p class="note">正解BPM・正解セル・正解時刻を使わない frozen predicted-upstream 最終試験。単独PASSでも接続誤差が累積するため、現在はFAIL。</p></section>'''
         if beat.get("timing_profile_trained") and beat.get("timing_profile"):
             tm = beat["timing_profile"]; tst = "PASS" if tm.get("pass") else "FAIL"
-            beat_section += f'''<section class="card"><div class="stage"><b>T</b><span>{tst}</span></div>
+            beat_section += f'''<section class="card"><div class="stage"><b>T</b><span class="{tst.lower()}">{tst}</span></div>
             <h2>Stored Timing Profile NN</h2><p class="flow">Tempo内部系列 → 単調な絶対セル位置列</p>
             <div class="listen">{beat_audio(bc['timing_before'], '生のお手本')}{beat_audio(bc['timing_after'], '保存profile click')}</div>
+            {figure(bc.get('timing_plot'), '横軸: 時間 / 縦軸: 音程。橙の縦線は保存profileの拍位置', 'e2e-beat-results/')}
             <dl><div><dt>pointer MAE cells</dt><dd>{n(tm['pointer_mae_cells'], 3)}</dd></div>
             <div><dt>pointer P95 cells</dt><dd>{n(tm['pointer_p95_cells'], 3)}</dd></div>
             <div><dt>backward jumps</dt><dd>{n(tm['backward_jumps'], 0)}</dd></div></dl>
@@ -86,9 +97,10 @@ def main():
         if beat.get("timeline_memory_trained") and beat.get("timeline_memory"):
             lm = beat["timeline_memory"]; lst = "PASS" if lm.get("pass") else "FAIL"
             source_note = " / ".join(f"{html.escape(k)} {n(v['pitch_mae_cents'])}c" for k, v in lm.get("by_source", {}).items())
-            beat_section += f'''<section class="card"><div class="stage"><b>L</b><span>{lst}</span></div>
+            beat_section += f'''<section class="card"><div class="stage"><b>L</b><span class="{lst.lower()}">{lst}</span></div>
             <h2>Beat-conditioned Timeline Memory</h2><p class="flow">Beat内部系列 + Ear → 保存100 Hz profile → 再現</p>
             <div class="listen">{beat_audio(bc['timeline_before'], '生のお手本')}{beat_audio(bc['timeline_after'], '保存tensorから再現')}</div>
+            {figure(bc.get('timeline_plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — お手本とTimeline再現', 'e2e-beat-results/')}
             <dl><div><dt>pitch MAE cents</dt><dd>{n(lm['pitch_mae_cents'])}</dd></div>
             <div><dt>correlation</dt><dd>{n(lm['trajectory_correlation'], 3)}</dd></div>
             <div><dt>voice F1</dt><dd>{n(lm['voice_f1'], 3)}</dd></div>
@@ -97,9 +109,10 @@ def main():
             <p class="note">remember後はraw音声とEar入力を破棄し、保存NN tensorだけでdecode。BPM/セル表現と併存するドリフトなし実行profile。音源別: {source_note}</p></section>'''
         if beat.get("timeline_position"):
             pm = beat["timeline_position"]; pst = "PASS" if pm.get("pass") else "FAIL"
-            beat_section += f'''<section class="card"><div class="stage"><b>P</b><span>{pst}</span></div>
+            beat_section += f'''<section class="card"><div class="stage"><b>P</b><span class="{pst.lower()}">{pst}</span></div>
             <h2>Position Planner NN</h2><p class="flow">100 Hz音程・発音 → 正規化プランジャ位置</p>
             <div class="listen">{beat_audio(bc['position_before'], 'Timeline入力')}{beat_audio(bc['position_after'], '位置→定常笛音')}</div>
+            {figure(bc.get('position_plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — Timeline入力と位置計画後', 'e2e-beat-results/')}
             <dl><div><dt>oracle position MAE %</dt><dd>{n(pm['position_mae_percent_stroke'], 3)}</dd></div>
             <div><dt>oracle steady pitch MAE</dt><dd>{n(pm['steady_pitch_mae_cents'])}</dd></div>
             <div><dt>connected position MAE %</dt><dd>{n(pm['connected_position_mae_percent_stroke'], 3)}</dd></div>
@@ -113,27 +126,36 @@ def main():
         history = json.loads(history_path.read_text(encoding="utf-8"))["attempts"]
         failed = sum(not row["pass"] for row in history); passed = len(history) - failed; groups = []
         for stage in dict.fromkeys(row["stage"] for row in history):
-            rows = [row for row in history if row["stage"] == stage]
+            rows = sorted((row for row in history if row["stage"] == stage),
+                          key=lambda row: (not row["pass"], row["id"]))
             cards_history = []
             for row in rows:
-                status = "PASS" if row["pass"] else "FAIL"
+                attempt_status = "PASS" if row["pass"] else "FAIL"
                 metric_text = " / ".join(f"{html.escape(k.replace('_', ' '))} {n(v, 3)}" for k, v in list(row["metrics"].items())[:6])
                 listening = ""
                 if row.get("audio_manifest"):
                     manifest_path = pathlib.Path(args.manifest).parent.parent / row["audio_manifest"]
                     if manifest_path.exists():
                         am = json.loads(manifest_path.read_text(encoding="utf-8")); case = am["cases"][0]
-                        pairs = (("position_before", "position_after"), ("timeline_before", "timeline_after"),
-                                 ("timing_before", "timing_after"), ("aligner_before", "aligner_after"),
-                                 ("memory_before", "memory_after"), ("tempo_before", "tempo_after"))
+                        pairs = (("position_before", "position_after", "position_plot"),
+                                 ("timeline_before", "timeline_after", "timeline_plot"),
+                                 ("timing_before", "timing_after", "timing_plot"),
+                                 ("aligner_before", "aligner_after", "aligner_plot"),
+                                 ("memory_before", "memory_after", "memory_plot"),
+                                 ("tempo_before", "tempo_after", "tempo_plot"))
                         pair = next((p for p in pairs if p[0] in case and p[1] in case), None)
                         if pair:
                             prefix = pathlib.PurePosixPath(row["audio_manifest"]).parent.as_posix() + "/"
-                            listening = f'<div class="listen">{doc_audio(prefix + case[pair[0]], "before")}{doc_audio(prefix + case[pair[1]], "after")}</div>'
-                cards_history.append(f'''<article class="attempt"><div class="stage"><b>試</b><span>{status}</span></div>
+                            plot_caption = ("横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: before / 橙: after"
+                                            if pair[2] not in ("tempo_plot", "timing_plot") else
+                                            "横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）")
+                            listening = (f'<div class="listen">{doc_audio(prefix + case[pair[0]], "before")}'
+                                         f'{doc_audio(prefix + case[pair[1]], "after")}</div>'
+                                         f'{figure(case.get(pair[2]), plot_caption, prefix)}')
+                cards_history.append(f'''<article class="attempt"><div class="stage"><b>試</b><span class="{attempt_status.lower()}">{attempt_status}</span></div>
                 <h3>{html.escape(row['id'])}</h3><p>{html.escape(row['reason'])}</p><p class="metrics">{metric_text or '数値なし'}</p>
                 <p class="note">split: {html.escape(str(row['split']))} / seed: {html.escape(str(row.get('seed')))}</p>{listening}</article>''')
-            groups.append(f'''<details {'open' if stage in ('Temporal Aligner', 'Timeline Memory') else ''}><summary>{html.escape(stage)} — {len(rows)}試行</summary><div class="attempt-grid">{''.join(cards_history)}</div></details>''')
+            groups.append(f'''<details {'open' if any(row['pass'] for row in rows) else ''}><summary>{html.escape(stage)} — {len(rows)}試行</summary><div class="attempt-grid">{''.join(cards_history)}</div></details>''')
         history_section = f'''<p>全 {len(history)} 試行（PASS {passed} / FAIL {failed}）。FAILも削除せず、固定レポート値と残存checkpointの代表WAVを掲載する。</p>{''.join(groups)}'''
 
     stages = [
@@ -158,7 +180,7 @@ def main():
             if key == "pass": continue
             metric_lines.append(f'<div><dt>{html.escape(key.replace("_", " "))}</dt><dd>{n(value, 3)}</dd></div>')
         cards.append(f'''<section class="card">
-          <div class="stage"><b>{number}</b><span>{status}</span></div>
+          <div class="stage"><b>{number}</b><span class="{status.lower()}">{status}</span></div>
           <h2>{title}</h2><p class="flow">{flow}</p>
           <div class="listen">{audio(before, "NNの前")}{audio(after, "NNの後")}</div>
           <dl>{''.join(metric_lines)}</dl><p class="note">{note}</p>
@@ -194,6 +216,7 @@ main{{max-width:1120px;margin:auto;padding:48px 20px 80px}}h1{{font-size:clamp(2
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:18px}}.card{{position:relative;background:linear-gradient(145deg,#132433,#0d1822);border:1px solid var(--line);border-radius:18px;padding:22px}}
 .stage{{display:flex;justify-content:space-between;align-items:center}}.stage b{{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--cyan);color:#071016}}.stage span{{font-weight:800;color:var(--red)}}.card:has(.stage span:first-child){{border-color:var(--cyan)}}
 .listen{{display:grid;gap:10px;margin:18px 0}}.audio{{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:8px}}audio{{width:100%;height:36px}}dl{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}dl div{{background:#0a141d;padding:9px;border-radius:8px}}dt{{font-size:.72rem;color:var(--muted)}}dd{{margin:0;font-size:1.05rem}}.note{{color:var(--muted);font-size:.9rem}}
+.pitch-plot{{margin:14px 0 18px}}.pitch-plot img{{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px;background:#0b1620}}.pitch-plot figcaption{{margin-top:7px;color:var(--muted);font-size:.78rem}}.stage span.pass{{color:#70f0ac}}.stage span.fail{{color:#ff8c78}}
 .pipeline{{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0}}.pipeline span{{border:1px solid var(--line);padding:8px 12px;border-radius:999px}}.pipeline i{{color:var(--cyan);font-style:normal;padding:8px 0}}
 .table{{overflow:auto}}table{{border-collapse:collapse;width:100%;font-size:.82rem}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:right;white-space:nowrap}}th:first-child{{text-align:left}}code{{color:var(--cyan)}}
 details{{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:#0b1620}}summary{{cursor:pointer;padding:14px 18px;color:var(--cyan);font-weight:700}}.attempt-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;padding:0 12px 12px}}.attempt{{background:#101d29;border:1px solid var(--line);border-radius:12px;padding:14px}}.attempt h3{{font-size:.95rem;overflow-wrap:anywhere;margin:.5rem 0}}.attempt .metrics{{font-size:.78rem;color:#c7d6df}}

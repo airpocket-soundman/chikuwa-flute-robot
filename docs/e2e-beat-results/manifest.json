@@ -25,9 +25,9 @@
     "official_path": "predicted_upstream"
   },
   "demo_metrics": {
-    "tempo_relative_error_median": 0.016171176174557766,
-    "tempo_relative_error_p90": 0.036334590092318195,
-    "phase_circular_mae_cycle": 0.032905126456171274,
+    "tempo_relative_error_median": 0.016189131461979415,
+    "tempo_relative_error_p90": 0.036320823687782,
+    "phase_circular_mae_cycle": 0.03290165634825826,
     "pass": true
   },
   "musical_memory_trained": false,
@@ -83,58 +83,70 @@
     {
       "case": "bpm_73",
       "true_bpm": 73.0,
-      "predicted_bpm": 73.650390625,
-      "tempo_relative_error": 0.008909460616438356,
-      "phase_circular_mae_cycle": 0.019668519496917725,
+      "predicted_bpm": 73.66150665283203,
+      "tempo_relative_error": 0.009061734970301797,
+      "phase_circular_mae_cycle": 0.01966816745698452,
       "detected_beats": 8,
       "tempo_before": "audio/bpm_73_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_73_tempo_after_clicks.wav",
+      "tempo_plot": "plots/bpm_73_tempo_pitch.svg",
       "timeline_before": "audio/bpm_73_tempo_before_reference.wav",
       "timeline_after": "audio/bpm_73_timeline_memory_recall.wav",
+      "timeline_plot": "plots/bpm_73_timeline_pitch.svg",
       "position_before": "audio/bpm_73_timeline_memory_recall.wav",
-      "position_after": "audio/bpm_73_position_planner.wav"
+      "position_after": "audio/bpm_73_position_planner.wav",
+      "position_plot": "plots/bpm_73_position_pitch.svg"
     },
     {
       "case": "bpm_97",
       "true_bpm": 97.0,
-      "predicted_bpm": 95.41683959960938,
-      "tempo_relative_error": 0.016321241241140465,
-      "phase_circular_mae_cycle": 0.05363700911402702,
+      "predicted_bpm": 95.43214416503906,
+      "tempo_relative_error": 0.01616346221609214,
+      "phase_circular_mae_cycle": 0.053620412945747375,
       "detected_beats": 8,
       "tempo_before": "audio/bpm_97_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_97_tempo_after_clicks.wav",
+      "tempo_plot": "plots/bpm_97_tempo_pitch.svg",
       "timeline_before": "audio/bpm_97_tempo_before_reference.wav",
       "timeline_after": "audio/bpm_97_timeline_memory_recall.wav",
+      "timeline_plot": "plots/bpm_97_timeline_pitch.svg",
       "position_before": "audio/bpm_97_timeline_memory_recall.wav",
-      "position_after": "audio/bpm_97_position_planner.wav"
+      "position_after": "audio/bpm_97_position_planner.wav",
+      "position_plot": "plots/bpm_97_position_pitch.svg"
     },
     {
       "case": "bpm_137",
       "true_bpm": 137.0,
-      "predicted_bpm": 130.8470916748047,
-      "tempo_relative_error": 0.044911739599965785,
-      "phase_circular_mae_cycle": 0.031725116074085236,
+      "predicted_bpm": 130.84353637695312,
+      "tempo_relative_error": 0.04493769067917427,
+      "phase_circular_mae_cycle": 0.03173397481441498,
       "detected_beats": 8,
       "tempo_before": "audio/bpm_137_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_137_tempo_after_clicks.wav",
+      "tempo_plot": "plots/bpm_137_tempo_pitch.svg",
       "timeline_before": "audio/bpm_137_tempo_before_reference.wav",
       "timeline_after": "audio/bpm_137_timeline_memory_recall.wav",
+      "timeline_plot": "plots/bpm_137_timeline_pitch.svg",
       "position_before": "audio/bpm_137_timeline_memory_recall.wav",
-      "position_after": "audio/bpm_137_position_planner.wav"
+      "position_after": "audio/bpm_137_position_planner.wav",
+      "position_plot": "plots/bpm_137_position_pitch.svg"
     },
     {
       "case": "bpm_173",
       "true_bpm": 173.0,
-      "predicted_bpm": 170.2283477783203,
-      "tempo_relative_error": 0.01602111110797507,
-      "phase_circular_mae_cycle": 0.026589861139655113,
+      "predicted_bpm": 170.19483947753906,
+      "tempo_relative_error": 0.01621480070786669,
+      "phase_circular_mae_cycle": 0.026584070175886154,
       "detected_beats": 9,
       "tempo_before": "audio/bpm_173_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_173_tempo_after_clicks.wav",
+      "tempo_plot": "plots/bpm_173_tempo_pitch.svg",
       "timeline_before": "audio/bpm_173_tempo_before_reference.wav",
       "timeline_after": "audio/bpm_173_timeline_memory_recall.wav",
+      "timeline_plot": "plots/bpm_173_timeline_pitch.svg",
       "position_before": "audio/bpm_173_timeline_memory_recall.wav",
-      "position_after": "audio/bpm_173_position_planner.wav"
+      "position_after": "audio/bpm_173_position_planner.wav",
+      "position_plot": "plots/bpm_173_position_pitch.svg"
     }
   ]
 }

@@ -48,6 +48,37 @@ def pointer_click_track(pointer, steps, subdivision):
     return y
 
 
+def write_pitch_plot(path, reference, output=None, output_voice=None, events=None, reference_voice=None):
+    """Plot the exact 100 Hz evaluation trajectories; never re-estimate pitch from WAV."""
+    import matplotlib
+    matplotlib.use("Agg")
+    matplotlib.rcParams["svg.hashsalt"] = "yamabiko-pitch-v1"
+    import matplotlib.pyplot as plt
+
+    reference = np.asarray(reference, dtype=float).copy()
+    if reference_voice is not None: reference[~np.asarray(reference_voice, dtype=bool)] = np.nan
+    fig, ax = plt.subplots(figsize=(8.4, 3.0), facecolor="#0b1620")
+    ax.set_facecolor("#0b1620")
+    ax.plot(np.arange(len(reference)) / 100.0, reference, color="#5ee9ff", lw=1.8, label="Reference / input")
+    if output is not None:
+        output = np.asarray(output, dtype=float).copy()
+        if output_voice is not None: output[~np.asarray(output_voice, dtype=bool)] = np.nan
+        ax.plot(np.arange(len(output)) / 100.0, output, color="#ffb45e", lw=1.5, label="Model output")
+    else:
+        ax.text(.99, .03, "No pitch output (beat events only)", transform=ax.transAxes,
+                ha="right", va="bottom", color="#ffb45e", fontsize=9)
+    for event in (events if events is not None else []):
+        ax.axvline(float(event) / 100.0, color="#ffb45e", alpha=.35, lw=.8)
+    ax.set_xlim(0, max(len(reference), len(output) if output is not None else 0) / 100.0)
+    ax.set_ylim(400, 2100); ax.set_xlabel("Time [s]"); ax.set_ylabel("Pitch [cent, A4 = 0]")
+    ax.grid(color="#274052", alpha=.65, linewidth=.6); ax.tick_params(colors="#c6d5de")
+    ax.xaxis.label.set_color("#c6d5de"); ax.yaxis.label.set_color("#c6d5de")
+    for spine in ax.spines.values(): spine.set_color("#365164")
+    ax.legend(loc="upper right", facecolor="#101d29", edgecolor="#365164", labelcolor="#e9f5f9")
+    fig.tight_layout(); path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, format="svg", facecolor=fig.get_facecolor(), metadata={"Date": None}); plt.close(fig)
+
+
 @torch.inference_mode()
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
@@ -88,7 +119,8 @@ def main():
         clock.load_state_dict(ck["performance_clock"]); clock.eval()
         aligner = NeuralTemporalAligner(cfg).to(args.device); aligner.load_state_dict(ck["temporal_aligner"]); aligner.eval()
     ear = E2EImitator.from_checkpoint(torch.load(ck["ear_checkpoint"], map_location=args.device), args.device).eval()
-    out = pathlib.Path(args.out); audio = out / "audio"; audio.mkdir(parents=True, exist_ok=True)
+    out = pathlib.Path(args.out); audio = out / "audio"; plots = out / "plots"
+    audio.mkdir(parents=True, exist_ok=True); plots.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed); cases = []; tempo_errors = []; phase_errors = []
     for index, bpm in enumerate(args.demo_bpms):
         example = make_beat_target(rng, bpm=bpm); wave, _ = synth_source(example.target, "recorder", rng, sr=SAMPLE_RATE)
@@ -108,12 +140,20 @@ def main():
                 "tempo_relative_error": tempo_errors[-1], "phase_circular_mae_cycle": phase_errors[-1],
                 "detected_beats": int(len(wraps)), "tempo_before": str(before.relative_to(out)).replace("\\", "/"),
                 "tempo_after": str(after.relative_to(out)).replace("\\", "/")}
+        tempo_plot = plots / f"{name}_tempo_pitch.svg"
+        write_pitch_plot(tempo_plot, example.target, events=wraps)
+        item["tempo_plot"] = str(tempo_plot.relative_to(out)).replace("\\", "/")
         if timing_profile is not None:
             stored_pointer = timing_profile(encoded, beat_out, mask)[0].cpu().numpy()
             timing_wave = pointer_click_track(stored_pointer, len(example.target), cfg.subdivision)
             timing_after = audio / f"{name}_timing_profile_clicks.wav"; write_wav(timing_after, timing_wave, SAMPLE_RATE)
             item["timing_before"] = item["tempo_before"]
             item["timing_after"] = str(timing_after.relative_to(out)).replace("\\", "/")
+            crossings = np.flatnonzero(np.floor(stored_pointer[1:] / cfg.subdivision) >
+                                       np.floor(stored_pointer[:-1] / cfg.subdivision)) + 1
+            timing_plot = plots / f"{name}_timing_pitch.svg"
+            write_pitch_plot(timing_plot, example.target, events=crossings)
+            item["timing_plot"] = str(timing_plot.relative_to(out)).replace("\\", "/")
         if timeline_memory is not None:
             _, stored = timeline_memory(features, encoded, beat_out, lengths)
             timeline_out = timeline_memory.decode(stored)[0]
@@ -123,6 +163,9 @@ def main():
             timeline_after = audio / f"{name}_timeline_memory_recall.wav"; write_wav(timeline_after, timeline_wave, SAMPLE_RATE)
             item["timeline_before"] = item["tempo_before"]
             item["timeline_after"] = str(timeline_after.relative_to(out)).replace("\\", "/")
+            timeline_plot = plots / f"{name}_timeline_pitch.svg"
+            write_pitch_plot(timeline_plot, example.target, timeline_pitch, timeline_voice)
+            item["timeline_plot"] = str(timeline_plot.relative_to(out)).replace("\\", "/")
             if position_planner is not None:
                 position = position_planner(timeline_out[None, ..., :2])[0, :, 0].cpu().numpy()
                 rig = RigParams.nominal(1); planned_pitch = rig.cents_at(position * rig.stroke[0])
@@ -130,6 +173,10 @@ def main():
                 planned_after = audio / f"{name}_position_planner.wav"; write_wav(planned_after, planned_wave, SAMPLE_RATE)
                 item["position_before"] = item["timeline_after"]
                 item["position_after"] = str(planned_after.relative_to(out)).replace("\\", "/")
+                position_plot = plots / f"{name}_position_pitch.svg"
+                write_pitch_plot(position_plot, timeline_pitch, planned_pitch, timeline_voice,
+                                 reference_voice=timeline_voice)
+                item["position_plot"] = str(position_plot.relative_to(out)).replace("\\", "/")
         if ck.get("musical_memory_trained"):
             confident = np.flatnonzero(confidence >= .5); start_frame = int(confident[0]) if len(confident) else 0
             cells = int(np.clip(round((len(example.target) - start_frame) / 100 * predicted_bpm / 60 * cfg.subdivision), 1, 64))
@@ -143,6 +190,9 @@ def main():
             mem_after = audio / f"{name}_memory_after_recall.wav"; write_wav(mem_after, rendered, SAMPLE_RATE)
             item["memory_before"] = item["tempo_before"]
             item["memory_after"] = str(mem_after.relative_to(out)).replace("\\", "/")
+            memory_plot = plots / f"{name}_memory_pitch.svg"
+            write_pitch_plot(memory_plot, example.target, track_pitch, track_voice)
+            item["memory_plot"] = str(memory_plot.relative_to(out)).replace("\\", "/")
             if clock is not None:
                 cell_lengths = torch.tensor([cells], device=args.device)
                 normalized_bpm = tempo.normalized_bpm(torch.tensor([predicted_bpm], device=args.device))
@@ -157,6 +207,10 @@ def main():
                 aligned_after = audio / f"{name}_aligner_after_100hz.wav"; write_wav(aligned_after, aligned_wave, SAMPLE_RATE)
                 item["aligner_before"] = item["memory_after"]
                 item["aligner_after"] = str(aligned_after.relative_to(out)).replace("\\", "/")
+                aligner_plot = plots / f"{name}_aligner_pitch.svg"
+                write_pitch_plot(aligner_plot, track_pitch, aligned_pitch, aligned_voice,
+                                 reference_voice=track_voice)
+                item["aligner_plot"] = str(aligner_plot.relative_to(out)).replace("\\", "/")
         cases.append(item)
     demo_metrics = {"tempo_relative_error_median": float(np.median(tempo_errors)),
                "tempo_relative_error_p90": float(np.quantile(tempo_errors, .9)),

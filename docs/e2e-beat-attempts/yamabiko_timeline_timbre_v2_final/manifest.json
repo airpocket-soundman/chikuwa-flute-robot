@@ -1,0 +1,88 @@
+{
+  "format": "yamabiko-beat-audio-v1",
+  "checkpoint": "runs/yamabiko_timeline_timbre_v2_final.pt",
+  "seed": 15551,
+  "official_path": "predicted_upstream",
+  "audio_kind": "tempo_after is diagnostic click track, not physical performance",
+  "tempo_beat": {
+    "tempo_relative_error_median": 0.011321211233735085,
+    "tempo_relative_error_p90": 0.06789593398571014,
+    "tempo_head_relative_error_median": 0.07439912110567093,
+    "phase_circular_mae_cycle": 0.05717724934220314,
+    "phase_confidence_mean": 0.9980171322822571,
+    "half_double_confusion_rate": 0.0,
+    "pass": true,
+    "seed": 14449,
+    "split": "frozen-heldout-bpm",
+    "heldout_bpms": [
+      73,
+      97,
+      113,
+      137,
+      157,
+      173
+    ],
+    "official_path": "predicted_upstream"
+  },
+  "demo_metrics": {
+    "tempo_relative_error_median": 0.015710315565123176,
+    "tempo_relative_error_p90": 0.015710315565123176,
+    "phase_circular_mae_cycle": 0.022245679050683975,
+    "pass": true
+  },
+  "musical_memory_trained": false,
+  "musical_memory": null,
+  "temporal_aligner_trained": false,
+  "temporal_aligner": null,
+  "timing_profile_trained": false,
+  "timing_profile": null,
+  "timeline_memory_trained": true,
+  "timeline_memory": {
+    "pitch_mae_cents": 57.50166702270508,
+    "trajectory_correlation": 0.9000954035535202,
+    "voice_f1": 0.9999544024467468,
+    "rest_false_positive_rate": 0.0,
+    "onset_f1_30ms": 0.8711306561463894,
+    "offset_f1_30ms": 1.0,
+    "by_source": {
+      "bird": {
+        "pitch_mae_cents": 31.62619972229004,
+        "trajectory_correlation": 0.9788778907181074
+      },
+      "hum": {
+        "pitch_mae_cents": 92.83706665039062,
+        "trajectory_correlation": 0.7336935877954529
+      },
+      "recorder": {
+        "pitch_mae_cents": 74.4786376953125,
+        "trajectory_correlation": 0.8508380029265709
+      },
+      "whistle": {
+        "pitch_mae_cents": 35.069091796875,
+        "trajectory_correlation": 0.9862670611097014
+      }
+    },
+    "pass": true,
+    "seed": 1191817,
+    "split": "frozen-final-timbre-v2-timeline",
+    "official_path": "stored_timeline_only"
+  },
+  "timeline_position": null,
+  "temporal_connected": null,
+  "cases": [
+    {
+      "case": "bpm_137",
+      "true_bpm": 137.0,
+      "predicted_bpm": 134.84768676757812,
+      "tempo_relative_error": 0.015710315565123176,
+      "phase_circular_mae_cycle": 0.022245679050683975,
+      "detected_beats": 8,
+      "tempo_before": "audio/bpm_137_tempo_before_reference.wav",
+      "tempo_after": "audio/bpm_137_tempo_after_clicks.wav",
+      "tempo_plot": "plots/bpm_137_tempo_pitch.svg",
+      "timeline_before": "audio/bpm_137_tempo_before_reference.wav",
+      "timeline_after": "audio/bpm_137_timeline_memory_recall.wav",
+      "timeline_plot": "plots/bpm_137_timeline_pitch.svg"
+    }
+  ]
+}

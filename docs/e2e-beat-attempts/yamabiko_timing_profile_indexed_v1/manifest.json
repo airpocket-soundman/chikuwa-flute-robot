@@ -1,6 +1,6 @@
 {
   "format": "yamabiko-beat-audio-v1",
-  "checkpoint": "runs\\yamabiko_timing_profile_indexed_v1.pt",
+  "checkpoint": "runs/yamabiko_timing_profile_indexed_v1.pt",
   "seed": 15551,
   "official_path": "predicted_upstream",
   "audio_kind": "tempo_after is diagnostic click track, not physical performance",
@@ -25,9 +25,9 @@
     "official_path": "predicted_upstream"
   },
   "demo_metrics": {
-    "tempo_relative_error_median": 0.01683902044365876,
-    "tempo_relative_error_p90": 0.01683902044365876,
-    "phase_circular_mae_cycle": 0.01746511086821556,
+    "tempo_relative_error_median": 0.01680493876881843,
+    "tempo_relative_error_p90": 0.01680493876881843,
+    "phase_circular_mae_cycle": 0.01746440678834915,
     "pass": true
   },
   "musical_memory_trained": true,
@@ -83,18 +83,22 @@
     {
       "case": "bpm_137",
       "true_bpm": 137.0,
-      "predicted_bpm": 134.69305419921875,
-      "tempo_relative_error": 0.01683902044365876,
-      "phase_circular_mae_cycle": 0.01746511086821556,
+      "predicted_bpm": 134.69772338867188,
+      "tempo_relative_error": 0.01680493876881843,
+      "phase_circular_mae_cycle": 0.01746440678834915,
       "detected_beats": 8,
       "tempo_before": "audio/bpm_137_tempo_before_reference.wav",
       "tempo_after": "audio/bpm_137_tempo_after_clicks.wav",
+      "tempo_plot": "plots/bpm_137_tempo_pitch.svg",
       "timing_before": "audio/bpm_137_tempo_before_reference.wav",
       "timing_after": "audio/bpm_137_timing_profile_clicks.wav",
+      "timing_plot": "plots/bpm_137_timing_pitch.svg",
       "memory_before": "audio/bpm_137_tempo_before_reference.wav",
       "memory_after": "audio/bpm_137_memory_after_recall.wav",
+      "memory_plot": "plots/bpm_137_memory_pitch.svg",
       "aligner_before": "audio/bpm_137_memory_after_recall.wav",
-      "aligner_after": "audio/bpm_137_aligner_after_100hz.wav"
+      "aligner_after": "audio/bpm_137_aligner_after_100hz.wav",
+      "aligner_plot": "plots/bpm_137_aligner_pitch.svg"
     }
   ]
 }

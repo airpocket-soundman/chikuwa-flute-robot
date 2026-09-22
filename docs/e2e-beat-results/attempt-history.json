@@ -147,7 +147,7 @@
         "ear_grid_upper_bound_mae_cents": 37.9720573425293,
         "ear_grid_upper_bound_correlation": 0.9273063144344887
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_musical_memory_aligned_v7_pass/manifest.json"
     },
     {
       "id": "yamabiko_musical_memory_aligned_v7",
@@ -254,7 +254,7 @@
         "phase_confidence_mean": 0.9980171322822571,
         "half_double_confusion_rate": 0.0
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/manifest.json"
     },
     {
       "id": "yamabiko_tempo_beat_v2",
@@ -303,7 +303,7 @@
         "phase_confidence_mean": 0.9994564652442932,
         "half_double_confusion_rate": 0.0
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_tempo_beat_v4_phase/manifest.json"
     },
     {
       "id": "yamabiko_tempo_beat_v4",
@@ -342,7 +342,7 @@
         "onset_f1_30ms": 0.9221601489757915,
         "offset_f1_30ms": 0.9994353472614342
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_temporal_aligner_final/manifest.json"
     },
     {
       "id": "yamabiko_temporal_aligner",
@@ -501,7 +501,7 @@
         "onset_f1_30ms": 0.918136908962597,
         "offset_f1_30ms": 0.9994678020223523
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_temporal_aligner_v7/manifest.json"
     },
     {
       "id": "yamabiko_temporal_connected_attention_diag",
@@ -704,7 +704,7 @@
         "onset_f1_30ms": 0.9284116331096197,
         "offset_f1_30ms": 0.9994397759103641
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_temporal_duration_final/manifest.json"
     },
     {
       "id": "yamabiko_temporal_duration_v1",
@@ -750,7 +750,7 @@
         "onset_f1_30ms": 0.9187853107344632,
         "offset_f1_30ms": 1.0
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_temporal_duration_v2/manifest.json"
     },
     {
       "id": "yamabiko_timeline_memory_direct_v1",
@@ -801,7 +801,7 @@
         "onset_f1_30ms": 0.8893033984452534,
         "offset_f1_30ms": 1.0
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_memory/manifest.json"
     },
     {
       "id": "yamabiko_timeline_memory_v2",
@@ -869,7 +869,7 @@
         "onset_f1_30ms": 0.8997029393169704,
         "offset_f1_30ms": 1.0
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_memory_v4/manifest.json"
     },
     {
       "id": "yamabiko_timeline_memory_v4_stratified",
@@ -916,7 +916,7 @@
         "connected_position_mae_percent_stroke": 7.858829021453857,
         "connected_steady_pitch_mae_cents": 161.86196899414062
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_position_v2/manifest.json"
     },
     {
       "id": "yamabiko_timeline_timbre_v2_final",
@@ -933,7 +933,7 @@
         "onset_f1_30ms": 0.8711306561463894,
         "offset_f1_30ms": 1.0
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_timbre_v2_final/manifest.json"
     },
     {
       "id": "yamabiko_timeline_timbre_v2",
@@ -950,7 +950,7 @@
         "onset_f1_30ms": 0.8786715155730213,
         "offset_f1_30ms": 0.9994635193133048
       },
-      "audio_manifest": null
+      "audio_manifest": "e2e-beat-attempts/yamabiko_timeline_timbre_v2/manifest.json"
     },
     {
       "id": "yamabiko_timing_profile_direct_v1",
