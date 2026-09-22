@@ -17,7 +17,11 @@ from flute_rl.yamabiko.e2e_stages import E2EStageProbes  # noqa: E402
 from flute_rl.yamabiko.e2e_io import SAMPLE_RATE  # noqa: E402
 from flute_rl.yamabiko.staged_nn import (ErrorComparator, FeedForwardPolicy,
                                          FeedbackResidualPolicy, ReferenceMemory,
+                                         AcousticFeedbackResidual, MotorTrajectoryController,
+                                         MotorAudioWorldModel,
                                          StagedConfig, TargetPositionPlanner)  # noqa: E402
+from flute_rl.yamabiko.physical_plant import (DifferentiableMotorFlute,
+                                              PhysicalPlantConfig)  # noqa: E402
 from flute_rl.yamabiko.hw import PITCH_FRAME, SR  # noqa: E402
 from flute_rl.sim import DT  # noqa: E402
 
@@ -186,3 +190,61 @@ def test_position_planner_treats_voice_input_as_a_logit():
     confident = planner(torch.cat([pitch, torch.tensor([[[6.0]]])], -1))
     very_confident = planner(torch.cat([pitch, torch.tensor([[[12.0]]])], -1))
     torch.testing.assert_close(confident, very_confident, atol=1e-4, rtol=1e-4)
+
+
+def test_minimal_physical_plant_has_torque_rise_motion_and_linear_flute():
+    cfg = PhysicalPlantConfig()
+    plant = DifferentiableMotorFlute(cfg)
+    params = plant.parameters(1, "cpu")
+    state = plant.initial_state(1, "cpu")
+    first = plant.step(state, torch.ones(1), params)
+    assert 0 < first.torque.item() < cfg.torque_gain
+    for _ in range(100):
+        first = plant.step(first, torch.ones(1), params)
+    assert first.position.item() > .1
+    cents, sounding = plant.flute(first, torch.ones(1), params)
+    assert cents.item() == pytest.approx(cfg.low_cents + cfg.pitch_span_cents * first.position.item(), abs=1e-4)
+    assert sounding.item()
+    _, silent = plant.flute(first, torch.zeros(1), params)
+    assert not silent.item()
+
+
+def test_motor_physics_is_deterministic_for_fixed_parameters_and_inputs():
+    plant = DifferentiableMotorFlute()
+    params = plant.parameters(2, "cpu", spread=0.0)
+    a = plant.initial_state(2, "cpu")
+    b = plant.initial_state(2, "cpu")
+    for pwm in torch.linspace(-1.0, 1.0, 80):
+        command = pwm.repeat(2)
+        a = plant.step(a, command, params)
+        b = plant.step(b, command, params)
+    torch.testing.assert_close(a.position, b.position)
+    torch.testing.assert_close(a.velocity, b.velocity)
+    torch.testing.assert_close(a.torque, b.torque)
+
+
+def test_physical_controllers_have_separate_plan_and_feedback_boundaries():
+    batch, steps = 3, 12
+    planner_executor = MotorTrajectoryController(hidden=8)
+    feedback = AcousticFeedbackResidual(hidden=8)
+    plan = torch.linspace(.1, .9, steps).repeat(batch, 1)
+    voice = torch.ones_like(plan)
+    base_state = planner_executor.initial_state(batch, "cpu")
+    base_pwm, valve_logit, base_state = planner_executor.step(
+        plan, voice, torch.zeros(batch), base_state, 0)
+    feedback_state = feedback.initial_state(batch, "cpu")
+    residual, error, feedback_state = feedback.step(
+        plan[:, 0], plan[:, 0] - .1, torch.ones(batch, dtype=torch.bool), voice[:, 0],
+        base_pwm, torch.zeros(batch), torch.zeros(batch), feedback_state)
+    assert base_pwm.shape == valve_logit.shape == residual.shape == error.shape == (batch,)
+    assert base_state.shape == (batch, 8)
+    assert feedback_state.shape == (batch, 16)
+    assert torch.all(residual.abs() <= feedback.limit)
+
+
+def test_motor_audio_world_model_exposes_only_pwm_to_pitch_relation():
+    model = MotorAudioWorldModel(hidden=8)
+    state = model.initial_state(3, "cpu")
+    pitch, state = model.step(torch.tensor([-.5, 0., .5]), state)
+    assert pitch.shape == (3,) and state.shape == (3, 8)
+    assert torch.all((pitch >= 0) & (pitch <= 1))

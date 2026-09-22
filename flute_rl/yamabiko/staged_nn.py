@@ -210,6 +210,120 @@ class PositionActionController(nn.Module):
         return torch.stack([torch.tanh(raw[:, 0]), torch.sigmoid(raw[:, 1])], 1)
 
 
+class MotorTrajectoryController(nn.Module):
+    """Execute a precomputed Position Planner trajectory without self audio.
+
+    This is the low-level motor tracker, not a second musical feedforward path.
+    Its recurrent state may infer motor motion from the planned trajectory and
+    previously applied PWM, but it never receives simulator true state.
+    """
+
+    FEATURES = 8
+
+    def __init__(self, hidden: int = 64):
+        super().__init__()
+        self.hidden = hidden
+        self.cell = nn.GRUCell(self.FEATURES, hidden)
+        self.latent_head = nn.Sequential(nn.Linear(hidden, hidden), nn.SiLU(), nn.Linear(hidden, 3))
+        self.head = nn.Sequential(nn.Linear(hidden + self.FEATURES + 5, hidden), nn.SiLU(),
+                                  nn.Linear(hidden, 2))
+
+    def initial_state(self, batch: int, device, dtype=torch.float32):
+        return torch.zeros(batch, self.hidden, device=device, dtype=dtype)
+
+    @staticmethod
+    def features(plan: torch.Tensor, voice: torch.Tensor, previous_pwm: torch.Tensor, t: int):
+        steps = plan.shape[1]
+        ids = [t, min(t + 5, steps - 1), min(t + 20, steps - 1), min(t + 50, steps - 1)]
+        p = [plan[:, i] for i in ids]
+        return torch.stack([p[0], p[1], p[2], p[3], p[1] - p[0], p[2] - p[0],
+                            voice[:, t], previous_pwm], 1)
+
+    def step(self, plan: torch.Tensor, voice: torch.Tensor, previous_pwm: torch.Tensor,
+             state: torch.Tensor, t: int):
+        features = self.features(plan, voice, previous_pwm, t)
+        state = self.cell(features, state)
+        # These are learned latent features, not supervised simulator state.
+        # The physical plant exposes no position/velocity/torque to this NN.
+        estimated = self.latent_motor_features(state)
+        desired_now, desired_future = features[:, 0], features[:, 2]
+        control = torch.cat([estimated, (desired_now[:, None] - estimated[:, 0:1]),
+                             (desired_future[:, None] - estimated[:, 0:1])], 1)
+        raw = self.head(torch.cat([state, features, control], 1))
+        return torch.tanh(raw[:, 0]), raw[:, 1], state
+
+    def latent_motor_features(self, state: torch.Tensor) -> torch.Tensor:
+        raw = self.latent_head(state)
+        return torch.stack([torch.sigmoid(raw[:, 0]), torch.tanh(raw[:, 1]), raw[:, 2]], 1)
+
+
+class MotorAudioWorldModel(nn.Module):
+    """Learn the black-box PWM-to-audible-pitch transition relation.
+
+    It predicts normalized audible pitch directly and has no heads or labels
+    for position, velocity, torque, friction, slope, intercept, or time constant.
+    """
+
+    def __init__(self, hidden: int = 64):
+        super().__init__(); self.hidden = hidden
+        self.cell = nn.GRUCell(1, hidden)
+        self.head = nn.Sequential(nn.Linear(hidden, hidden), nn.SiLU(), nn.Linear(hidden, 1))
+
+    def initial_state(self, batch: int, device, dtype=torch.float32):
+        return torch.zeros(batch, self.hidden, device=device, dtype=dtype)
+
+    def step(self, pwm: torch.Tensor, state: torch.Tensor):
+        state = self.cell(pwm[:, None], state)
+        pitch = torch.sigmoid(self.head(state)[:, 0])
+        return pitch, state
+
+
+class AcousticFeedbackResidual(nn.Module):
+    """Adaptive causal tracker with an implicit instrument/motor context.
+
+    The recurrent state is never supervised as slope, intercept, friction or
+    time constant.  It learns whatever latent statistic is useful from audible
+    pitch transitions and past PWM, and can be kept across repeated plays.
+    """
+
+    FEATURES = 11
+
+    def __init__(self, hidden: int = 48, limit: float = .45):
+        super().__init__()
+        self.hidden = hidden
+        self.limit = limit
+        self.fast_cell = nn.GRUCell(self.FEATURES, hidden)
+        self.context_cell = nn.GRUCell(self.FEATURES, hidden)
+        self.head = nn.Sequential(nn.Linear(2 * hidden + self.FEATURES, hidden), nn.SiLU(),
+                                  nn.Linear(hidden, 1))
+
+    def initial_state(self, batch: int, device, dtype=torch.float32):
+        return torch.zeros(batch, 2 * self.hidden, device=device, dtype=dtype)
+
+    def step(self, target_pitch: torch.Tensor, heard_pitch: torch.Tensor,
+             heard_valid: torch.Tensor, target_voice: torch.Tensor, base_pwm: torch.Tensor,
+             previous_pwm: torch.Tensor, previous_error: torch.Tensor, state: torch.Tensor,
+             target_future: torch.Tensor | None = None,
+             previous_heard: torch.Tensor | None = None):
+        target_future = target_pitch if target_future is None else target_future
+        previous_heard = heard_pitch if previous_heard is None else previous_heard
+        error = torch.where(heard_valid, target_pitch - heard_pitch, torch.zeros_like(target_pitch))
+        pitch_velocity = torch.where(heard_valid, heard_pitch - previous_heard,
+                                     torch.zeros_like(heard_pitch))
+        features = torch.stack([target_pitch, target_future, target_future - target_pitch,
+                                heard_pitch, error, pitch_velocity,
+                                heard_valid.to(target_pitch.dtype), target_voice,
+                                base_pwm, previous_pwm, previous_error], 1)
+        fast, context = state.split(self.hidden, dim=1)
+        fast = self.fast_cell(features, fast)
+        proposed_context = self.context_cell(features, context)
+        # Slow context survives a whole performance and repeated practice.
+        context = context + .04 * (proposed_context - context)
+        state = torch.cat([fast, context], 1)
+        residual = self.limit * torch.tanh(self.head(torch.cat([state, features], 1))[:, 0])
+        return residual, error, state
+
+
 class ErrorComparator(nn.Module):
     """Estimate signed target-minus-self pitch error from two neural ears."""
 

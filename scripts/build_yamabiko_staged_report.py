@@ -11,6 +11,10 @@ def n(value, digits=1):
     return "—" if value is None else f"{value:.{digits}f}"
 
 
+def pct(value, digits=1):
+    return "—" if value is None else f"{value * 100:.{digits}f}"
+
+
 def audio(src, label):
     return f'<div class="audio"><span>{html.escape(label)}</span><audio controls preload="none" src="e2e-results/{html.escape(src)}"></audio></div>'
 
@@ -28,6 +32,21 @@ def figure(src, caption, prefix=""):
         return ""
     return (f'<figure class="pitch-plot"><img loading="lazy" src="{html.escape(prefix + src)}" '
             f'alt="{html.escape(caption)}"><figcaption>{html.escape(caption)}</figcaption></figure>')
+
+
+def metric_value(metrics, *keys):
+    """Return the first available metric, keeping the report schema backwards compatible."""
+    for key in keys:
+        if key in metrics:
+            return metrics[key]
+    return None
+
+
+def gate_state(metrics, *keys, default="pending"):
+    value = metric_value(metrics, *keys)
+    if value is None:
+        return default
+    return "pass" if bool(value) else "fail"
 
 
 def flow_node(title, state, detail, href=None):
@@ -48,11 +67,27 @@ def flow_arrow(state="neutral", label=""):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--manifest", default="docs/e2e-results/manifest.json")
+    ap.add_argument("--physical-manifest", default="docs/e2e-physical-results/manifest.json",
+                    help="Optional motor/flute/feedback evaluation manifest")
     ap.add_argument("--out", default="docs/e2e-training-report.html")
     args = ap.parse_args(); data = json.loads(pathlib.Path(args.manifest).read_text(encoding="utf-8"))
     s, examples, feedback = data["summary"], data["audio"], data["feedback"]
     representative = next((x for x in examples if x["case"] == "step_up_down"), examples[0])
     docs_root = pathlib.Path(args.manifest).parent.parent
+    physical_path = pathlib.Path(args.physical_manifest)
+    physical = json.loads(physical_path.read_text(encoding="utf-8")) if physical_path.exists() else {}
+    physical_summary = physical.get("summary", physical)
+    if not physical_summary:
+        fallback_reports = list((docs_root.parent / "runs").glob("yamabiko_physical_control*_report.json"))
+        if fallback_reports:
+            latest_report = max(fallback_reports, key=lambda path: path.stat().st_mtime)
+            physical_summary = json.loads(latest_report.read_text(encoding="utf-8"))
+    physical_prefix = ""
+    if physical_path.exists():
+        try:
+            physical_prefix = physical_path.parent.relative_to(docs_root).as_posix().rstrip("/") + "/"
+        except ValueError:
+            physical_prefix = physical_path.parent.as_posix().rstrip("/") + "/"
     history_path = docs_root / "e2e-beat-results" / "attempt-history.json"
     history = json.loads(history_path.read_text(encoding="utf-8"))["attempts"] if history_path.exists() else []
     beat_path = pathlib.Path(args.manifest).parent.parent / "e2e-beat-results" / "manifest.json"
@@ -138,7 +173,7 @@ def main():
             gate_pass = oracle_pass and transform_pass and output_pass
             pst = "PASS" if gate_pass else "FAIL"
             beat_cards["planning"].append(f'''<section class="card"><div class="stage"><b>P</b><span class="{pst.lower()}">Position Gate {pst}</span></div>
-            <h2>Position Planner NN</h2><p class="flow">100 Hz音程・発音 → 正規化プランジャ位置</p>
+            <h2>Position Planner NN = Feedforward</h2><p class="flow">100 Hz音程・発音 → 先読みした正規化プランジャ位置</p>
             <div class="listen">{beat_audio(bc['position_before'], 'Timeline入力')}{beat_audio(bc['position_after'], '位置→定常笛音')}</div>
             {figure(bc.get('position_plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — Timeline入力と位置計画後', 'e2e-beat-results/')}
             <dl><div><dt>① 持ち込み誤差</dt><dd>{n(inherited_mae)} cent</dd></div>
@@ -148,7 +183,7 @@ def main():
             <div><dt>Planner追加位置MAE</dt><dd>{n(pm.get('model_added_position_mae_percent_stroke'), 3)}%</dd></div>
             <div><dt>入口からの正味MAE変化</dt><dd>{n(pm.get('net_absolute_change_cents'))} cent</dd></div>
             <div><dt>分解式の最大残差</dt><dd>{n(pm.get('attribution_residual_max_cents'), 6)} cent</dd></div></dl>
-            <p class="note">判定は正解入力・実Timeline入力でのPlanner固有変換・接続出口の3つを分離。同一曲・同一フレームの符号付き誤差は、持ち込み＋Planner追加＝出口総誤差。MAE同士は符号を失うため足し算にはならない。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section>''')
+            <p class="note">このNNが音楽的フィードフォワードであり、別のFeedforward Policyは置かない。判定は正解入力・実Timeline入力でのPlanner固有変換・接続出口の3つを分離。同一曲・同一フレームの符号付き誤差は、持ち込み＋Planner追加＝出口総誤差。MAE同士は符号を失うため足し算にはならない。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section>''')
 
     def history_attempt_card(row):
         attempt_status = "PASS" if row["pass"] else "FAIL"
@@ -245,12 +280,66 @@ def main():
             beat_cards[bucket].insert(0, card_html)
         else:
             beat_cards[bucket].append(card_html)
-    beat_cards["planning"].append('''<section class="card pending"><div class="stage"><b>4</b><span class="pending">未評価</span></div>
-      <h2>Motor / Controller / Flute</h2><p class="flow">目標位置 → モータ動特性 → バルブ → 笛</p>
-      <p>現行Timeline→Position経路とは未統合。現在のafter WAVは定常位置からの診断再合成で、モータ動特性や実機を通していない。</p></section>''')
-    beat_cards["feedback"].append(f'''<section class="card pending"><div class="stage"><b>F</b><span class="pending">未学習</span></div>
-      <h2>Feedback Residual</h2><p class="flow">推定誤差 + 状態 → 操作量補正</p>
-      <p>{html.escape(feedback['reason'])}。まだ学習・評価していない。</p></section>''')
+    # Physical-control results are optional so the report can be generated before the
+    # first run.  A missing gate is shown as untested, never silently treated as PASS.
+    world_metrics = physical_summary.get("motor_audio_world_model", {})
+    controller_metrics = physical_summary.get("motor_controller", physical_summary)
+    feedback_metrics = physical_summary.get("feedback", physical_summary)
+    world_state = gate_state(world_metrics, "pass") if world_metrics else "pending"
+    controller_state = (gate_state(controller_metrics, "pass") if controller_metrics is not physical_summary else
+                        gate_state(physical_summary, "motor_controller_pass"))
+    physics_state = gate_state(physical_summary, "motor_physics_pass")
+    flute_state = gate_state(physical_summary, "linear_flute_pass")
+    residual_state = (gate_state(feedback_metrics, "pass") if feedback_metrics is not physical_summary else
+                      gate_state(physical_summary, "feedback_pass"))
+
+    def state_label(state):
+        return {"pass": "PASS", "fail": "FAIL", "pending": "未評価"}[state]
+
+    beat_cards["planning"].extend([
+        f'''<section class="card {world_state}"><div class="stage"><b>W</b><span class="{world_state}">{state_label(world_state)}</span></div>
+        <h2>Motor Audio World Model NN</h2><p class="flow">PWM履歴 → 次に聞こえる音程</p>
+        <p>物理パラメータを推定せず、決定論的シミュレータを入出力だけから同定する。位置・速度・トルク・摩擦は教師にも入力にも使わない。</p>
+        <dl><div><dt>holdout audio MAE</dt><dd>{n(metric_value(world_metrics, 'audio_mae_cents'), 1)} cent</dd></div>
+        <div><dt>real rig</dt><dd>未検証</dd></div></dl></section>''',
+        f'''<section class="card {controller_state}"><div class="stage"><b>C</b><span class="{controller_state}">{state_label(controller_state)}</span></div>
+        <h2>Motor Controller NN</h2><p class="flow">Position Planner目標 + 過去PWMの潜在履歴 → PWM・valve</p>
+        <p>Position Plannerが先読みした位置目標を追跡する低レベル制御器。音楽的なフィードフォワードを別に重複実装しない。</p>
+        <dl><div><dt>position MAE</dt><dd>{n(metric_value(controller_metrics, 'position_mae_percent_stroke', 'motor_position_mae_percent_stroke'), 3)} % stroke</dd></div>
+        <div><dt>feedforward pitch MAE</dt><dd>{n(metric_value(controller_metrics, 'feedforward_pitch_mae_cents'), 1)} cent</dd></div></dl></section>''',
+        f'''<section class="card {physics_state}"><div class="stage"><b>P</b><span class="{physics_state}">{state_label(physics_state)}</span></div>
+        <h2>Motor Physics Simulator</h2><p class="flow">PWM → torque rise・摩擦・慣性 → 実変位</p>
+        <p>学習対象NNではなく、遅れ・オーバーシュート・摩擦を再現する訓練環境。乱数化した物理条件で制御器を評価する。</p></section>''',
+        f'''<section class="card {flute_state}"><div class="stage"><b>F</b><span class="{flute_state}">{state_label(flute_state)}</span></div>
+        <h2>Linear Flute Simulator</h2><p class="flow">実変位 → 線形音程 / valve → 発音ON・OFF</p>
+        <p>笛の変位と音程を線形対応させた解析モデル。学習対象ではなく、モータの実変位を評価可能な音へ変換する。</p></section>''',
+    ])
+
+    physical_cases = physical.get("cases", [])
+    if physical_cases:
+        physical_case = next((case for case in physical_cases if case.get("case") == "step_up_down"), physical_cases[0])
+        target_wav = metric_value(physical_case, "target_wav", "reference_wav", "before_wav")
+        base_wav = metric_value(physical_case, "feedforward_wav", "base_wav", "open_loop_wav")
+        closed_wav = metric_value(physical_case, "feedback_wav", "closed_wav", "closed_loop_wav", "after_wav")
+        listens = "".join(doc_audio(physical_prefix + src, label) for src, label in
+                          ((target_wav, "目標"), (base_wav, "Feedforward"), (closed_wav, "Feedback後")) if src)
+        plots = "".join((
+            figure(metric_value(physical_case, "pitch_plot"), "横軸: 時間 [s] / 縦軸: 音程 [cent] — 目標・Feedforward・Feedback後", physical_prefix),
+            figure(metric_value(physical_case, "position_plot"), "横軸: 時間 [s] / 縦軸: 正規化変位 — 目標位置と物理シミュレータ変位", physical_prefix),
+            figure(metric_value(physical_case, "control_plot", "pwm_plot"), "横軸: 時間 [s] / 縦軸: PWM — Feedforward出力とFeedback補正", physical_prefix),
+        ))
+        beat_cards["planning"].append(f'''<section class="card"><div class="stage"><b>W</b><span class="{residual_state}">{state_label(residual_state)}</span></div>
+        <h2>Physical simulation WAV / plots</h2><p class="flow">目標 → Feedforward物理演奏 → Feedback補正後</p>
+        <div class="listen">{listens}</div>{plots}
+        <p class="note">これは内部シミュレータの音であり、実機録音ではない。real_rig_validated={str(bool(physical_summary.get('real_rig_validated', False))).lower()}。</p></section>''')
+
+    beat_cards["feedback"].append(f'''<section class="card {residual_state}"><div class="stage"><b>R</b><span class="{residual_state}">{state_label(residual_state)}</span></div>
+      <h2>Adaptive Feedback NN</h2><p class="flow">目標音程 − 自己音 + PWM/音程変化履歴 → PWM補正</p>
+      <p>Position PlannerのフィードフォワードPWMを置き換えず、自己音のずれだけを小さな補正として加える。</p>
+      <dl><div><dt>closed-loop pitch MAE</dt><dd>{n(metric_value(feedback_metrics, 'closed_pitch_mae_cents', 'feedback_pitch_mae_cents'), 1)} cent</dd></div>
+      <div><dt>improvement</dt><dd>{pct(metric_value(feedback_metrics, 'improvement_fraction', 'feedback_improvement_fraction'), 1)} %</dd></div>
+      <div><dt>non-worse rigs</dt><dd>{pct(metric_value(feedback_metrics, 'nonworse_rig_fraction', 'feedback_nonworse_rig_fraction'), 1)} %</dd></div></dl>
+      <p class="note">評価は乱数化シミュレータ。実機適応と反復練習はまだ検証していない。</p></section>''')
 
     process_specs = (
         ("1", "聞く・拍を取る", "生音声から音程・発音、BPM、拍位相を推定する。", "perception"),
@@ -276,16 +365,38 @@ def main():
     memory_flow = [
         flow_node("Timeline Memory", "pass" if timeline_metrics.get("pass") else "fail", f"MAE {n(timeline_metrics.get('pitch_mae_cents'))} cent", "#process-2"),
     ]
-    performance_flow = [
-        flow_node("Position Planner", "pass" if position_gate_pass else "fail",
-                  f"持込 {n(position_metrics.get('inherited_pitch_mae_cents'))} / 追加 {n(position_metrics.get('model_added_pitch_mae_cents'))} / 出口 {n(position_metrics.get('output_total_pitch_mae_cents'))} cent", "#process-3"),
-        flow_arrow("pending", "現行経路は未統合"),
-        flow_node("Motor / Flute", "pending", "現行経路未統合・実機未評価", "#process-3"),
+    performance_flow_primary = [
+        flow_node("Position Planner = Feedforward", "pass" if position_gate_pass else "fail",
+                  f"音程Timeline → 先読み位置 / 出口 {n(position_metrics.get('output_total_pitch_mae_cents'))} cent", "#process-3"),
+        flow_arrow(controller_state, "位置目標"),
+        flow_node("Motor Controller", controller_state,
+                  f"位置MAE {n(metric_value(controller_metrics, 'position_mae_percent_stroke', 'motor_position_mae_percent_stroke'), 2)}% stroke", "#process-3"),
+        flow_arrow(physics_state, "PWM・valve"),
+        flow_node("Motor Physics", physics_state, "torque rise・摩擦・慣性 → 実変位", "#process-3"),
+        flow_arrow(flute_state, "実変位"),
+        flow_node("Linear Flute", flute_state, "実変位 → 音程 / valve → 発音", "#process-3"),
     ]
+    performance_flow_secondary = [
+        flow_node("Motor Audio World Model", world_state, "PWM履歴 → 次の可聴音程", "#process-3"),
+        flow_arrow(world_state, "学習時だけ制御器へ勾配"),
+        flow_node("Motor Controller", controller_state, "Planner目標 + 潜在履歴 → PWM", "#process-3"),
+    ]
+    comparator_metrics = physical_summary.get("comparator", s["comparator"])
+    comparator_state = gate_state(comparator_metrics, "pass")
     correction_flow = [
-        flow_node("Error Comparator", "pass" if s["comparator"].get("pass") else "fail", f"error MAE {n(s['comparator'].get('error_mae'))} cent", "#process-4"), flow_arrow("pending"),
-        flow_node("Feedback Residual", "pending", "未学習・反復適応も未統合", "#process-4"),
+        flow_node("Error Comparator", comparator_state,
+                  f"error MAE {n(metric_value(comparator_metrics, 'error_mae', 'error_mae_cents'))} cent", "#process-4"),
+        flow_arrow(residual_state, "符号付き音程差"),
+        flow_node("Feedback Residual", residual_state,
+                  f"閉ループMAE {n(metric_value(feedback_metrics, 'closed_pitch_mae_cents', 'feedback_pitch_mae_cents'))} cent", "#process-4"),
     ]
+    performance_states = ["pass" if position_gate_pass else "fail", world_state,
+                          controller_state, physics_state, flute_state]
+    performance_gate_state = ("fail" if "fail" in performance_states else
+                              ("pending" if "pending" in performance_states else "pass"))
+    correction_states = [comparator_state, residual_state]
+    correction_gate_state = ("fail" if "fail" in correction_states else
+                             ("pending" if "pending" in correction_states else "pass"))
     flow_diagram = f'''<section class="flow-overview" aria-labelledby="flow-title"><div class="flow-heading"><div><h2 id="flow-title">全体フローと現在地</h2><p>緑は固定Gate PASS、赤はFAIL、橙は工程内に未評価部分あり、灰は未学習・未評価。</p></div><strong>全体 E2E: FAIL / 未完成</strong></div>
       <div class="phase-flow" aria-label="採用予定パイプラインの4工程">
         <section class="flow-phase"><header><span>1</span><div><b>聴く・拍を理解する</b><small>お手本から音程、休符、BPM、拍位置を取り出す</small></div><strong class="pass">工程 PASS</strong></header>
@@ -294,14 +405,15 @@ def main():
         <section class="flow-phase"><header><span>2</span><div><b>お手本をTimelineとして覚える</b><small>演奏時刻に沿った音程と休符の地図を保存する</small></div><strong class="pass">工程 PASS</strong></header>
           <ol class="system-flow flow-row nodes-1">{''.join(memory_flow)}</ol></section>
         <div class="phase-connector {'pass' if position_gate_pass else 'fail'}"><span>↓</span><b>同一フレーム再評価 — 持ち込み {n(position_metrics.get('inherited_pitch_mae_cents'))} ｜ Planner追加 {n(position_metrics.get('model_added_pitch_mae_cents'))} ｜ 出口 {n(position_metrics.get('output_total_pitch_mae_cents'))} cent（各MAEは非加算）</b></div>
-        <section class="flow-phase"><header><span>3</span><div><b>身体で演奏する</b><small>目標音程を笛の位置へ変換し、モータで動かす</small></div><strong class="partial">Position {'PASS' if position_gate_pass else 'FAIL'} / Motor未評価</strong></header>
-          <ol class="system-flow flow-row nodes-2">{''.join(performance_flow)}</ol></section>
-        <div class="phase-connector pending"><span>↓</span><b>現行のモータ・笛・自己音経路は未統合</b></div>
-        <section class="flow-phase"><header><span>4</span><div><b>自分の音を聴いて直す</b><small>目標との差を測り、次の操作へ補正を返す</small></div><strong class="fail">Comparator FAIL / Feedback未学習</strong></header>
+        <section class="flow-phase"><header><span>3</span><div><b>身体で演奏する</b><small>Position Plannerがフィードフォワード目標を作り、PWM履歴の潜在表現でモータを制御する</small></div><strong class="{performance_gate_state if performance_gate_state != 'pending' else 'partial'}">Physical {state_label(performance_gate_state)}</strong></header>
+          <ol class="system-flow flow-row nodes-4">{''.join(performance_flow_primary)}</ol>
+          <ol class="system-flow flow-row nodes-2">{''.join(performance_flow_secondary)}</ol></section>
+        <div class="phase-connector {correction_gate_state}"><span>↓</span><b>シミュレータ自己音と目標の差を閉ループ補正へ渡す</b></div>
+        <section class="flow-phase"><header><span>4</span><div><b>自分の音を聴いて直す</b><small>目標との差を測り、Position Plannerの出力へPWM補正を足す</small></div><strong class="{correction_gate_state if correction_gate_state != 'pending' else 'partial'}">Correction {state_label(correction_gate_state)}</strong></header>
           <ol class="system-flow flow-row nodes-2">{''.join(correction_flow)}</ol></section>
       </div>
-      <div class="feedback-return"><b>↩ Feedback loop</b><span>工程4の補正を工程3のPosition / Controllerへ戻す — 未学習</span></div>
-      <p class="flow-caveat">Neural Earは合成・音響乱数化ホールドアウトでのPASSで、実録音は未評価。Positionは正解入力・実Timeline入力での固有変換・接続出口を別々に判定する。Motor / Flute以降は未統合のため、PositionがPASSしても全体E2Eは未完成。</p></section>'''
+      <div class="feedback-return"><b>↩ Feedback loop</b><span>Feedback ResidualはPWMだけを補正。音楽的フィードフォワードはPosition Plannerが担当する。</span></div>
+      <p class="flow-caveat">Motor PhysicsとLinear Fluteは決定論的な訓練環境。NNは内部の位置・速度・トルク・物理定数を受け取らず、World ModelはPWMと可聴音程の関係だけを学ぶ。ここで示す結果は内部シミュレーションであり、実機検証は {('済み' if physical_summary.get('real_rig_validated') else '未実施')}。</p></section>'''
     details = []
     for stage, rows in data["details"].items():
         heads = [k for k in rows[0] if k != "case"]
@@ -333,23 +445,63 @@ def main():
         <h3>{html.escape(report_path.stem.removesuffix('_report'))}</h3><p class="metrics">{metric_text}</p>
         <p class="note">補助Gateの記録。最終演奏Gate 3は3試行すべてFAIL。</p></article>''')
 
+    # Keep failed physical-control experiments visible.  A checked-in manifest may
+    # carry richer artifact links; local run reports provide a useful fallback.
+    physical_attempt_rows = list(physical.get("attempts", []))
+    known_attempt_ids = {str(row.get("id")) for row in physical_attempt_rows}
+    for report_path in sorted((docs_root.parent / "runs").glob("yamabiko_physical_control*_report.json")):
+        attempt_id = report_path.stem.removesuffix("_report")
+        if attempt_id in known_attempt_ids:
+            continue
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        physical_attempt_rows.append({"id": attempt_id, "pass": report.get("pass", False),
+                                      "reason": report.get("split", "physical simulation"),
+                                      "metrics": report})
+
+    physical_attempt_cards = []
+    for row in physical_attempt_rows:
+        metrics = row.get("metrics", row)
+        row_pass = bool(row.get("pass", metrics.get("pass", False)))
+        row_status = "PASS" if row_pass else "FAIL"
+        metric_items = [(key, value) for key, value in metrics.items()
+                        if isinstance(value, (int, float)) and not isinstance(value, bool) and key not in ("seed",)]
+        metric_text = " / ".join(f"{html.escape(key.replace('_', ' '))} {n(value, 3)}" for key, value in metric_items[:7])
+        artifact = row.get("case", row.get("artifacts", {}))
+        artifact_prefix = row.get("artifact_prefix", physical_prefix)
+        artifact_listens = "".join(doc_audio(artifact_prefix + src, label) for src, label in (
+            (metric_value(artifact, "target_wav", "reference_wav"), "目標"),
+            (metric_value(artifact, "feedforward_wav", "base_wav"), "Feedforward"),
+            (metric_value(artifact, "feedback_wav", "closed_wav"), "Feedback後"),
+        ) if src)
+        artifact_plot = figure(metric_value(artifact, "pitch_plot"),
+                               "横軸: 時間 [s] / 縦軸: 音程 [cent] — 物理制御試行", artifact_prefix)
+        physical_attempt_cards.append(f'''<article class="attempt"><div class="stage"><b>PHY</b><span class="{row_status.lower()}">{row_status}</span></div>
+        <h3>{html.escape(str(row.get('id', 'physical-attempt')))}</h3><p>{html.escape(str(row.get('reason', 'physical simulation')))}</p>
+        <p class="metrics">{metric_text or '数値なし'}</p>{f'<div class="listen">{artifact_listens}</div>' if artifact_listens else ''}{artifact_plot}
+        <p class="note">シミュレーション評価。実機検証ではない。</p></article>''')
+    physical_pass_count = sum(bool(row.get("pass", row.get("metrics", {}).get("pass", False))) for row in physical_attempt_rows)
+    physical_history = (f'''<p class="history-count">{len(physical_attempt_rows)}試行 — PASS {physical_pass_count} / FAIL {len(physical_attempt_rows)-physical_pass_count}</p>
+    <div class="attempt-grid raw-e2e-grid">{''.join(physical_attempt_cards)}</div>''' if physical_attempt_rows else
+                        '<p>物理制御の試行記録はまだありません。</p>')
+
     pipeline_tabs = f'''<section class="pipeline-lab" aria-labelledby="pipeline-tabs-title"><h2 id="pipeline-tabs-title">パイプライン別の結果と試行記録</h2>
     <p>採用予定と代替案を混在させず、同じパイプラインのフロー・結果・WAV・グラフ・失敗試行を一つのタブへまとめた。</p>
     <div class="tab-list" role="tablist" aria-label="パイプライン別結果">
-      <button type="button" role="tab" id="tab-current" aria-controls="pipeline-current" aria-selected="true">採用予定 Timeline <small>20試行 / 全体FAIL</small></button>
+      <button type="button" role="tab" id="tab-current" aria-controls="pipeline-current" aria-selected="true">採用予定 Timeline＋Physical <small>{len(physical_attempt_rows)}物理試行 / 実機未検証</small></button>
       <button type="button" role="tab" id="tab-clock" aria-controls="pipeline-clock" aria-selected="false" tabindex="-1">代替A Beat-cell＋Clock <small>26試行 / 接続FAIL</small></button>
       <button type="button" role="tab" id="tab-timing" aria-controls="pipeline-timing" aria-selected="false" tabindex="-1">代替B Duration／Timing <small>10試行 / 全体FAIL</small></button>
       <button type="button" role="tab" id="tab-legacy" aria-controls="pipeline-legacy" aria-selected="false" tabindex="-1">旧 Staged制御 <small>3系統 / 全体FAIL</small></button>
       <button type="button" role="tab" id="tab-raw-e2e" aria-controls="pipeline-raw-e2e" aria-selected="false" tabindex="-1">単一 Raw-audio E2E <small>7記録 / 演奏FAIL</small></button>
     </div>
     <section class="tab-panel" role="tabpanel" id="pipeline-current" aria-labelledby="tab-current">
-      <header class="pipeline-summary adopted"><div><span>採用予定</span><h2>Beat-conditioned Timeline Pipeline</h2></div><strong>Position {'PASS' if position_gate_pass else 'FAIL'} / Motor以降未完成</strong></header>
+      <header class="pipeline-summary adopted"><div><span>採用予定</span><h2>Beat-conditioned Timeline + Physical Control</h2></div><strong>Physical simulation {state_label(performance_gate_state)} / 実機未検証</strong></header>
       <div class="pipeline-explainer"><h3>この方式は何をしている？</h3>
-        <p>お手本を聴いたら、曲を「時間に沿った音程と休符の地図」として丸ごと覚える方式です。演奏中はその地図を先頭から読み、必要な笛の位置へ変換します。</p>
-        <dl><div><dt>覚え方</dt><dd>100 Hzの細かなTimeline</dd></div><div><dt>時間の扱い</dt><dd>BPMと拍を手掛かりに地図を保存</dd></div><div><dt>狙い</dt><dd>音符の長さや休符をずらさず再現</dd></div><div><dt>現在の課題</dt><dd>記憶から位置計画へ渡すと誤差が増える</dd></div></dl>
+        <p>お手本を「時間に沿った音程と休符の地図」として覚え、Position Plannerが先読み位置を作ります。これがフィードフォワードです。Motor Controllerは推定した身体状態で位置を追い、自己音の誤差だけをFeedback ResidualがPWMへ足します。</p>
+        <dl><div><dt>Feedforward</dt><dd>Position Planner（別Policyは置かない）</dd></div><div><dt>関係学習</dt><dd>PWM履歴 → 可聴音程のWorld Model</dd></div><div><dt>訓練環境</dt><dd>決定論的なtorque rise・摩擦・慣性 + 線形笛</dd></div><div><dt>検証範囲</dt><dd>内部simulationのみ / 実機未検証</dd></div></dl>
       </div>
-      <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner → Motor/Flute → Comparator → Feedback</p>
-      {process_results}<h2>このパイプラインの試行履歴</h2>{current_history}
+      <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner (= Feedforward) → Motor Controller → Motor Physics → Linear Flute → Comparator → Adaptive Feedback ↩ PWM<br>学習時: PWM/audio → Motor Audio World Model → Motor Controller</p>
+      {process_results}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
+      <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p>{physical_history}
     </section>
     <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">
       <header class="pipeline-summary alternative"><div><span>代替案 A</span><h2>Beat-cell + Neural Clock / Aligner</h2></div><strong>単独PASS / 接続FAIL</strong></header>
@@ -396,6 +548,9 @@ def main():
     </section>'''
     old = {"mae": 264.1299841855391, "corr": -0.995092265219766,
            "direction": 1.0, "explanation": "旧方向指標は300 ms以内の微小な符号一致で1.0となるため無効化"}
+    verdict_detail = (f"Physical simulationはMotor Controller {state_label(controller_state)} / "
+                      f"Feedback Residual {state_label(residual_state)}。実機検証は"
+                      f"{'済み' if physical_summary.get('real_rig_validated') else '未実施'}。")
     doc = f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Yamabiko E2E 分離NN 学習レポート</title>
 <style>
@@ -408,27 +563,27 @@ main{{max-width:1120px;margin:auto;padding:48px 20px 80px}}h1{{font-size:clamp(2
 .listen{{display:grid;gap:10px;margin:18px 0}}.audio{{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:8px}}audio{{width:100%;height:36px}}dl{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}dl div{{background:#0a141d;padding:9px;border-radius:8px}}dt{{font-size:.72rem;color:var(--muted)}}dd{{margin:0;font-size:1.05rem}}.note{{color:var(--muted);font-size:.9rem}}
 .model-explainer{{margin:14px 0;padding:14px;border-left:3px solid var(--cyan);border-radius:0 10px 10px 0;background:#0a1721}}.model-explainer h3{{margin:0 0 5px;color:var(--cyan);font-size:1rem}}.model-explainer p{{margin:.35rem 0;color:#d2e0e7;font-size:.92rem}}
 .pitch-plot{{margin:14px 0 18px}}.pitch-plot img{{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px;background:#0b1620}}.pitch-plot figcaption{{margin-top:7px;color:var(--muted);font-size:.78rem}}.stage span.pass{{color:#70f0ac}}.stage span.fail{{color:#ff8c78}}.stage span.partial{{color:#ffc96b}}.stage span.pending{{color:#9eb2c0}}.legacy{{border-style:dashed;opacity:.86}}.pending{{border-color:#526675}}
-.flow-overview{{margin:28px 0;padding:24px;background:#0b1620;border:1px solid var(--line);border-radius:18px}}.flow-heading{{display:flex;justify-content:space-between;gap:20px;align-items:start}}.flow-heading strong{{color:var(--red);border:1px solid var(--red);padding:8px 12px;border-radius:9px;white-space:nowrap}}.phase-flow{{display:grid;gap:0;margin:22px 0}}.flow-phase{{padding:16px;border:1px solid var(--line);border-radius:14px;background:#0d1923}}.flow-phase>header{{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:center}}.flow-phase>header>span{{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--cyan);color:#071016;font-size:1.1rem;font-weight:900}}.flow-phase>header div{{display:grid}}.flow-phase>header small{{color:var(--muted)}}.flow-phase>header strong{{padding:5px 9px;border-radius:8px;font-size:.8rem}}.flow-phase>header strong.pass{{color:#70f0ac;border:1px solid #46c987}}.flow-phase>header strong.fail{{color:#ff8c78;border:1px solid var(--red)}}.flow-phase>header strong.partial{{color:#ffc96b;border:1px solid #d69c3b}}.system-flow{{list-style:none;margin:14px 0 0;padding:0}}.flow-row{{display:grid;align-items:stretch;gap:8px}}.flow-row.nodes-3{{grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr)}}.flow-row.nodes-2{{grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr)}}.flow-row.nodes-1{{grid-template-columns:minmax(0,1fr)}}.flow-node{{min-width:0;display:flex;flex-direction:column;border:2px solid var(--line);border-radius:12px;background:#101d29}}.flow-node>span,.flow-node>b,.flow-node>small{{margin-left:14px;margin-right:14px}}.flow-node>a{{display:flex;flex:1;flex-direction:column;gap:6px;padding:14px;color:inherit;text-decoration:none}}.flow-node>a span,.flow-node>span{{font-size:.72rem;font-weight:900}}.flow-node small{{color:var(--muted)}}.flow-node em{{margin-top:auto;padding-top:8px;color:var(--cyan);font-size:.75rem;font-style:normal}}.flow-node.pass{{border-color:#46c987}}.flow-node.pass span{{color:#70f0ac}}.flow-node.fail{{border-color:var(--red)}}.flow-node.fail span{{color:#ff8c78}}.flow-node.partial{{border-color:#d69c3b}}.flow-node.partial span{{color:#ffc96b}}.flow-node.pending,.flow-node.neutral{{border-color:#526675}}.flow-node.pending span,.flow-node.neutral span{{color:#b3c0c8}}.flow-arrow{{min-width:0;display:grid;place-items:center;align-content:center;text-align:center;color:var(--muted)}}.flow-arrow i{{font-size:1.6rem;font-style:normal}}.flow-arrow small{{font-size:.68rem}}.flow-arrow.fail,.phase-connector.fail{{color:var(--red)}}.flow-arrow.pass,.phase-connector.pass{{color:#70f0ac}}.flow-arrow.pending,.phase-connector.pending{{color:#9eb2c0}}.phase-connector{{display:flex;justify-content:center;gap:12px;align-items:center;min-height:58px;text-align:center;font-size:.85rem}}.phase-connector span{{font-size:1.6rem}}.feedback-return{{display:flex;gap:12px;align-items:center;border:1px dashed #526675;border-radius:10px;padding:10px 14px;color:var(--muted)}}.feedback-return b{{color:#9eb2c0}}.flow-caveat{{color:var(--muted);font-size:.88rem}}
+.flow-overview{{margin:28px 0;padding:24px;background:#0b1620;border:1px solid var(--line);border-radius:18px}}.flow-heading{{display:flex;justify-content:space-between;gap:20px;align-items:start}}.flow-heading strong{{color:var(--red);border:1px solid var(--red);padding:8px 12px;border-radius:9px;white-space:nowrap}}.phase-flow{{display:grid;gap:0;margin:22px 0}}.flow-phase{{padding:16px;border:1px solid var(--line);border-radius:14px;background:#0d1923}}.flow-phase>header{{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:center}}.flow-phase>header>span{{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--cyan);color:#071016;font-size:1.1rem;font-weight:900}}.flow-phase>header div{{display:grid}}.flow-phase>header small{{color:var(--muted)}}.flow-phase>header strong{{padding:5px 9px;border-radius:8px;font-size:.8rem}}.flow-phase>header strong.pass{{color:#70f0ac;border:1px solid #46c987}}.flow-phase>header strong.fail{{color:#ff8c78;border:1px solid var(--red)}}.flow-phase>header strong.partial{{color:#ffc96b;border:1px solid #d69c3b}}.system-flow{{list-style:none;margin:14px 0 0;padding:0}}.flow-row{{display:grid;align-items:stretch;gap:8px}}.flow-row.nodes-4{{grid-template-columns:minmax(0,1fr) 42px minmax(0,1fr) 42px minmax(0,1fr) 42px minmax(0,1fr)}}.flow-row.nodes-3{{grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr)}}.flow-row.nodes-2{{grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr)}}.flow-row.nodes-1{{grid-template-columns:minmax(0,1fr)}}.flow-node{{min-width:0;display:flex;flex-direction:column;border:2px solid var(--line);border-radius:12px;background:#101d29}}.flow-node>span,.flow-node>b,.flow-node>small{{margin-left:14px;margin-right:14px}}.flow-node>a{{display:flex;flex:1;flex-direction:column;gap:6px;padding:14px;color:inherit;text-decoration:none}}.flow-node>a span,.flow-node>span{{font-size:.72rem;font-weight:900}}.flow-node small{{color:var(--muted)}}.flow-node em{{margin-top:auto;padding-top:8px;color:var(--cyan);font-size:.75rem;font-style:normal}}.flow-node.pass{{border-color:#46c987}}.flow-node.pass span{{color:#70f0ac}}.flow-node.fail{{border-color:var(--red)}}.flow-node.fail span{{color:#ff8c78}}.flow-node.partial{{border-color:#d69c3b}}.flow-node.partial span{{color:#ffc96b}}.flow-node.pending,.flow-node.neutral{{border-color:#526675}}.flow-node.pending span,.flow-node.neutral span{{color:#b3c0c8}}.flow-arrow{{min-width:0;display:grid;place-items:center;align-content:center;text-align:center;color:var(--muted)}}.flow-arrow i{{font-size:1.6rem;font-style:normal}}.flow-arrow small{{font-size:.68rem}}.flow-arrow.fail,.phase-connector.fail{{color:var(--red)}}.flow-arrow.pass,.phase-connector.pass{{color:#70f0ac}}.flow-arrow.pending,.phase-connector.pending{{color:#9eb2c0}}.phase-connector{{display:flex;justify-content:center;gap:12px;align-items:center;min-height:58px;text-align:center;font-size:.85rem}}.phase-connector span{{font-size:1.6rem}}.feedback-return{{display:flex;gap:12px;align-items:center;border:1px dashed #526675;border-radius:10px;padding:10px 14px;color:var(--muted)}}.feedback-return b{{color:#9eb2c0}}.flow-caveat{{color:var(--muted);font-size:.88rem}}
 .process-section{{margin:46px 0;scroll-margin-top:20px}}.process-section>header,.history-process>header{{display:flex;gap:14px;align-items:center;margin-bottom:16px}}.process-section>header>span,.history-process>header>b{{display:grid;place-items:center;flex:0 0 44px;height:44px;border-radius:12px;background:var(--cyan);color:#071016;font-size:1.15rem}}.process-section>header p,.history-process>header p{{margin:0;color:var(--muted)}}.history-process{{margin:26px 0;padding:18px;border-left:3px solid var(--line);background:#0a141d;border-radius:0 14px 14px 0}}
 .pipeline-lab{{margin:42px 0}}.tab-list{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px;margin:18px 0}}.tab-list button{{min-height:58px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0b1620;color:var(--ink);font:inherit;font-weight:750;text-align:left;cursor:pointer}}.tab-list button small{{display:block;color:var(--muted);font-weight:500}}.tab-list button[aria-selected="true"]{{border-color:var(--cyan);background:#12303a;box-shadow:inset 0 -3px 0 var(--cyan)}}.tab-panel{{padding:22px;border:1px solid var(--line);border-radius:16px;background:#09131c;scroll-margin-top:18px}}.tab-panel[hidden]{{display:none}}.pipeline-summary{{display:flex;justify-content:space-between;gap:18px;align-items:start;padding-bottom:14px;border-bottom:1px solid var(--line)}}.pipeline-summary span{{color:var(--cyan);font-size:.78rem;font-weight:900;letter-spacing:.08em}}.pipeline-summary strong{{padding:7px 10px;border-radius:8px;white-space:nowrap}}.pipeline-summary.adopted strong{{color:#ffc96b;border:1px solid #d69c3b}}.pipeline-summary.alternative strong{{color:#ffc96b;border:1px solid #d69c3b}}.pipeline-summary.rejected strong,.pipeline-summary.legacy-summary strong,.pipeline-summary.research strong{{color:var(--red);border:1px solid var(--red)}}.pipeline-explainer{{margin:18px 0;padding:18px;border:1px solid #315065;border-radius:14px;background:linear-gradient(135deg,#102333,#0c1924)}}.pipeline-explainer h3{{margin:0 0 6px;color:var(--cyan)}}.pipeline-explainer>p{{margin:.3rem 0 1rem;font-size:1.02rem;color:#d8e5eb}}.pipeline-explainer dl{{margin:0}}.pipeline-explainer dd{{font-size:.9rem}}.pipeline-route{{padding:12px 14px;border-radius:10px;background:#101d29;color:var(--cyan);font-family:ui-monospace,monospace;overflow-wrap:anywhere}}.history-count{{color:var(--muted);font-weight:700}}.raw-e2e-grid{{padding:0}}
 .table{{overflow:auto}}table{{border-collapse:collapse;width:100%;font-size:.82rem}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:right;white-space:nowrap}}th:first-child{{text-align:left}}code{{color:var(--cyan)}}
 details{{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:#0b1620}}summary{{cursor:pointer;padding:14px 18px;color:var(--cyan);font-weight:700}}.attempt-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px;padding:0 12px 12px}}.attempt{{background:#101d29;border:1px solid var(--line);border-radius:12px;padding:14px}}.attempt h3{{font-size:.95rem;overflow-wrap:anywhere;margin:.5rem 0}}.attempt .metrics{{font-size:.78rem;color:#c7d6df}}summary:focus-visible,a:focus-visible,audio:focus-visible,.tab-list button:focus-visible{{outline:3px solid #ffc96b;outline-offset:3px}}
-footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:860px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}.flow-heading,.pipeline-summary{{display:block}}.flow-heading strong,.pipeline-summary strong{{display:inline-block;margin-top:8px;white-space:normal}}.flow-row.nodes-3,.flow-row.nodes-2,.flow-row.nodes-1{{grid-template-columns:1fr}}.flow-arrow{{min-width:0;min-height:42px}}.flow-arrow i{{transform:rotate(90deg)}}.flow-phase>header{{grid-template-columns:42px minmax(0,1fr)}}.flow-phase>header strong{{grid-column:1/-1;justify-self:start}}.audio{{grid-template-columns:1fr}}.tab-panel{{padding:14px}}}}
+footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:860px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}.flow-heading,.pipeline-summary{{display:block}}.flow-heading strong,.pipeline-summary strong{{display:inline-block;margin-top:8px;white-space:normal}}.flow-row.nodes-4,.flow-row.nodes-3,.flow-row.nodes-2,.flow-row.nodes-1{{grid-template-columns:1fr}}.flow-arrow{{min-width:0;min-height:42px}}.flow-arrow i{{transform:rotate(90deg)}}.flow-phase>header{{grid-template-columns:42px minmax(0,1fr)}}.flow-phase>header strong{{grid-column:1/-1;justify-self:start}}.audio{{grid-template-columns:1fr}}.tab-panel{{padding:14px}}}}
 </style></head><body><main>
 <p class="eyebrow">PHYSICAL AI / OBJECTIVE GATED DEVELOPMENT</p><h1>お手本は、<br>本当に演奏になったか。</h1>
-<p class="lead">単一の総合スコアで隠さず、聴覚・記憶・フィードフォワード演奏・誤差判定を独立したNNに分け、未知の固定課題で評価した。各カードの音声は同じ <code>step_up_down</code> 課題の「NN前 / NN後」である。</p>
+<p class="lead">単一の総合スコアで隠さず、聴覚・記憶・フィードフォワード・状態推定・モータ制御・誤差補正を分けて評価する。Position Plannerが音楽的フィードフォワードを担い、Motor PhysicsとLinear Fluteは学習用シミュレータとして実変位と音を作る。</p>
 {flow_diagram}
-<div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained={str(feedback['trained']).lower()} / pass={str(feedback['pass']).lower()}（{html.escape(feedback['reason'])}）。</div>
+<div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSし、さらに実機で再検証するまでE2E成功とは呼ばない。{html.escape(verdict_detail)}</div>
 {pipeline_tabs}
 <h2>評価を厳格化した理由</h2><p>旧一体モデルはMAE {old['mae']:.1f} cent、軌跡相関 {old['corr']:.3f} で実際には逆方向へ追従した。一方、旧方向指標だけは {old['direction']:.1f} だった。{old['explanation']}。新評価は発音できない目標区間へ1200 cent罰を与え、P90、発音率、休符漏れ、遷移ゲイン、整定誤差をケース別に残す。</p>
-<h2>学習の分離と再統合</h2><p>前段が合格したら凍結して次段を学習する。FFは名目rig・自己音なしから開始し、同じ参照でもrigごとに異なるOracle操作を回帰する不可能問題を避けた。次に閉ループDAggerでFeedback Residualを学習し、最後に未知rigと複数takeのRig Adapterを追加する。最終配備時は各NNを一つのforward graphとcheckpointへ束ねられるため、分離評価とE2E推論は両立する。</p>
+<h2>学習の分離と再統合</h2><p>Position Plannerを音楽的フィードフォワードとして固定し、PWMと可聴音程の関係だけを学ぶWorld Model、位置計画を追うMotor Controller、速い運動状態と遅い個体文脈を持つAdaptive Feedbackを順に学習する。物理真値は学習入力・教師へ漏らさず、評価グラフの原因分析だけに使う。</p>
 <h2>今後の実装計画</h2>
 <div class="grid">
   <section class="card">
     <div class="stage"><b>M</b><span>PLAN</span></div>
     <h2>交換可能な個別NNと統合E2E</h2>
     <p class="flow">modular learned / joint E2E / deterministic hybrid</p>
-    <p>Ear、Tempo/Beat、Musical Memory、Aligner、Planner、Motor State、Controller、Comparator、Feedbackに共通Tensor契約を定義する。開発時は個別checkpointと中間評価を維持し、配備時は単一のComposite graphへ統合する。</p>
+    <p>Ear、Tempo/Beat、Musical Memory、Aligner、Planner、World Model、Controller、Comparator、Feedbackに共通Tensor契約を定義する。開発時は個別checkpointと中間評価を維持し、配備時はWorld Modelを外し、ControllerとAdaptive Feedbackを単一のComposite graphへ統合する。</p>
     <ul>
       <li>個別NN接続: 合格済みブロックを凍結して接続</li>
       <li>joint E2E: 補助損失を残して全体を低学習率で微調整</li>
