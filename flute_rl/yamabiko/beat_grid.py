@@ -252,15 +252,20 @@ class NeuralTemporalAligner(nn.Module):
     def forward(self, grid: torch.Tensor, grid_lengths: torch.Tensor, pointer: torch.Tensor):
         encoded, _ = self.memory(grid)
         cells = torch.arange(grid.shape[1], device=grid.device, dtype=grid.dtype)
-        centers = cells[None, None, :] + .5
-        distance = pointer[..., None] - centers
+        position = pointer[..., None]
+        distance = position - cells[None, None, :]
         valid = cells[None, :] < grid_lengths[:, None]
-        weights = torch.exp(-.5 * (distance / .22) ** 2) * valid[:, None]
+        # Differentiable interval membership.  A tiny forward bias resolves a
+        # cell boundary in favour of the newly starting cell, preserving
+        # attacks that a symmetric Gaussian would blur 50:50.
+        sharpness, forward_bias = 24.0, .035
+        weights = (torch.sigmoid(sharpness * (distance + forward_bias)) *
+                   torch.sigmoid(sharpness * (1.0 - distance - forward_bias))) * valid[:, None]
         weights = weights / weights.sum(-1, keepdim=True).clamp_min(1e-8)
         context = torch.einsum("btc,bch->bth", weights, encoded)
         raw = torch.einsum("btc,bcf->btf", weights, grid)
         # Relative position lets the NN learn intra-cell slopes and attacks.
-        local = torch.tanh(4.0 * distance)
+        local = torch.tanh(4.0 * (distance - .5))
         offset = torch.einsum("btc,btc->bt", weights, local).unsqueeze(-1)
         started = (pointer >= 0).to(grid.dtype).unsqueeze(-1)
         out = self.decode(torch.cat([context, raw, offset, started], -1))
