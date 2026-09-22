@@ -18,6 +18,8 @@ from flute_rl.targets import make_beat_target  # noqa: E402
 from flute_rl.yamabiko.beat_grid import (BeatAlignedMusicalMemoryNet, BeatGridConfig,
                                          DurationConditionedPerformanceClock, MusicalMemoryNet, NeuralPerformanceClock,
                                          NeuralTemporalAligner, ReferenceTimingProfileNet, TempoBeatNet)  # noqa: E402
+from flute_rl.yamabiko.beat_grid import DirectReferenceTimingProfileNet, IndexedReferenceTimingProfileNet  # noqa: E402
+from flute_rl.yamabiko.beat_grid import BeatTimelineRecallNet  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from flute_rl.yamabiko.e2e_io import HOP, SAMPLE_RATE, frame_audio_numpy  # noqa: E402
 
@@ -64,8 +66,14 @@ def main():
     memory.load_state_dict(ck["musical_memory"]); memory.eval()
     clock = aligner = None
     timing_profile = None
+    timeline_memory = None
+    if ck.get("timeline_memory_trained"):
+        timeline_memory = BeatTimelineRecallNet(cfg).to(args.device)
+        timeline_memory.load_state_dict(ck["timeline_memory"]); timeline_memory.eval()
     if ck.get("timing_profile_trained"):
-        timing_profile = ReferenceTimingProfileNet(cfg).to(args.device)
+        profile_kind = ck.get("timing_profile_kind")
+        profile_cls = DirectReferenceTimingProfileNet if profile_kind == "direct-v1" else (IndexedReferenceTimingProfileNet if profile_kind == "indexed-v1" else ReferenceTimingProfileNet)
+        timing_profile = profile_cls(cfg).to(args.device)
         timing_profile.load_state_dict(ck["timing_profile"]); timing_profile.eval()
     if ck.get("temporal_aligner_trained"):
         clock = (DurationConditionedPerformanceClock(cfg) if ck.get("performance_clock_kind") == "duration-conditioned"
@@ -99,6 +107,15 @@ def main():
             timing_after = audio / f"{name}_timing_profile_clicks.wav"; write_wav(timing_after, timing_wave, SAMPLE_RATE)
             item["timing_before"] = item["tempo_before"]
             item["timing_after"] = str(timing_after.relative_to(out)).replace("\\", "/")
+        if timeline_memory is not None:
+            _, stored = timeline_memory(features, encoded, beat_out, lengths)
+            timeline_out = timeline_memory.decode(stored)[0]
+            timeline_pitch = timeline_out[:, 0].cpu().numpy() * 600 + 1300
+            timeline_voice = timeline_out[:, 1].cpu().numpy() >= 0
+            timeline_wave = synth_self(timeline_pitch, timeline_voice, np.random.default_rng(18000 + index), sr=SAMPLE_RATE)
+            timeline_after = audio / f"{name}_timeline_memory_recall.wav"; write_wav(timeline_after, timeline_wave, SAMPLE_RATE)
+            item["timeline_before"] = item["tempo_before"]
+            item["timeline_after"] = str(timeline_after.relative_to(out)).replace("\\", "/")
         if ck.get("musical_memory_trained"):
             confident = np.flatnonzero(confidence >= .5); start_frame = int(confident[0]) if len(confident) else 0
             cells = int(np.clip(round((len(example.target) - start_frame) / 100 * predicted_bpm / 60 * cfg.subdivision), 1, 64))
@@ -143,6 +160,8 @@ def main():
                 "temporal_aligner": ck.get("temporal_aligner_metrics"),
                 "timing_profile_trained": bool(ck.get("timing_profile_trained")),
                 "timing_profile": ck.get("timing_profile_metrics"),
+                "timeline_memory_trained": bool(ck.get("timeline_memory_trained")),
+                "timeline_memory": ck.get("timeline_memory_metrics"),
                 "temporal_connected": ck.get("temporal_connected_metrics"), "cases": cases}
     out.mkdir(parents=True, exist_ok=True); (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"wrote {out / 'manifest.json'}")

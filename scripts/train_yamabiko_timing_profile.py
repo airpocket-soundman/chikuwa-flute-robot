@@ -13,7 +13,8 @@ from torch.nn import functional as F
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from flute_rl.yamabiko.beat_grid import BeatGridConfig, ReferenceTimingProfileNet, TempoBeatNet  # noqa: E402
+from flute_rl.yamabiko.beat_grid import (BeatGridConfig, DirectReferenceTimingProfileNet, IndexedReferenceTimingProfileNet,
+                                         ReferenceTimingProfileNet, TempoBeatNet)  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from train_yamabiko_tempo_beat import collate, dataset  # noqa: E402
 
@@ -49,6 +50,8 @@ def main():
     ap.add_argument("--songs", type=int, default=384); ap.add_argument("--valid-songs", type=int, default=96)
     ap.add_argument("--steps", type=int, default=1400); ap.add_argument("--batch", type=int, default=12)
     ap.add_argument("--lr", type=float, default=5e-4)
+    ap.add_argument("--indexed", action="store_true")
+    ap.add_argument("--direct", action="store_true")
     ap.add_argument("--seed", type=int, default=27491); ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); rng = np.random.default_rng(args.seed); torch.manual_seed(args.seed)
     ck = torch.load(args.init, map_location=args.device); cfg = BeatGridConfig(**ck["config"])
@@ -59,8 +62,11 @@ def main():
     train = dataset(ear, rng, args.songs, args.device)
     bpms = [69, 87, 103, 129, 153, 177]
     valid = dataset(ear, np.random.default_rng(args.seed + 100000), args.valid_songs, args.device, bpms)
-    profile = ReferenceTimingProfileNet(cfg).to(args.device)
-    if ck.get("timing_profile_trained"): profile.load_state_dict(ck["timing_profile"])
+    profile_cls = DirectReferenceTimingProfileNet if args.direct else (IndexedReferenceTimingProfileNet if args.indexed else ReferenceTimingProfileNet)
+    profile = profile_cls(cfg).to(args.device)
+    desired_kind = "direct-v1" if args.direct else ("indexed-v1" if args.indexed else "phase-only-v1")
+    if ck.get("timing_profile_trained") and ck.get("timing_profile_kind") == desired_kind:
+        profile.load_state_dict(ck["timing_profile"])
     optimizer = torch.optim.AdamW(profile.parameters(), lr=args.lr, weight_decay=1e-6)
     for step in range(1, args.steps + 1):
         ids = rng.integers(len(train), size=args.batch).tolist(); features, lengths, _, _, _ = collate(train, ids, args.device)
@@ -77,7 +83,8 @@ def main():
     metrics = evaluate(tempo, profile.eval(), valid, args.device)
     metrics["pass"] = metrics["pointer_mae_cells"] <= .10 and metrics["pointer_p95_cells"] <= .25 and metrics["backward_jumps"] == 0
     metrics.update({"seed": args.seed + 100000, "split": "development-unknown-bpm", "official_path": "predicted_tempo_features"})
-    ck["timing_profile"] = profile.state_dict(); ck["timing_profile_trained"] = True; ck["timing_profile_metrics"] = metrics
+    ck["timing_profile"] = profile.state_dict(); ck["timing_profile_trained"] = True
+    ck["timing_profile_kind"] = desired_kind; ck["timing_profile_metrics"] = metrics
     torch.save(ck, args.out); pathlib.Path(args.report).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"saved {args.out}")
 

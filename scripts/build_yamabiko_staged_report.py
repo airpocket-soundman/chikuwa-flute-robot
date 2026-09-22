@@ -79,6 +79,17 @@ def main():
             <div><dt>pointer P95 cells</dt><dd>{n(tm['pointer_p95_cells'], 3)}</dd></div>
             <div><dt>backward jumps</dt><dd>{n(tm['backward_jumps'], 0)}</dd></div></dl>
             <p class="note">afterは保存されたTiming Profileの拍だけを鳴らす診断click。物理演奏音ではない。</p></section>'''
+        if beat.get("timeline_memory_trained") and beat.get("timeline_memory"):
+            lm = beat["timeline_memory"]; lst = "PASS" if lm.get("pass") else "FAIL"
+            beat_section += f'''<section class="card"><div class="stage"><b>L</b><span>{lst}</span></div>
+            <h2>Beat-conditioned Timeline Memory</h2><p class="flow">Beat内部系列 + Ear → 保存100 Hz profile → 再現</p>
+            <div class="listen">{beat_audio(bc['timeline_before'], '生のお手本')}{beat_audio(bc['timeline_after'], '保存tensorから再現')}</div>
+            <dl><div><dt>pitch MAE cents</dt><dd>{n(lm['pitch_mae_cents'])}</dd></div>
+            <div><dt>correlation</dt><dd>{n(lm['trajectory_correlation'], 3)}</dd></div>
+            <div><dt>voice F1</dt><dd>{n(lm['voice_f1'], 3)}</dd></div>
+            <div><dt>rest false positive</dt><dd>{n(lm['rest_false_positive_rate'], 4)}</dd></div>
+            <div><dt>onset F1 30 ms</dt><dd>{n(lm['onset_f1_30ms'], 3)}</dd></div></dl>
+            <p class="note">remember後はraw音声とEar入力を破棄し、保存NN tensorだけでdecode。BPM/セル表現と併存するドリフトなし実行profile。</p></section>'''
         beat_section += "</div>"
 
     stages = [

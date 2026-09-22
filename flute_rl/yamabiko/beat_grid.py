@@ -289,6 +289,86 @@ class ReferenceTimingProfileNet(nn.Module):
         return pointer0[:, None] + travelled
 
 
+class IndexedReferenceTimingProfileNet(nn.Module):
+    """Timing profile NN with the audio pipeline's normalized frame clock."""
+
+    def __init__(self, config: BeatGridConfig):
+        super().__init__(); self.config = config; h = config.memory_hidden
+        self.encoder = nn.GRU(2 * config.beat_hidden + 5, h, batch_first=True, bidirectional=True)
+        self.start = nn.Sequential(nn.Linear(2 * h, h), nn.SiLU(), nn.Linear(h, 1))
+        self.delta = nn.Sequential(nn.Linear(2 * h, h), nn.SiLU(), nn.Linear(h, 1))
+
+    def forward(self, beat_encoded: torch.Tensor, beat_outputs: torch.Tensor, mask: torch.Tensor):
+        steps = beat_encoded.shape[1]
+        index = torch.arange(steps, device=beat_encoded.device, dtype=beat_encoded.dtype)[None]
+        lengths = mask.sum(1, keepdim=True).to(beat_encoded.dtype).clamp_min(1)
+        progress = (index / (lengths - 1).clamp_min(1)).expand(len(mask), -1)
+        time_features = torch.stack([progress, 1 - progress], -1)
+        encoded, _ = self.encoder(torch.cat([beat_encoded, beat_outputs, time_features], -1))
+        pooled = (encoded * mask[..., None]).sum(1) / lengths
+        pointer0 = -torch.nn.functional.softplus(self.start(pooled)[:, 0])
+        delta = torch.nn.functional.softplus(self.delta(encoded)[..., 0]) * .12 * mask
+        travelled = torch.cat([torch.zeros(len(encoded), 1, device=encoded.device, dtype=encoded.dtype),
+                               torch.cumsum(delta[:, :-1], 1)], 1)
+        return pointer0[:, None] + travelled
+
+
+class DirectReferenceTimingProfileNet(nn.Module):
+    """Direct absolute-position decoder with a monotonic output constraint."""
+
+    def __init__(self, config: BeatGridConfig):
+        super().__init__(); self.config = config; h = config.memory_hidden
+        self.encoder = nn.GRU(2 * config.beat_hidden + 5, h, batch_first=True, bidirectional=True)
+        self.head = nn.Sequential(nn.Linear(2 * h, h), nn.SiLU(), nn.Linear(h, 1))
+
+    def forward(self, beat_encoded: torch.Tensor, beat_outputs: torch.Tensor, mask: torch.Tensor):
+        steps = beat_encoded.shape[1]; index = torch.arange(steps, device=beat_encoded.device, dtype=beat_encoded.dtype)[None]
+        lengths = mask.sum(1, keepdim=True).to(beat_encoded.dtype).clamp_min(1)
+        progress = (index / (lengths - 1).clamp_min(1)).expand(len(mask), -1)
+        time_features = torch.stack([progress, 1 - progress], -1)
+        encoded, _ = self.encoder(torch.cat([beat_encoded, beat_outputs, time_features], -1))
+        raw = self.head(encoded)[..., 0]
+        # Structural physical constraint: stored musical time never reverses.
+        return torch.cummax(raw, dim=1).values
+
+
+class BeatTimelineRecallNet(nn.Module):
+    """Store a beat-conditioned 100 Hz neural performance profile.
+
+    ``remember`` runs only while listening.  Its returned tensor is sufficient
+    for repeated ``decode`` calls after raw audio has been discarded.
+    """
+
+    OUTPUTS = 4  # pitch, voice logit, onset logit, offset logit
+
+    def __init__(self, config: BeatGridConfig):
+        super().__init__(); self.config = config; h = config.memory_hidden
+        source_dim = config.input_dim + 2 * config.beat_hidden + 3
+        self.encoder = nn.GRU(source_dim, h, batch_first=True, bidirectional=True)
+        self.decoder = nn.Sequential(nn.Linear(2 * h + 2, h), nn.SiLU(),
+                                     nn.Linear(h, h), nn.SiLU(), nn.Linear(h, self.OUTPUTS))
+
+    def remember(self, audio_features: torch.Tensor, beat_encoded: torch.Tensor,
+                 beat_outputs: torch.Tensor, lengths: torch.Tensor):
+        source = torch.cat([audio_features, beat_encoded, beat_outputs], -1)
+        packed = nn.utils.rnn.pack_padded_sequence(source, lengths.cpu(), batch_first=True, enforce_sorted=False)
+        encoded, _ = self.encoder(packed)
+        encoded, _ = nn.utils.rnn.pad_packed_sequence(encoded, batch_first=True,
+                                                       total_length=audio_features.shape[1])
+        # Calibrated Ear channels become part of the stored neural tensor, not
+        # a runtime bypass to raw audio.
+        return torch.cat([encoded, audio_features[..., -2:]], -1)
+
+    def decode(self, stored_profile: torch.Tensor):
+        raw = self.decoder(stored_profile)
+        pitch = stored_profile[..., -2:-1] + .03 * raw[..., :1]
+        return torch.cat([pitch, raw[..., 1:]], -1)
+
+    def forward(self, audio_features, beat_encoded, beat_outputs, lengths):
+        stored = self.remember(audio_features, beat_encoded, beat_outputs, lengths)
+        return self.decode(stored), stored
+
+
 class NeuralTemporalAligner(nn.Module):
     """Render remembered beat cells onto 100 Hz using a neural clock pointer."""
 
