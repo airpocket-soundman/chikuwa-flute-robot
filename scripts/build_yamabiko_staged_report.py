@@ -30,11 +30,14 @@ def figure(src, caption, prefix=""):
             f'alt="{html.escape(caption)}"><figcaption>{html.escape(caption)}</figcaption></figure>')
 
 
-def flow_node(title, state, detail):
+def flow_node(title, state, detail, href=None):
     labels = {"pass": "PASS", "fail": "FAIL", "partial": "単独PASS / 接続FAIL",
               "pending": "未学習・未評価", "neutral": "INPUT"}
-    return (f'<li class="flow-node {state}"><span>{html.escape(labels[state])}</span>'
-            f'<b>{html.escape(title)}</b><small>{html.escape(detail)}</small></li>')
+    content = (f'<span>{html.escape(labels[state])}</span><b>{html.escape(title)}</b>'
+               f'<small>{html.escape(detail)}</small>')
+    if href:
+        content = f'<a href="{html.escape(href)}">{content}<em>工程の結果を見る ↓</em></a>'
+    return f'<li class="flow-node {state}">{content}</li>'
 
 
 def flow_arrow(state="neutral", label=""):
@@ -225,7 +228,7 @@ def main():
         ("3", "身体で演奏する", "音程目標を位置へ変換し、モータと笛で音にする。", "planning"),
         ("4", "聴いて差を直す", "自己音と目標を比較し、次の操作を補正する。", "feedback"),
     )
-    process_results = "".join(f'''<section class="process-section"><header><span>{number}</span><div><h2>工程 {number}: {title}</h2><p>{description}</p></div></header><div class="grid">{''.join(beat_cards[key])}</div></section>'''
+    process_results = "".join(f'''<section class="process-section" id="process-{number}"><header><span>{number}</span><div><h2>工程 {number}: {title}</h2><p>{description}</p></div></header><div class="grid">{''.join(beat_cards[key])}</div></section>'''
                               for number, title, description, key in process_specs)
 
     tempo_metrics = beat.get("tempo_beat", {})
@@ -233,21 +236,24 @@ def main():
     position_metrics = beat.get("timeline_position", {}) or {}
     position_connected_pass = (position_metrics.get("connected_position_mae_percent_stroke", float("inf")) <= 1.0 and
                                position_metrics.get("connected_steady_pitch_mae_cents", float("inf")) <= 30.0)
-    flow_items = [
-        flow_node("お手本音声", "neutral", "raw waveform"), flow_arrow(),
-        flow_node("Neural Ear", "pass" if s["ear"].get("pass") else "fail", f"MAE {n(s['ear'].get('mae'))} cent"), flow_arrow(),
-        flow_node("Tempo / Beat", "pass" if tempo_metrics.get("pass") else "fail", f"BPM誤差 {n(tempo_metrics.get('tempo_relative_error_median', 0)*100, 2)}%"), flow_arrow(),
-        flow_node("Timeline Memory", "pass" if timeline_metrics.get("pass") else "fail", f"MAE {n(timeline_metrics.get('pitch_mae_cents'))} cent"),
-        flow_arrow("pass" if position_connected_pass else "fail", f"接続 {n(position_metrics.get('connected_steady_pitch_mae_cents'))} cent"),
+    flow_row_1 = [
+        flow_node("お手本音声", "neutral", "raw waveform", "#process-1"), flow_arrow(),
+        flow_node("Neural Ear", "pass" if s["ear"].get("pass") else "fail", f"MAE {n(s['ear'].get('mae'))} cent", "#process-1"), flow_arrow(),
+        flow_node("Tempo / Beat", "pass" if tempo_metrics.get("pass") else "fail", f"BPM誤差 {n(tempo_metrics.get('tempo_relative_error_median', 0)*100, 2)}%", "#process-1"), flow_arrow(),
+        flow_node("Timeline Memory", "pass" if timeline_metrics.get("pass") else "fail", f"MAE {n(timeline_metrics.get('pitch_mae_cents'))} cent", "#process-2"),
+    ]
+    flow_row_2 = [
         flow_node("Position Planner", "pass" if position_metrics.get("pass") and position_connected_pass else "partial",
-                  f"単独 {n(position_metrics.get('steady_pitch_mae_cents'))} / 接続 {n(position_metrics.get('connected_steady_pitch_mae_cents'))} cent"),
+                  f"単独 {n(position_metrics.get('steady_pitch_mae_cents'))} / 接続 {n(position_metrics.get('connected_steady_pitch_mae_cents'))} cent", "#process-3"),
         flow_arrow("fail", "現行経路は未統合"),
-        flow_node("Motor / Flute", "fail", f"旧simulation MAE {n(s['feedforward'].get('mae'))} cent・実機未評価"), flow_arrow("fail"),
-        flow_node("Error Comparator", "pass" if s["comparator"].get("pass") else "fail", f"error MAE {n(s['comparator'].get('error_mae'))} cent"), flow_arrow("pending"),
-        flow_node("Feedback Residual", "pending", "未学習・反復適応も未統合"),
+        flow_node("Motor / Flute", "fail", f"旧simulation MAE {n(s['feedforward'].get('mae'))} cent・実機未評価", "#process-3"), flow_arrow("fail"),
+        flow_node("Error Comparator", "pass" if s["comparator"].get("pass") else "fail", f"error MAE {n(s['comparator'].get('error_mae'))} cent", "#process-4"), flow_arrow("pending"),
+        flow_node("Feedback Residual", "pending", "未学習・反復適応も未統合", "#process-4"),
     ]
     flow_diagram = f'''<section class="flow-overview" aria-labelledby="flow-title"><div class="flow-heading"><div><h2 id="flow-title">全体フローと現在地</h2><p>緑は固定Gate PASS、赤はFAIL、橙は単独PASSだが接続FAIL、灰は未学習・未評価。</p></div><strong>全体 E2E: FAIL / 未完成</strong></div>
-      <ol class="system-flow" aria-label="AI演奏システムの工程と合否">{''.join(flow_items)}</ol>
+      <ol class="system-flow flow-row" aria-label="AI演奏システム前半の工程と合否">{''.join(flow_row_1)}</ol>
+      <div class="flow-turn fail" aria-hidden="true"><span>↓</span><b>Timeline → Position 接続 FAIL: {n(position_metrics.get('connected_steady_pitch_mae_cents'))} cent</b></div>
+      <ol class="system-flow flow-row" start="5" aria-label="AI演奏システム後半の工程と合否">{''.join(flow_row_2)}</ol>
       <div class="feedback-return"><b>↩ Feedback loop</b><span>自己音の誤差からPosition / Controllerへ補正を戻す経路 — 未学習</span></div>
       <p class="flow-caveat">Neural Earは合成・音響乱数化ホールドアウトでのPASSで、実録音は未評価。Position PlannerのPASSは正解音程入力での単独Gateであり、Timeline接続はFAIL。</p></section>'''
     details = []
@@ -273,7 +279,7 @@ def main():
     doc = f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Yamabiko E2E 分離NN 学習レポート</title>
 <style>
-:root{{--bg:#081018;--panel:#101d29;--ink:#edf6fb;--muted:#9eb2c0;--cyan:#4ee1d1;--red:#ff7b72;--line:#284052}}*{{box-sizing:border-box}}
+:root{{--bg:#081018;--panel:#101d29;--ink:#edf6fb;--muted:#9eb2c0;--cyan:#4ee1d1;--red:#ff7b72;--line:#284052}}*{{box-sizing:border-box}}html{{scroll-behavior:smooth}}
 body{{margin:0;background:radial-gradient(circle at 80% 0,#163047 0,transparent 42%),var(--bg);color:var(--ink);font:15px/1.65 system-ui,sans-serif}}
 main{{max-width:1120px;margin:auto;padding:48px 20px 80px}}h1{{font-size:clamp(2rem,5vw,4.5rem);line-height:1.02;margin:.2em 0}}h2{{margin:.2rem 0}}h3{{margin-top:2rem}}.eyebrow,.flow{{color:var(--cyan);letter-spacing:.05em}}.lead{{font-size:1.15rem;max-width:820px;color:#c7d6df}}
 .verdict{{border:1px solid var(--red);background:#28171a;padding:18px 22px;border-radius:14px;margin:28px 0}}.verdict b{{color:var(--red)}}
@@ -281,11 +287,11 @@ main{{max-width:1120px;margin:auto;padding:48px 20px 80px}}h1{{font-size:clamp(2
 .stage{{display:flex;justify-content:space-between;align-items:center}}.stage b{{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--cyan);color:#071016}}.stage span{{font-weight:800;color:var(--red)}}.card:has(.stage span:first-child){{border-color:var(--cyan)}}
 .listen{{display:grid;gap:10px;margin:18px 0}}.audio{{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:8px}}audio{{width:100%;height:36px}}dl{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}dl div{{background:#0a141d;padding:9px;border-radius:8px}}dt{{font-size:.72rem;color:var(--muted)}}dd{{margin:0;font-size:1.05rem}}.note{{color:var(--muted);font-size:.9rem}}
 .pitch-plot{{margin:14px 0 18px}}.pitch-plot img{{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px;background:#0b1620}}.pitch-plot figcaption{{margin-top:7px;color:var(--muted);font-size:.78rem}}.stage span.pass{{color:#70f0ac}}.stage span.fail{{color:#ff8c78}}.stage span.partial{{color:#ffc96b}}.stage span.pending{{color:#9eb2c0}}.legacy{{border-style:dashed;opacity:.86}}.pending{{border-color:#526675}}
-.flow-overview{{margin:28px 0;padding:24px;background:#0b1620;border:1px solid var(--line);border-radius:18px}}.flow-heading{{display:flex;justify-content:space-between;gap:20px;align-items:start}}.flow-heading strong{{color:var(--red);border:1px solid var(--red);padding:8px 12px;border-radius:9px;white-space:nowrap}}.system-flow{{list-style:none;margin:22px 0;padding:0;display:flex;align-items:stretch;overflow-x:auto;gap:8px}}.flow-node{{min-width:145px;display:flex;flex-direction:column;gap:6px;padding:14px;border:2px solid var(--line);border-radius:12px;background:#101d29}}.flow-node span{{font-size:.72rem;font-weight:900}}.flow-node small{{color:var(--muted)}}.flow-node.pass{{border-color:#46c987}}.flow-node.pass span{{color:#70f0ac}}.flow-node.fail{{border-color:var(--red)}}.flow-node.fail span{{color:#ff8c78}}.flow-node.partial{{border-color:#d69c3b}}.flow-node.partial span{{color:#ffc96b}}.flow-node.pending,.flow-node.neutral{{border-color:#526675}}.flow-node.pending span,.flow-node.neutral span{{color:#b3c0c8}}.flow-arrow{{min-width:82px;display:grid;place-items:center;align-content:center;text-align:center;color:var(--muted)}}.flow-arrow i{{font-size:1.6rem;font-style:normal}}.flow-arrow.fail{{color:var(--red)}}.flow-arrow.pass{{color:#70f0ac}}.flow-arrow.pending{{color:#9eb2c0}}.feedback-return{{display:flex;gap:12px;align-items:center;border:1px dashed #526675;border-radius:10px;padding:10px 14px;color:var(--muted)}}.feedback-return b{{color:#9eb2c0}}.flow-caveat{{color:var(--muted);font-size:.88rem}}
-.process-section{{margin:46px 0}}.process-section>header,.history-process>header{{display:flex;gap:14px;align-items:center;margin-bottom:16px}}.process-section>header>span,.history-process>header>b{{display:grid;place-items:center;flex:0 0 44px;height:44px;border-radius:12px;background:var(--cyan);color:#071016;font-size:1.15rem}}.process-section>header p,.history-process>header p{{margin:0;color:var(--muted)}}.history-process{{margin:26px 0;padding:18px;border-left:3px solid var(--line);background:#0a141d;border-radius:0 14px 14px 0}}
+.flow-overview{{margin:28px 0;padding:24px;background:#0b1620;border:1px solid var(--line);border-radius:18px}}.flow-heading{{display:flex;justify-content:space-between;gap:20px;align-items:start}}.flow-heading strong{{color:var(--red);border:1px solid var(--red);padding:8px 12px;border-radius:9px;white-space:nowrap}}.system-flow{{list-style:none;margin:18px 0;padding:0}}.flow-row{{display:grid;grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr);align-items:stretch;gap:8px}}.flow-node{{min-width:0;display:flex;flex-direction:column;border:2px solid var(--line);border-radius:12px;background:#101d29}}.flow-node>span,.flow-node>b,.flow-node>small{{margin-left:14px;margin-right:14px}}.flow-node>a{{display:flex;flex:1;flex-direction:column;gap:6px;padding:14px;color:inherit;text-decoration:none}}.flow-node>a span,.flow-node>span{{font-size:.72rem;font-weight:900}}.flow-node small{{color:var(--muted)}}.flow-node em{{margin-top:auto;padding-top:8px;color:var(--cyan);font-size:.75rem;font-style:normal}}.flow-node.pass{{border-color:#46c987}}.flow-node.pass span{{color:#70f0ac}}.flow-node.fail{{border-color:var(--red)}}.flow-node.fail span{{color:#ff8c78}}.flow-node.partial{{border-color:#d69c3b}}.flow-node.partial span{{color:#ffc96b}}.flow-node.pending,.flow-node.neutral{{border-color:#526675}}.flow-node.pending span,.flow-node.neutral span{{color:#b3c0c8}}.flow-arrow{{min-width:0;display:grid;place-items:center;align-content:center;text-align:center;color:var(--muted)}}.flow-arrow i{{font-size:1.6rem;font-style:normal}}.flow-arrow small{{font-size:.68rem}}.flow-arrow.fail,.flow-turn.fail{{color:var(--red)}}.flow-arrow.pass{{color:#70f0ac}}.flow-arrow.pending{{color:#9eb2c0}}.flow-turn{{display:flex;justify-content:center;gap:12px;align-items:center;margin:4px 0;font-size:.82rem}}.flow-turn span{{font-size:1.5rem}}.feedback-return{{display:flex;gap:12px;align-items:center;border:1px dashed #526675;border-radius:10px;padding:10px 14px;color:var(--muted)}}.feedback-return b{{color:#9eb2c0}}.flow-caveat{{color:var(--muted);font-size:.88rem}}
+.process-section{{margin:46px 0;scroll-margin-top:20px}}.process-section>header,.history-process>header{{display:flex;gap:14px;align-items:center;margin-bottom:16px}}.process-section>header>span,.history-process>header>b{{display:grid;place-items:center;flex:0 0 44px;height:44px;border-radius:12px;background:var(--cyan);color:#071016;font-size:1.15rem}}.process-section>header p,.history-process>header p{{margin:0;color:var(--muted)}}.history-process{{margin:26px 0;padding:18px;border-left:3px solid var(--line);background:#0a141d;border-radius:0 14px 14px 0}}
 .table{{overflow:auto}}table{{border-collapse:collapse;width:100%;font-size:.82rem}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:right;white-space:nowrap}}th:first-child{{text-align:left}}code{{color:var(--cyan)}}
 details{{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:#0b1620}}summary{{cursor:pointer;padding:14px 18px;color:var(--cyan);font-weight:700}}.attempt-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px;padding:0 12px 12px}}.attempt{{background:#101d29;border:1px solid var(--line);border-radius:12px;padding:14px}}.attempt h3{{font-size:.95rem;overflow-wrap:anywhere;margin:.5rem 0}}.attempt .metrics{{font-size:.78rem;color:#c7d6df}}summary:focus-visible,a:focus-visible,audio:focus-visible{{outline:3px solid #ffc96b;outline-offset:3px}}
-footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:700px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}.flow-heading{{display:block}}.flow-heading strong{{display:inline-block;margin-top:8px}}.system-flow{{display:grid;overflow:visible}}.flow-arrow{{min-width:0;min-height:42px}}.flow-arrow i{{transform:rotate(90deg)}}.audio{{grid-template-columns:1fr}}}}
+footer{{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);padding-top:18px}}@media(max-width:860px){{main{{padding-top:28px}}dl{{grid-template-columns:1fr}}.flow-heading{{display:block}}.flow-heading strong{{display:inline-block;margin-top:8px}}.flow-row{{grid-template-columns:1fr}}.flow-arrow{{min-width:0;min-height:42px}}.flow-arrow i{{transform:rotate(90deg)}}.flow-turn{{border-block:1px dashed #526675;padding:8px}}.audio{{grid-template-columns:1fr}}}}
 </style></head><body><main>
 <p class="eyebrow">PHYSICAL AI / OBJECTIVE GATED DEVELOPMENT</p><h1>お手本は、<br>本当に演奏になったか。</h1>
 <p class="lead">単一の総合スコアで隠さず、聴覚・記憶・フィードフォワード演奏・誤差判定を独立したNNに分け、未知の固定課題で評価した。各カードの音声は同じ <code>step_up_down</code> 課題の「NN前 / NN後」である。</p>
