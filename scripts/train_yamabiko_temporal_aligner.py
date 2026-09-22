@@ -62,7 +62,12 @@ def tolerant_event_f1(truth: torch.Tensor, logits: torch.Tensor, mask: torch.Ten
     score = torch.sigmoid(logits)
     for row in range(len(truth)):
         n = int(mask[row].sum()); y = score[row, :n]
-        peaks = torch.nonzero((y >= .5) & (y >= torch.roll(y, 1)) & (y > torch.roll(y, -1))).flatten().tolist()
+        candidates = torch.nonzero((y >= .5) & (y >= torch.roll(y, 1)) & (y > torch.roll(y, -1))).flatten().tolist()
+        # Standard event peak picking: keep the strongest peak in each 30 ms
+        # neighbourhood instead of counting a broad attack as many events.
+        peaks = []
+        for candidate in sorted(candidates, key=lambda i: float(y[i]), reverse=True):
+            if all(abs(candidate - kept) > radius for kept in peaks): peaks.append(candidate)
         actual = torch.nonzero(truth[row, :n] >= .5).flatten().tolist(); used = set()
         for p in peaks:
             choices = [(abs(p - a), j) for j, a in enumerate(actual) if j not in used and abs(p - a) <= radius]
@@ -134,9 +139,11 @@ def main():
         loss_done = F.binary_cross_entropy_with_logits(done_logit, done, pos_weight=(negatives / positives.clamp_min(1)).detach())
         loss_pitch = F.smooth_l1_loss(pred[..., 0][voiced], target[..., 0][voiced])
         loss_voice = F.binary_cross_entropy_with_logits(pred[..., 1][mask], target[..., 1][mask])
-        loss_on = F.binary_cross_entropy_with_logits(pred[..., 2][mask], target[..., 2][mask], pos_weight=torch.tensor(15., device=args.device))
-        loss_off = F.binary_cross_entropy_with_logits(pred[..., 3][mask], target[..., 3][mask], pos_weight=torch.tensor(15., device=args.device))
-        loss = 2 * loss_clock + .6 * loss_done + loss_pitch + .5 * loss_voice + .2 * (loss_on + loss_off)
+        rests = mask & ~target[..., 1].bool()
+        loss_rest = F.binary_cross_entropy_with_logits(pred[..., 1][rests], target[..., 1][rests])
+        loss_on = F.binary_cross_entropy_with_logits(pred[..., 2][mask], target[..., 2][mask], pos_weight=torch.tensor(10., device=args.device))
+        loss_off = F.binary_cross_entropy_with_logits(pred[..., 3][mask], target[..., 3][mask], pos_weight=torch.tensor(10., device=args.device))
+        loss = 2 * loss_clock + .6 * loss_done + loss_pitch + .5 * loss_voice + .25 * loss_rest + .3 * (loss_on + loss_off)
         optimizer.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(list(clock.parameters()) + list(aligner.parameters()), 1); optimizer.step()
         if step == 1 or step % 100 == 0:
             print(f"step {step:4d} loss {float(loss):.5f} clock {float(loss_clock):.5f} pitch {float(loss_pitch):.5f}", flush=True)
