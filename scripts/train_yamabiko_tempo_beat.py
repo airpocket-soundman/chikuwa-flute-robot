@@ -30,7 +30,10 @@ class Sample:
 def dataset(ear, rng, count, device, bpms=None):
     result = []
     for i in range(count):
-        beat = make_beat_target(rng, bpm=None if bpms is None else float(bpms[i % len(bpms)]))
+        # Vary phrase length so BPM cannot be inferred from total duration and
+        # a fixed beat count.  The network must use repeated acoustic events.
+        beat = make_beat_target(rng, bpm=None if bpms is None else float(bpms[i % len(bpms)]),
+                                beats=int(rng.integers(6, 13)))
         kind = str(rng.choice(SOURCE_KINDS)); wave, _ = synth_source(beat.target, kind, rng, sr=SAMPLE_RATE)
         frames = frame_audio_numpy(room(wave, SAMPLE_RATE, rng), len(beat.target))
         features = ear.audio_features(torch.from_numpy(frames).to(device)).cpu()
@@ -81,6 +84,7 @@ def main():
     ap.add_argument("--out", default="runs/yamabiko_tempo_beat.pt"); ap.add_argument("--report", default="runs/yamabiko_tempo_beat_report.json")
     ap.add_argument("--songs", type=int, default=384); ap.add_argument("--valid-songs", type=int, default=96)
     ap.add_argument("--steps", type=int, default=1200); ap.add_argument("--batch", type=int, default=12)
+    ap.add_argument("--lr", type=float, default=7e-4); ap.add_argument("--init", default=None)
     ap.add_argument("--seed", type=int, default=14449); ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); rng = np.random.default_rng(args.seed); torch.manual_seed(args.seed)
     ear = E2EImitator.from_checkpoint(torch.load(args.ear, map_location=args.device), args.device).eval()
@@ -92,7 +96,10 @@ def main():
     valid = dataset(ear, np.random.default_rng(args.seed + 100_000), args.valid_songs, args.device, valid_bpms)
     config = BeatGridConfig(input_dim=ear.config.audio_dim + 2)
     tempo, memory = TempoBeatNet(config).to(args.device), MusicalMemoryNet(config).to(args.device)
-    optimizer = torch.optim.AdamW(tempo.parameters(), lr=7e-4, weight_decay=1e-6)
+    if args.init:
+        initial = torch.load(args.init, map_location=args.device)
+        tempo.load_state_dict(initial["tempo_beat"]); memory.load_state_dict(initial["musical_memory"])
+    optimizer = torch.optim.AdamW(tempo.parameters(), lr=args.lr, weight_decay=1e-6)
     for step in range(1, args.steps + 1):
         ids = rng.integers(len(train), size=args.batch); features, lengths, bpm, phase, valid_phase = collate(train, ids, args.device)
         bpm_log, out, _, mask = tempo(features, lengths)
@@ -100,10 +107,22 @@ def main():
         loss_bpm = F.smooth_l1_loss(bpm_log, target_bpm)
         loss_phase = F.mse_loss(out[..., :2][valid_phase], phase[valid_phase])
         loss_conf = F.binary_cross_entropy_with_logits(out[..., 2][mask], valid_phase[mask].float())
-        loss = loss_bpm + loss_phase + .1 * loss_conf
+        # Tie the global BPM head to the local phase motion.  Without this
+        # loss two unrelated heads can each look plausible while disagreeing.
+        gap = 10  # 100 ms at the 100 Hz reference timeline
+        pair = valid_phase[:, gap:] & valid_phase[:, :-gap]
+        p0, p1 = out[:, :-gap, :2], out[:, gap:, :2]
+        phase_cos = (p0 * p1).sum(-1)
+        phase_sin = p1[..., 0] * p0[..., 1] - p1[..., 1] * p0[..., 0]
+        advance = 2 * torch.pi * tempo.bpm(bpm_log) * (gap / 100.0) / 60.0
+        expected_cos = torch.cos(advance)[:, None].expand_as(phase_cos)
+        expected_sin = torch.sin(advance)[:, None].expand_as(phase_sin)
+        loss_consistency = (F.mse_loss(phase_cos[pair], expected_cos[pair]) +
+                            F.mse_loss(phase_sin[pair], expected_sin[pair]))
+        loss = loss_bpm + loss_phase + .1 * loss_conf + .3 * loss_consistency
         optimizer.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(tempo.parameters(), 1); optimizer.step()
         if step == 1 or step % 100 == 0:
-            print(f"step {step:4d} loss {float(loss.detach()):.5f} bpm {float(loss_bpm.detach()):.5f} phase {float(loss_phase.detach()):.5f}", flush=True)
+            print(f"step {step:4d} loss {float(loss.detach()):.5f} bpm {float(loss_bpm.detach()):.5f} phase {float(loss_phase.detach()):.5f} consistent {float(loss_consistency.detach()):.5f}", flush=True)
     metrics = evaluate(tempo.eval(), valid, args.device)
     metrics["pass"] = (metrics["tempo_relative_error_median"] <= .03 and
                        metrics["phase_circular_mae_cycle"] <= .08 and

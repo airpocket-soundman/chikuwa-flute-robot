@@ -17,8 +17,8 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
 <h2>拍グリッド再設計</h2><p>お手本をBPMと拍位相へ割り当て、その拍セル上に連続音程・休符・onset・offset・傾斜を記憶する。BPMラベルは任意秒長の旧データへ後付けせず、BPMから生成した専用データだけで評価する。</p><div class="grid"><section class="card"><div class="stage"><b>B</b><span>FAIL</span></div>
         <h2>Tempo / Beat NN</h2><p class="flow">raw reference → BPM・連続beat phase</p>
         <div class="listen"><div class="audio"><span>お手本</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>予測拍click</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_after_clicks.wav"></audio></div></div>
-        <dl><div><dt>tempo median relative error</dt><dd>0.0374</dd></div>
-        <div><dt>phase MAE cycle</dt><dd>0.0648</dd></div></dl>
+        <dl><div><dt>tempo median relative error</dt><dd>0.0603</dd></div>
+        <div><dt>phase MAE cycle</dt><dd>0.0541</dd></div></dl>
         <p class="note">afterはTempo NNの拍だけを鳴らした診断clickで、演奏音ではない。official path: predicted_upstream</p>
         </section></div>
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained=false / pass=false（feedback residual training is the next gated stage）。</div>
