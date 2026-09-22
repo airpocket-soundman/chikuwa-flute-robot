@@ -41,10 +41,13 @@ def main():
     args = ap.parse_args(); ck = torch.load(args.model, map_location=args.device)
     cfg = BeatGridConfig(**ck["config"]); tempo = TempoBeatNet(cfg).to(args.device); tempo.load_state_dict(ck["tempo_beat"]); tempo.eval()
     kind = ck.get("musical_memory_kind")
-    memory = (BeatAlignedMusicalMemoryNet(cfg, pitch_skip=kind in ("beat-aligned-v2", "beat-aligned-v3", "beat-aligned-v4"),
-                                          sharp_alignment=kind in ("beat-aligned-v3", "beat-aligned-v4"),
-                                          stable_clock=kind == "beat-aligned-v4")
-              if kind in ("beat-aligned-v1", "beat-aligned-v2", "beat-aligned-v3", "beat-aligned-v4")
+    memory = (BeatAlignedMusicalMemoryNet(cfg, pitch_skip=kind in ("beat-aligned-v2", "beat-aligned-v3", "beat-aligned-v4", "beat-aligned-v5", "beat-aligned-v6", "beat-aligned-v7"),
+                                          sharp_alignment=kind in ("beat-aligned-v3", "beat-aligned-v4", "beat-aligned-v5", "beat-aligned-v6", "beat-aligned-v7"),
+                                          stable_clock=kind == "beat-aligned-v4", phase_lock=kind == "beat-aligned-v5",
+                                          alignment_sigma=.14 if kind == "beat-aligned-v7" else (.18 if kind == "beat-aligned-v6" else None),
+                                          pitch_residual_scale=.03 if kind == "beat-aligned-v7" else (.05 if kind == "beat-aligned-v6" else .1),
+                                          wrap_clock=kind == "beat-aligned-v7")
+              if kind in ("beat-aligned-v1", "beat-aligned-v2", "beat-aligned-v3", "beat-aligned-v4", "beat-aligned-v5", "beat-aligned-v6", "beat-aligned-v7")
               else MusicalMemoryNet(cfg)).to(args.device)
     memory.load_state_dict(ck["musical_memory"]); memory.eval()
     ear = E2EImitator.from_checkpoint(torch.load(ck["ear_checkpoint"], map_location=args.device), args.device).eval()
