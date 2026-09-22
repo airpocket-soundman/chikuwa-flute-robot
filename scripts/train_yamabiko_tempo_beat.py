@@ -24,6 +24,7 @@ from flute_rl.yamabiko.e2e_io import SAMPLE_RATE, frame_audio_numpy  # noqa: E40
 class Sample:
     features: torch.Tensor
     beat: BeatTarget
+    source_kind: str
 
 
 @torch.inference_mode()
@@ -37,7 +38,7 @@ def dataset(ear, rng, count, device, bpms=None):
         kind = str(rng.choice(SOURCE_KINDS)); wave, _ = synth_source(beat.target, kind, rng, sr=SAMPLE_RATE)
         frames = frame_audio_numpy(room(wave, SAMPLE_RATE, rng), len(beat.target))
         features = ear.audio_features(torch.from_numpy(frames).to(device)).cpu()
-        result.append(Sample(features, beat))
+        result.append(Sample(features, beat, kind))
     return result
 
 

@@ -1,6 +1,6 @@
 {
   "format": "yamabiko-beat-audio-v1",
-  "checkpoint": "runs/yamabiko_timeline_memory_v3.pt",
+  "checkpoint": "runs/yamabiko_timeline_memory_direct_v1.pt",
   "seed": 15551,
   "official_path": "predicted_upstream",
   "audio_kind": "tempo_after is diagnostic click track, not physical performance",
@@ -77,15 +77,33 @@
   },
   "timeline_memory_trained": true,
   "timeline_memory": {
-    "pitch_mae_cents": 60.64207458496094,
-    "trajectory_correlation": 0.8920605988172602,
-    "voice_f1": 0.9997624158859253,
-    "rest_false_positive_rate": 0.0005556481773965061,
-    "onset_f1_30ms": 0.8880071493465027,
-    "offset_f1_30ms": 0.9994292237442922,
+    "pitch_mae_cents": 78.82645416259766,
+    "trajectory_correlation": 0.9135898682203007,
+    "voice_f1": 0.9992709755897522,
+    "rest_false_positive_rate": 0.00032448218553327024,
+    "onset_f1_30ms": 0.8705363270582838,
+    "offset_f1_30ms": 1.0,
+    "by_source": {
+      "hum": {
+        "pitch_mae_cents": 104.39600372314453,
+        "trajectory_correlation": 0.8642910801099433
+      },
+      "recorder": {
+        "pitch_mae_cents": 73.87222290039062,
+        "trajectory_correlation": 0.9149120222074411
+      },
+      "whistle": {
+        "pitch_mae_cents": 52.137489318847656,
+        "trajectory_correlation": 0.9816353942507161
+      },
+      "bird": {
+        "pitch_mae_cents": 76.72126007080078,
+        "trajectory_correlation": 0.9180205051869036
+      }
+    },
     "pass": false,
-    "seed": 151817,
-    "split": "development-unknown-bpm-v3",
+    "seed": 171817,
+    "split": "development-direct-pitch",
     "official_path": "stored_timeline_only"
   },
   "temporal_connected": null,

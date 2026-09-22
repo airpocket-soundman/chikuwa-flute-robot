@@ -341,8 +341,8 @@ class BeatTimelineRecallNet(nn.Module):
 
     OUTPUTS = 4  # pitch, voice logit, onset logit, offset logit
 
-    def __init__(self, config: BeatGridConfig):
-        super().__init__(); self.config = config; h = config.memory_hidden
+    def __init__(self, config: BeatGridConfig, direct_pitch: bool = False):
+        super().__init__(); self.config = config; self.direct_pitch = direct_pitch; h = config.memory_hidden
         source_dim = config.input_dim + 2 * config.beat_hidden + 3
         self.encoder = nn.GRU(source_dim, h, batch_first=True, bidirectional=True)
         self.decoder = nn.Sequential(nn.Linear(2 * h + 2, h), nn.SiLU(),
@@ -361,7 +361,7 @@ class BeatTimelineRecallNet(nn.Module):
 
     def decode(self, stored_profile: torch.Tensor):
         raw = self.decoder(stored_profile)
-        pitch = stored_profile[..., -2:-1] + .10 * raw[..., :1]
+        pitch = raw[..., :1] if self.direct_pitch else stored_profile[..., -2:-1] + .10 * raw[..., :1]
         return torch.cat([pitch, raw[..., 1:]], -1)
 
     def forward(self, audio_features, beat_encoded, beat_outputs, lengths):

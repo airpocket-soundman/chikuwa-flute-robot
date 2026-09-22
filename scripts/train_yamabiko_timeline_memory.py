@@ -24,6 +24,7 @@ SCALE = 600.0
 @torch.inference_mode()
 def evaluate(tempo, timeline, samples, device):
     pitch_e = []; truth_p = []; pred_p = []; voice_t = []; voice_p = []; rest_p = []; onset = []; offset = []
+    source_pitch = {}
     for start in range(0, len(samples), 12):
         ids = list(range(start, min(start + 12, len(samples))))
         features, lengths, _, _, _ = collate(samples, ids, device)
@@ -38,12 +39,20 @@ def evaluate(tempo, timeline, samples, device):
         rest_p.append((pred[..., 1][rests] >= 0).cpu())
         onset.append(tolerant_event_f1(target[..., 2], pred[..., 2], frame_mask))
         offset.append(tolerant_event_f1(target[..., 3], pred[..., 3], frame_mask))
+        for row, sample_id in enumerate(ids):
+            v = voiced[row]; kind = samples[sample_id].source_kind
+            bucket = source_pitch.setdefault(kind, [[], [], []])
+            bucket[0].append((pred[row, :, 0][v] - target[row, :, 0][v]).abs().cpu() * SCALE)
+            bucket[1].append(target[row, :, 0][v].cpu()); bucket[2].append(pred[row, :, 0][v].cpu())
     truth, pred = torch.cat(truth_p).numpy(), torch.cat(pred_p).numpy()
     result = {"pitch_mae_cents": float(torch.cat(pitch_e).mean()),
               "trajectory_correlation": float(np.corrcoef(truth, pred)[0, 1]),
               "voice_f1": f1(torch.cat(voice_t), torch.cat(voice_p)),
               "rest_false_positive_rate": float(torch.cat(rest_p).float().mean()),
               "onset_f1_30ms": float(np.mean(onset)), "offset_f1_30ms": float(np.mean(offset))}
+    result["by_source"] = {kind: {"pitch_mae_cents": float(torch.cat(values[0]).mean()),
+                                  "trajectory_correlation": float(np.corrcoef(torch.cat(values[1]), torch.cat(values[2]))[0, 1])}
+                           for kind, values in source_pitch.items()}
     result["pass"] = (result["pitch_mae_cents"] <= 60 and result["trajectory_correlation"] >= .90 and
                       result["voice_f1"] >= .95 and result["rest_false_positive_rate"] <= .03 and
                       result["onset_f1_30ms"] >= .85)
@@ -57,6 +66,7 @@ def main():
     ap.add_argument("--songs", type=int, default=384); ap.add_argument("--valid-songs", type=int, default=96)
     ap.add_argument("--steps", type=int, default=1200); ap.add_argument("--batch", type=int, default=12)
     ap.add_argument("--lr", type=float, default=5e-4)
+    ap.add_argument("--direct-pitch", action="store_true")
     ap.add_argument("--seed", type=int, default=31817); ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--eval-seed", type=int, default=131817); ap.add_argument("--split", default="development-unknown-bpm")
     args = ap.parse_args(); rng = np.random.default_rng(args.seed); torch.manual_seed(args.seed)
@@ -68,8 +78,10 @@ def main():
     train = dataset(ear, rng, args.songs, args.device) if args.steps else []
     bpms = [71, 91, 109, 133, 157, 179]
     valid = dataset(ear, np.random.default_rng(args.eval_seed), args.valid_songs, args.device, bpms)
-    timeline = BeatTimelineRecallNet(cfg).to(args.device)
-    if ck.get("timeline_memory_trained"): timeline.load_state_dict(ck["timeline_memory"])
+    timeline = BeatTimelineRecallNet(cfg, direct_pitch=args.direct_pitch).to(args.device)
+    desired_kind = "direct-pitch-v1" if args.direct_pitch else "residual-pitch-v1"
+    if ck.get("timeline_memory_trained") and ck.get("timeline_memory_kind", "residual-pitch-v1") == desired_kind:
+        timeline.load_state_dict(ck["timeline_memory"])
     optimizer = torch.optim.AdamW(timeline.parameters(), lr=args.lr, weight_decay=1e-6)
     for step in range(1, args.steps + 1):
         ids = rng.integers(len(train), size=args.batch).tolist(); features, lengths, _, _, _ = collate(train, ids, args.device)
@@ -94,7 +106,8 @@ def main():
         if step == 1 or step % 100 == 0: print(f"step {step:4d} loss {float(loss.detach()):.5f} pitch {float(loss_pitch.detach()):.5f}", flush=True)
     metrics = evaluate(tempo, timeline.eval(), valid, args.device)
     metrics.update({"seed": args.eval_seed, "split": args.split, "official_path": "stored_timeline_only"})
-    ck["timeline_memory"] = timeline.state_dict(); ck["timeline_memory_trained"] = True; ck["timeline_memory_metrics"] = metrics
+    ck["timeline_memory"] = timeline.state_dict(); ck["timeline_memory_trained"] = True
+    ck["timeline_memory_kind"] = desired_kind; ck["timeline_memory_metrics"] = metrics
     torch.save(ck, args.out); pathlib.Path(args.report).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"saved {args.out}")
 

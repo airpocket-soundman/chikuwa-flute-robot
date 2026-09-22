@@ -68,7 +68,7 @@ def main():
     timing_profile = None
     timeline_memory = None
     if ck.get("timeline_memory_trained"):
-        timeline_memory = BeatTimelineRecallNet(cfg).to(args.device)
+        timeline_memory = BeatTimelineRecallNet(cfg, direct_pitch=ck.get("timeline_memory_kind") == "direct-pitch-v1").to(args.device)
         timeline_memory.load_state_dict(ck["timeline_memory"]); timeline_memory.eval()
     if ck.get("timing_profile_trained"):
         profile_kind = ck.get("timing_profile_kind")
