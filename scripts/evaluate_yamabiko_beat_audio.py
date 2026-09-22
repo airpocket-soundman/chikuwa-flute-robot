@@ -77,6 +77,10 @@ def write_pitch_plot(path, reference, output=None, output_voice=None, events=Non
     ax.legend(loc="upper right", facecolor="#101d29", edgecolor="#365164", labelcolor="#e9f5f9")
     fig.tight_layout(); path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, format="svg", facecolor=fig.get_facecolor(), metadata={"Date": None}); plt.close(fig)
+    # Matplotlib writes trailing spaces in path-data lines.  Normalize the
+    # generated artifact so report-only updates keep git diff checks clean.
+    svg = path.read_text(encoding="utf-8")
+    path.write_text("\n".join(line.rstrip() for line in svg.splitlines()) + "\n", encoding="utf-8")
 
 
 @torch.inference_mode()

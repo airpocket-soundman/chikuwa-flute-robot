@@ -39,6 +39,8 @@ def stage_for(stem):
 
 def reason_for(stem, passed):
     if passed: return "採用候補または合格checkpoint"
+    if stem.startswith("yamabiko_timeline_position_v3"):
+        return "同一フレーム分解でPlanner自身の実入力変換誤差が大きくFAIL"
     for key, reason in REASONS.items():
         if key in stem: return reason
     return "固定Gateの少なくとも1指標を満たさず不採用"

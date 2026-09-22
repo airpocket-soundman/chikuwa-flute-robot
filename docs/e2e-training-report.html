@@ -26,27 +26,27 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
         <div class="phase-connector pass"><span>↓</span><b>理解した音程と拍を保存する</b></div>
         <section class="flow-phase"><header><span>2</span><div><b>お手本をTimelineとして覚える</b><small>演奏時刻に沿った音程と休符の地図を保存する</small></div><strong class="pass">工程 PASS</strong></header>
           <ol class="system-flow flow-row nodes-1"><li class="flow-node pass"><a href="#process-2"><span>PASS</span><b>Timeline Memory</b><small>MAE 57.5 cent</small><em>工程の結果を見る ↓</em></a></li></ol></section>
-        <div class="phase-connector fail"><span>↓</span><b>ここで接続FAIL — Timeline → Position: 161.9 cent</b></div>
-        <section class="flow-phase"><header><span>3</span><div><b>身体で演奏する</b><small>目標音程を笛の位置へ変換し、モータで動かす</small></div><strong class="partial">単独PASS / 接続FAIL</strong></header>
-          <ol class="system-flow flow-row nodes-2"><li class="flow-node partial"><a href="#process-3"><span>単独PASS / 接続FAIL</span><b>Position Planner</b><small>単独 11.5 / 接続 161.9 cent</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow pending" aria-hidden="true"><i>→</i><small>現行経路は未統合</small></li><li class="flow-node pending"><a href="#process-3"><span>未学習・未評価</span><b>Motor / Flute</b><small>現行経路未統合・実機未評価</small><em>工程の結果を見る ↓</em></a></li></ol></section>
+        <div class="phase-connector fail"><span>↓</span><b>同一フレーム再評価 — 持ち込み 59.2 ｜ Planner追加 148.7 ｜ 出口 164.6 cent（各MAEは非加算）</b></div>
+        <section class="flow-phase"><header><span>3</span><div><b>身体で演奏する</b><small>目標音程を笛の位置へ変換し、モータで動かす</small></div><strong class="fail">Planner追加誤差 FAIL / 実機未評価</strong></header>
+          <ol class="system-flow flow-row nodes-2"><li class="flow-node fail"><a href="#process-3"><span>FAIL</span><b>Position Planner</b><small>持込 59.2 / 追加 148.7 / 出口 164.6 cent</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow pending" aria-hidden="true"><i>→</i><small>現行経路は未統合</small></li><li class="flow-node pending"><a href="#process-3"><span>未学習・未評価</span><b>Motor / Flute</b><small>現行経路未統合・実機未評価</small><em>工程の結果を見る ↓</em></a></li></ol></section>
         <div class="phase-connector pending"><span>↓</span><b>現行のモータ・笛・自己音経路は未統合</b></div>
         <section class="flow-phase"><header><span>4</span><div><b>自分の音を聴いて直す</b><small>目標との差を測り、次の操作へ補正を返す</small></div><strong class="fail">Comparator FAIL / Feedback未学習</strong></header>
           <ol class="system-flow flow-row nodes-2"><li class="flow-node fail"><a href="#process-4"><span>FAIL</span><b>Error Comparator</b><small>error MAE 70.5 cent</small><em>工程の結果を見る ↓</em></a></li><li class="flow-arrow pending" aria-hidden="true"><i>→</i><small></small></li><li class="flow-node pending"><a href="#process-4"><span>未学習・未評価</span><b>Feedback Residual</b><small>未学習・反復適応も未統合</small><em>工程の結果を見る ↓</em></a></li></ol></section>
       </div>
       <div class="feedback-return"><b>↩ Feedback loop</b><span>工程4の補正を工程3のPosition / Controllerへ戻す — 未学習</span></div>
-      <p class="flow-caveat">Neural Earは合成・音響乱数化ホールドアウトでのPASSで、実録音は未評価。Position PlannerのPASSは正解音程入力での単独Gateであり、Timeline接続はFAIL。</p></section>
+      <p class="flow-caveat">Neural Earは合成・音響乱数化ホールドアウトでのPASSで、実録音は未評価。Position Plannerは正解入力ではPASSだが、同一評価集合で切り分けると実入力に対するPlanner追加誤差がFAIL。したがってモデル単体の接続耐性もPASSではない。</p></section>
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained=false / pass=false（feedback residual training is the next gated stage）。</div>
 <section class="pipeline-lab" aria-labelledby="pipeline-tabs-title"><h2 id="pipeline-tabs-title">パイプライン別の結果と試行記録</h2>
     <p>採用予定と代替案を混在させず、同じパイプラインのフロー・結果・WAV・グラフ・失敗試行を一つのタブへまとめた。</p>
     <div class="tab-list" role="tablist" aria-label="パイプライン別結果">
-      <button type="button" role="tab" id="tab-current" aria-controls="pipeline-current" aria-selected="true">採用予定 Timeline <small>18試行 / 全体FAIL</small></button>
+      <button type="button" role="tab" id="tab-current" aria-controls="pipeline-current" aria-selected="true">採用予定 Timeline <small>19試行 / 全体FAIL</small></button>
       <button type="button" role="tab" id="tab-clock" aria-controls="pipeline-clock" aria-selected="false" tabindex="-1">代替A Beat-cell＋Clock <small>26試行 / 接続FAIL</small></button>
       <button type="button" role="tab" id="tab-timing" aria-controls="pipeline-timing" aria-selected="false" tabindex="-1">代替B Duration／Timing <small>10試行 / 全体FAIL</small></button>
       <button type="button" role="tab" id="tab-legacy" aria-controls="pipeline-legacy" aria-selected="false" tabindex="-1">旧 Staged制御 <small>3系統 / 全体FAIL</small></button>
       <button type="button" role="tab" id="tab-raw-e2e" aria-controls="pipeline-raw-e2e" aria-selected="false" tabindex="-1">単一 Raw-audio E2E <small>7記録 / 演奏FAIL</small></button>
     </div>
     <section class="tab-panel" role="tabpanel" id="pipeline-current" aria-labelledby="tab-current">
-      <header class="pipeline-summary adopted"><div><span>採用予定</span><h2>Beat-conditioned Timeline Pipeline</h2></div><strong>単独3 Gate PASS / 接続FAIL</strong></header>
+      <header class="pipeline-summary adopted"><div><span>採用予定</span><h2>Beat-conditioned Timeline Pipeline</h2></div><strong>Position実入力変換 FAIL / 全体FAIL</strong></header>
       <div class="pipeline-explainer"><h3>この方式は何をしている？</h3>
         <p>お手本を聴いたら、曲を「時間に沿った音程と休符の地図」として丸ごと覚える方式です。演奏中はその地図を先頭から読み、必要な笛の位置へ変換します。</p>
         <dl><div><dt>覚え方</dt><dd>100 Hzの細かなTimeline</dd></div><div><dt>時間の扱い</dt><dd>BPMと拍を手掛かりに地図を保存</dd></div><div><dt>狙い</dt><dd>音符の長さや休符をずらさず再現</dd></div><div><dt>現在の課題</dt><dd>記憶から位置計画へ渡すと誤差が増える</dd></div></dl>
@@ -73,15 +73,17 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
             <div><dt>voice F1</dt><dd>1.000</dd></div>
             <div><dt>rest false positive</dt><dd>0.0000</dd></div>
             <div><dt>onset F1 30 ms</dt><dd>0.871</dd></div></dl>
-            <p class="note">現行本線。remember後はraw音声とEar入力を破棄し、保存NN tensorだけでdecode。音源別: bird 31.6c / hum 92.8c / recorder 74.5c / whistle 35.1c</p></section></div></section><section class="process-section" id="process-3"><header><span>3</span><div><h2>工程 3: 身体で演奏する</h2><p>音程目標を位置へ変換し、モータと笛で音にする。</p></div></header><div class="grid"><section class="card"><div class="stage"><b>P</b><span class="partial">単独 PASS / 接続 FAIL</span></div>
+            <p class="note">現行本線。remember後はraw音声とEar入力を破棄し、保存NN tensorだけでdecode。音源別: bird 31.6c / hum 92.8c / recorder 74.5c / whistle 35.1c</p></section></div></section><section class="process-section" id="process-3"><header><span>3</span><div><h2>工程 3: 身体で演奏する</h2><p>音程目標を位置へ変換し、モータと笛で音にする。</p></div></header><div class="grid"><section class="card"><div class="stage"><b>P</b><span class="fail">Planner追加誤差 FAIL</span></div>
             <h2>Position Planner NN</h2><p class="flow">100 Hz音程・発音 → 正規化プランジャ位置</p>
             <div class="listen"><div class="audio"><span>Timeline入力</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_timeline_memory_recall.wav"></audio></div><div class="audio"><span>位置→定常笛音</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_position_planner.wav"></audio></div></div>
             <figure class="pitch-plot"><img loading="lazy" src="e2e-beat-results/plots/bpm_137_position_pitch.svg" alt="横軸: 時間 [s] / 縦軸: 音程 [cent] — Timeline入力と位置計画後"><figcaption>横軸: 時間 [s] / 縦軸: 音程 [cent] — Timeline入力と位置計画後</figcaption></figure>
-            <dl><div><dt>oracle position MAE %</dt><dd>0.600</dd></div>
-            <div><dt>oracle steady pitch MAE</dt><dd>11.5</dd></div>
-            <div><dt>connected position MAE %</dt><dd>7.859</dd></div>
-            <div><dt>connected steady pitch MAE</dt><dd>161.9</dd></div></dl>
-            <p class="note">単独GateはOracle音程で判定してPASS。Timeline接続値は前段誤差を含みFAIL。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section><section class="card pending"><div class="stage"><b>4</b><span class="pending">未評価</span></div>
+            <dl><div><dt>① 持ち込み誤差</dt><dd>59.2 cent</dd></div>
+            <div><dt>② Planner追加誤差</dt><dd>148.7 cent — FAIL</dd></div>
+            <div><dt>③ 出口の総誤差</dt><dd>164.6 cent — FAIL</dd></div>
+            <div><dt>参考: 正解入力時</dt><dd>11.5 cent — PASS</dd></div>
+            <div><dt>Planner追加位置MAE</dt><dd>6.995%</dd></div>
+            <div><dt>分解式の最大残差</dt><dd>0.000122 cent</dd></div></dl>
+            <p class="note">同一曲・同一フレームで、持ち込み＋Planner追加＝出口総誤差となる符号付き誤差を計算後、各成分のMAEを表示。MAE同士は符号を失うため足し算にはならない。afterは定常位置の診断再合成で、モータ動特性は次Gate。</p></section><section class="card pending"><div class="stage"><b>4</b><span class="pending">未評価</span></div>
       <h2>Motor / Controller / Flute</h2><p class="flow">目標位置 → モータ動特性 → バルブ → 笛</p>
       <p>現行Timeline→Position経路とは未統合。現在のafter WAVは定常位置からの診断再合成で、モータ動特性や実機を通していない。</p></section></div></section><section class="process-section" id="process-4"><header><span>4</span><div><h2>工程 4: 聴いて差を直す</h2><p>自己音と目標を比較し、次の操作を補正する。</p></div></header><div class="grid"><section class="card">
           <div class="stage"><b>4</b><span class="fail">FAIL</span></div>
@@ -92,7 +94,7 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
           <dl><div><dt>error mae</dt><dd>70.526</dd></div><div><dt>sign accuracy</dt><dd>0.991</dd></div></dl><p class="note">beforeは意図的に外した自己音、afterは推定誤差を足し戻した診断用再合成。物理演奏ではない。</p>
         </section><section class="card pending"><div class="stage"><b>F</b><span class="pending">未学習</span></div>
       <h2>Feedback Residual</h2><p class="flow">推定誤差 + 状態 → 操作量補正</p>
-      <p>feedback residual training is the next gated stage。まだ学習・評価していない。</p></section></div></section><h2>このパイプラインの試行履歴</h2><p class="history-count">18試行 — PASS 7 / FAIL 11</p><details open><summary>Tempo / Beat — PASS 2 / FAIL 4</summary><div class="attempt-grid"><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
+      <p>feedback residual training is the next gated stage。まだ学習・評価していない。</p></section></div></section><h2>このパイプラインの試行履歴</h2><p class="history-count">19試行 — PASS 7 / FAIL 12</p><details open><summary>Tempo / Beat — PASS 2 / FAIL 4</summary><div class="attempt-grid"><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
         <h3>yamabiko_tempo_beat_timbre_v2</h3><p>採用候補または合格checkpoint</p><p class="metrics">tempo relative error median 0.011 / tempo relative error p90 0.068 / tempo head relative error median 0.074 / phase circular mae cycle 0.057 / phase confidence mean 0.998 / half double confusion rate 0.000</p>
         <p class="note">split: frozen-heldout-bpm / seed: 14449</p><div class="listen"><div class="audio"><span>before</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>after</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/audio/bpm_137_tempo_after_clicks.wav"></audio></div></div><figure class="pitch-plot"><img loading="lazy" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/plots/bpm_137_tempo_pitch.svg" alt="横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）"><figcaption>横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）</figcaption></figure></article><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
         <h3>yamabiko_tempo_beat_v4_phase</h3><p>採用候補または合格checkpoint</p><p class="metrics">tempo relative error median 0.008 / tempo relative error p90 0.035 / tempo head relative error median 0.045 / phase circular mae cycle 0.040 / phase confidence mean 0.999 / half double confusion rate 0.000</p>
@@ -124,11 +126,13 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
         <h3>yamabiko_timeline_memory_v4_final</h3><p>固定Gateの少なくとも1指標を満たさず不採用</p><p class="metrics">pitch mae cents 67.454 / trajectory correlation 0.907 / voice f1 1.000 / rest false positive rate 0.000 / onset f1 30ms 0.890 / offset f1 30ms 1.000</p>
         <p class="note">split: frozen-final-unknown-bpm-v4 / seed: 1161817</p></article><article class="attempt"><div class="stage"><b>試</b><span class="fail">FAIL</span></div>
         <h3>yamabiko_timeline_memory_v4_stratified</h3><p>固定Gateの少なくとも1指標を満たさず不採用</p><p class="metrics">pitch mae cents 67.454 / trajectory correlation 0.907 / voice f1 1.000 / rest false positive rate 0.000 / onset f1 30ms 0.890 / offset f1 30ms 1.000</p>
-        <p class="note">split: diagnostic-final-stratified / seed: 1161817</p></article></div></details><details open><summary>Position Planner — PASS 1 / FAIL 1</summary><div class="attempt-grid"><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
+        <p class="note">split: diagnostic-final-stratified / seed: 1161817</p></article></div></details><details open><summary>Position Planner — PASS 1 / FAIL 2</summary><div class="attempt-grid"><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
         <h3>yamabiko_timeline_position_v2</h3><p>採用候補または合格checkpoint</p><p class="metrics">position mae percent stroke 0.600 / position p95 percent stroke 1.534 / steady pitch mae cents 11.522 / connected position mae percent stroke 7.859 / connected steady pitch mae cents 161.862</p>
         <p class="note">split: frozen-unknown-bpm / seed: 123611</p><div class="listen"><div class="audio"><span>before</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_timeline_position_v2/audio/bpm_137_timeline_memory_recall.wav"></audio></div><div class="audio"><span>after</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_timeline_position_v2/audio/bpm_137_position_planner.wav"></audio></div></div><figure class="pitch-plot"><img loading="lazy" src="e2e-beat-attempts/yamabiko_timeline_position_v2/plots/bpm_137_position_pitch.svg" alt="横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: before / 橙: after"><figcaption>横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: before / 橙: after</figcaption></figure></article><article class="attempt"><div class="stage"><b>試</b><span class="fail">FAIL</span></div>
         <h3>yamabiko_timeline_position</h3><p>単独とpredicted-upstream結合を分離評価</p><p class="metrics">position mae percent stroke 3.496 / position p95 percent stroke 13.903 / steady pitch mae cents 64.969</p>
-        <p class="note">split: frozen-unknown-bpm / seed: 123611</p></article></div></details>
+        <p class="note">split: frozen-unknown-bpm / seed: 123611</p></article><article class="attempt"><div class="stage"><b>試</b><span class="fail">FAIL</span></div>
+        <h3>yamabiko_timeline_position_v3</h3><p>同一フレーム分解でPlanner自身の実入力変換誤差が大きくFAIL</p><p class="metrics">position mae percent stroke 0.590 / position p95 percent stroke 1.399 / steady pitch mae cents 11.531 / connected position mae percent stroke 7.947 / connected steady pitch mae cents 164.611 / inherited pitch mae cents 59.240</p>
+        <p class="note">split: frozen-unknown-bpm / seed: 123611</p><div class="listen"><div class="audio"><span>before</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_timeline_position_v3/audio/bpm_73_timeline_memory_recall.wav"></audio></div><div class="audio"><span>after</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_timeline_position_v3/audio/bpm_73_position_planner.wav"></audio></div></div><figure class="pitch-plot"><img loading="lazy" src="e2e-beat-attempts/yamabiko_timeline_position_v3/plots/bpm_73_position_pitch.svg" alt="横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: before / 橙: after"><figcaption>横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: before / 橙: after</figcaption></figure></article></div></details>
     </section>
     <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">
       <header class="pipeline-summary alternative"><div><span>代替案 A</span><h2>Beat-cell + Neural Clock / Aligner</h2></div><strong>単独PASS / 接続FAIL</strong></header>

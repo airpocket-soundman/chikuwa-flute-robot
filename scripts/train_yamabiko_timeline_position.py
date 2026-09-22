@@ -33,6 +33,8 @@ def labels(items, steps, device):
 @torch.inference_mode()
 def evaluate(tempo, timeline, planner, samples, device):
     errors = []; pitch_errors = []; connected_errors = []; connected_pitch_errors = []
+    inherited_pitch_errors = []; model_added_pitch_errors = []; model_added_position_errors = []
+    inherited_signed = []; model_added_signed = []; total_signed = []
     rig = RigParams.nominal(1)
     for start in range(0, len(samples), 12):
         ids = list(range(start, min(start + 12, len(samples))))
@@ -45,14 +47,44 @@ def evaluate(tempo, timeline, planner, samples, device):
         cents = rig.cents_at((position[voice].cpu().numpy() * rig.stroke[0]))
         connected_cents = rig.cents_at((connected[voice].cpu().numpy() * rig.stroke[0]))
         truth = target[..., 0][voice].cpu().numpy() * SCALE + CENTER
+        requested = decoded[..., 0][voice].cpu().numpy() * SCALE + CENTER
+        ideal_connected_position = np.clip(rig.x_for_cents(requested) / rig.stroke[0], 0, 1)
+        ideal_connected_cents = rig.cents_at(ideal_connected_position * rig.stroke[0])
+        inherited = ideal_connected_cents - truth
+        model_added = connected_cents - ideal_connected_cents
+        total = connected_cents - truth
         pitch_errors.append(torch.from_numpy(np.abs(cents - truth).astype(np.float32)))
         connected_pitch_errors.append(torch.from_numpy(np.abs(connected_cents - truth).astype(np.float32)))
+        inherited_pitch_errors.append(torch.from_numpy(np.abs(inherited).astype(np.float32)))
+        model_added_pitch_errors.append(torch.from_numpy(np.abs(model_added).astype(np.float32)))
+        model_added_position_errors.append(torch.from_numpy(
+            np.abs(connected[voice].cpu().numpy() - ideal_connected_position).astype(np.float32)))
+        inherited_signed.append(torch.from_numpy(inherited.astype(np.float32)))
+        model_added_signed.append(torch.from_numpy(model_added.astype(np.float32)))
+        total_signed.append(torch.from_numpy(total.astype(np.float32)))
+    inherited_signed_all = torch.cat(inherited_signed)
+    model_added_signed_all = torch.cat(model_added_signed)
+    total_signed_all = torch.cat(total_signed)
     result = {"position_mae_percent_stroke": float(torch.cat(errors).mean() * 100),
               "position_p95_percent_stroke": float(torch.quantile(torch.cat(errors), .95) * 100),
               "steady_pitch_mae_cents": float(torch.cat(pitch_errors).mean()),
               "connected_position_mae_percent_stroke": float(torch.cat(connected_errors).mean() * 100),
-              "connected_steady_pitch_mae_cents": float(torch.cat(connected_pitch_errors).mean())}
-    result["pass"] = result["position_mae_percent_stroke"] <= 1.0 and result["steady_pitch_mae_cents"] <= 30
+              "connected_steady_pitch_mae_cents": float(torch.cat(connected_pitch_errors).mean()),
+              "inherited_pitch_mae_cents": float(torch.cat(inherited_pitch_errors).mean()),
+              "model_added_position_mae_percent_stroke": float(torch.cat(model_added_position_errors).mean() * 100),
+              "model_added_pitch_mae_cents": float(torch.cat(model_added_pitch_errors).mean()),
+              "output_total_pitch_mae_cents": float(total_signed_all.abs().mean()),
+              "inherited_pitch_bias_cents": float(inherited_signed_all.mean()),
+              "model_added_pitch_bias_cents": float(model_added_signed_all.mean()),
+              "output_total_pitch_bias_cents": float(total_signed_all.mean()),
+              "attribution_residual_max_cents": float(
+                  (inherited_signed_all + model_added_signed_all - total_signed_all).abs().max())}
+    result["oracle_input_pass"] = (result["position_mae_percent_stroke"] <= 1.0 and
+                                   result["steady_pitch_mae_cents"] <= 30)
+    result["real_input_transform_pass"] = (result["model_added_position_mae_percent_stroke"] <= 1.0 and
+                                            result["model_added_pitch_mae_cents"] <= 30)
+    result["connected_output_pass"] = result["output_total_pitch_mae_cents"] <= 30
+    result["pass"] = result["oracle_input_pass"] and result["real_input_transform_pass"]
     return result
 
 
