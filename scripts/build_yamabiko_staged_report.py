@@ -115,12 +115,27 @@ def main():
             composite_prefix = composite_path.parent.as_posix().rstrip("/") + "/"
     history_path = docs_root / "e2e-beat-results" / "attempt-history.json"
     history = json.loads(history_path.read_text(encoding="utf-8"))["attempts"] if history_path.exists() else []
+    if hybrid_lab.get("planner_summary") and not any(
+            row.get("id") == "yamabiko_timeline_position_v5" for row in history):
+        planner_summary = hybrid_lab["planner_summary"]
+        history.append({"id": "yamabiko_timeline_position_v5", "stage": "Position Planner",
+                        "pass": bool(planner_summary.get("pass")),
+                        "split": planner_summary.get("split", "ten-public-hybrid-samples-v1"),
+                        "seed": 923611,
+                        "reason": "線形Flute simulatorと教師契約を統一して再較正",
+                        "metrics": planner_summary, "audio_manifest": None})
     beat_path = pathlib.Path(args.manifest).parent.parent / "e2e-beat-results" / "manifest.json"
     beat = {}
     beat_cards = {"perception": [], "memory": [], "planning": [], "feedback": []}
     legacy_cards = []
     if beat_path.exists():
-        beat = json.loads(beat_path.read_text(encoding="utf-8")); bm = beat["tempo_beat"]
+        beat = json.loads(beat_path.read_text(encoding="utf-8"))
+        # The hybrid benchmark uses the same linear flute as the connected
+        # physical simulator, so its Planner attribution supersedes the older
+        # nonlinear-tube evaluation when present.
+        if hybrid_lab.get("planner_summary"):
+            beat["timeline_position"] = hybrid_lab["planner_summary"]
+        bm = beat["tempo_beat"]
         bc = next((x for x in beat["cases"] if x["case"] == "bpm_137"), beat["cases"][0])
         status = "PASS" if bm.get("pass") else "FAIL"
         beat_cards["perception"].append(f'''<section class="card"><div class="stage"><b>B</b><span class="{status.lower()}">{status}</span></div>
@@ -544,7 +559,7 @@ def main():
         <label><span>4 制御</span><select data-hybrid-stage="control"><option value="nn">NN Controller＋Feedback</option><option value="det">決定論 PD＋PID</option></select><small>位置・自己音 → PWM・演奏</small></label>
       </div>
       <button type="button" class="hybrid-run">この構成で出力を作る</button>
-      <div class="hybrid-live" aria-live="polite"><b data-hybrid-route></b><span>最終音程MAE <strong data-hybrid-mae>—</strong> cent</span><span>発音率 <strong data-hybrid-voice>—</strong></span></div>
+      <div class="hybrid-live" aria-live="polite"><b data-hybrid-route></b><span>Planner追加MAE <strong data-hybrid-planner-mae>—</strong> cent</span><span>最終音程MAE <strong data-hybrid-mae>—</strong> cent</span><span>発音率 <strong data-hybrid-voice>—</strong></span></div>
       <canvas class="hybrid-chart" role="img" aria-label="選択したパイプラインの時間対音程グラフ"></canvas>
       <div class="hybrid-outputs">
         <section><b>1 聴覚の出力</b><small>音程・発音を次の記憶へ</small><audio controls preload="none" data-hybrid-audio="ear"></audio></section>
@@ -787,7 +802,7 @@ window.addEventListener('hashchange', activateHash); activateHash();
     const ctx = canvas.getContext('2d'); ctx.scale(dpr,dpr);
     const styles = getComputedStyle(document.documentElement), ink = styles.getPropertyValue('--ink').trim();
     const muted = styles.getPropertyValue('--muted').trim(), line = styles.getPropertyValue('--line').trim();
-    const cyan = styles.getPropertyValue('--cyan').trim(), orange = '#ffc96b';
+    const cyan = styles.getPropertyValue('--cyan').trim(), green = '#70f0ac', orange = '#ffc96b';
     ctx.clearRect(0,0,width,height); const m={{l:58,r:18,t:34,b:42}}, lo=600, hi=2000;
     const x = i => m.l + i*(width-m.l-m.r)/Math.max(1,entry.memory.pitch_cents.length-1);
     const y = value => m.t + (hi-value)*(height-m.t-m.b)/(hi-lo);
@@ -795,8 +810,11 @@ window.addEventListener('hashchange', activateHash); activateHash();
     [600,900,1200,1500,1800].forEach(v=>{{ctx.beginPath();ctx.moveTo(m.l,y(v));ctx.lineTo(width-m.r,y(v));ctx.stroke();ctx.fillText(String(v),8,y(v)+4);}});
     ctx.fillText('音程 [cent]',8,18); ctx.fillText(`時間 [s]  0 — ${{(entry.memory.pitch_cents.length/100).toFixed(1)}}`,m.l,height-12);
     const plot = (track,color,dash=[]) => {{ctx.strokeStyle=color;ctx.lineWidth=2;ctx.setLineDash(dash);ctx.beginPath();let open=false;track.pitch_cents.forEach((v,i)=>{{if(!track.voice[i]){{open=false;return;}}const px=x(i),py=y(v);if(!open){{ctx.moveTo(px,py);open=true;}}else ctx.lineTo(px,py);}});ctx.stroke();ctx.setLineDash([]);}};
-    plot(entry.memory,cyan); plot(entry.performance,orange,[6,4]);
-    ctx.fillStyle=cyan;ctx.fillText('— 記憶Timeline（制御目標）',m.l,19);ctx.fillStyle=orange;ctx.fillText('--- 最終演奏',m.l+205,19);
+    const plannerTrack = {{pitch_cents:entry.planner.pitch_cents || entry.planner.nominal_cents,
+                          voice:entry.planner.voice}};
+    plot(entry.memory,cyan); plot(plannerTrack,green); plot(entry.performance,orange,[6,4]);
+    ctx.fillStyle=cyan;ctx.fillText('— 記憶Timeline',m.l,19);ctx.fillStyle=green;ctx.fillText('— 計画出力',m.l+125,19);
+    ctx.fillStyle=orange;ctx.fillText('--- 最終演奏',m.l+220,19);
     ctx.strokeStyle=ink;ctx.strokeRect(m.l,m.t,width-m.l-m.r,height-m.t-m.b);
   }}
 
@@ -819,6 +837,11 @@ window.addEventListener('hashchange', activateHash); activateHash();
     root.querySelector('[data-hybrid-description]').textContent = sample.description || '';
     if (referenceAudio.getAttribute('src') !== sample.reference_wav) referenceAudio.src = sample.reference_wav;
     root.querySelector('[data-hybrid-route]').textContent = stages.map(name => label[choice[name]]).join(' → ');
+    const plannedPitch = entry.planner.pitch_cents || entry.planner.nominal_cents;
+    const plannerErrors = plannedPitch.map((value,index) => entry.memory.voice[index] && entry.planner.voice[index]
+      ? Math.abs(value-entry.memory.pitch_cents[index]) : null).filter(value => value !== null);
+    root.querySelector('[data-hybrid-planner-mae]').textContent = plannerErrors.length
+      ? (plannerErrors.reduce((sum,value) => sum+value,0)/plannerErrors.length).toFixed(1) : '—';
     root.querySelector('[data-hybrid-mae]').textContent = entry.metrics.final_pitch_mae_cents == null ? '—' : entry.metrics.final_pitch_mae_cents.toFixed(1);
     root.querySelector('[data-hybrid-voice]').textContent = (100*entry.metrics.voiced_fraction).toFixed(1) + '%';
     updateAudio('ear', entry.ear); updateAudio('memory', entry.memory);

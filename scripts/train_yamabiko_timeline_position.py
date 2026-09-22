@@ -13,7 +13,6 @@ from torch.nn import functional as F
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from flute_rl.yamabiko import RigParams  # noqa: E402
 from flute_rl.yamabiko.beat_grid import BeatGridConfig, BeatTimelineRecallNet, TempoBeatNet  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from flute_rl.yamabiko.staged_nn import StagedConfig, TargetPositionPlanner  # noqa: E402
@@ -25,9 +24,9 @@ CENTER, SCALE = 1300.0, 600.0
 
 def labels(items, steps, device):
     target, mask, _, _ = frame_targets(items, steps, device)
-    cents = target[..., 0].cpu().numpy() * SCALE + CENTER
-    rig = RigParams.nominal(1); x = rig.x_for_cents(cents) / rig.stroke[0]
-    return target, mask, torch.from_numpy(np.clip(x, 0, 1).astype(np.float32)).to(device)
+    # The adopted physical simulator uses a linear 700..1900 cent flute.
+    # Normalized pitch -1..+1 therefore maps exactly to stroke 0..1.
+    return target, mask, ((target[..., 0] + 1.0) * 0.5).clamp(0, 1)
 
 
 def oracle_planner_input(target):
@@ -38,10 +37,7 @@ def oracle_planner_input(target):
 
 def ideal_position_for_pitch(pitch, device):
     """Supervise the Planner's transform without asking it to fix upstream pitch."""
-    rig = RigParams.nominal(1)
-    cents = pitch.detach().cpu().numpy() * SCALE + CENTER
-    position = np.clip(rig.x_for_cents(cents) / rig.stroke[0], 0, 1)
-    return torch.from_numpy(position.astype(np.float32)).to(device)
+    return ((pitch.detach() + 1.0) * 0.5).clamp(0, 1).to(device)
 
 
 @torch.inference_mode()
@@ -49,7 +45,6 @@ def evaluate(tempo, timeline, planner, samples, device):
     errors = []; pitch_errors = []; connected_errors = []; connected_pitch_errors = []
     inherited_pitch_errors = []; model_added_pitch_errors = []; model_added_position_errors = []
     inherited_signed = []; model_added_signed = []; total_signed = []
-    rig = RigParams.nominal(1)
     for start in range(0, len(samples), 12):
         ids = list(range(start, min(start + 12, len(samples))))
         features, lengths, _, _, _ = collate(samples, ids, device)
@@ -58,12 +53,12 @@ def evaluate(tempo, timeline, planner, samples, device):
         voice = mask & target[..., 1].bool(); position = planner(oracle_planner_input(target))[..., 0]
         connected = planner(decoded[..., :2])[..., 0]
         errors.append((position[voice] - label[voice]).abs().cpu()); connected_errors.append((connected[voice] - label[voice]).abs().cpu())
-        cents = rig.cents_at((position[voice].cpu().numpy() * rig.stroke[0]))
-        connected_cents = rig.cents_at((connected[voice].cpu().numpy() * rig.stroke[0]))
+        cents = 700.0 + 1200.0 * position[voice].cpu().numpy()
+        connected_cents = 700.0 + 1200.0 * connected[voice].cpu().numpy()
         truth = target[..., 0][voice].cpu().numpy() * SCALE + CENTER
         requested = decoded[..., 0][voice].cpu().numpy() * SCALE + CENTER
-        ideal_connected_position = np.clip(rig.x_for_cents(requested) / rig.stroke[0], 0, 1)
-        ideal_connected_cents = rig.cents_at(ideal_connected_position * rig.stroke[0])
+        ideal_connected_position = np.clip((requested - 700.0) / 1200.0, 0, 1)
+        ideal_connected_cents = 700.0 + 1200.0 * ideal_connected_position
         inherited = ideal_connected_cents - truth
         model_added = connected_cents - ideal_connected_cents
         total = connected_cents - truth

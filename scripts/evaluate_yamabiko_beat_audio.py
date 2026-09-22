@@ -22,7 +22,6 @@ from flute_rl.yamabiko.beat_grid import DirectReferenceTimingProfileNet, Indexed
 from flute_rl.yamabiko.beat_grid import BeatTimelineRecallNet  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from flute_rl.yamabiko.e2e_io import HOP, SAMPLE_RATE, frame_audio_numpy  # noqa: E402
-from flute_rl.yamabiko import RigParams  # noqa: E402
 from flute_rl.yamabiko.staged_nn import StagedConfig, TargetPositionPlanner  # noqa: E402
 
 
@@ -172,7 +171,9 @@ def main():
             item["timeline_plot"] = str(timeline_plot.relative_to(out)).replace("\\", "/")
             if position_planner is not None:
                 position = position_planner(timeline_out[None, ..., :2])[0, :, 0].cpu().numpy()
-                rig = RigParams.nominal(1); planned_pitch = rig.cents_at(position * rig.stroke[0])
+                # Match the adopted deterministic physical simulator's linear
+                # flute contract instead of the retired nonlinear tube model.
+                planned_pitch = 700.0 + 1200.0 * position
                 planned_wave = synth_self(planned_pitch, timeline_voice, np.random.default_rng(19000 + index), sr=SAMPLE_RATE)
                 planned_after = audio / f"{name}_position_planner.wav"; write_wav(planned_after, planned_wave, SAMPLE_RATE)
                 item["position_before"] = item["timeline_after"]

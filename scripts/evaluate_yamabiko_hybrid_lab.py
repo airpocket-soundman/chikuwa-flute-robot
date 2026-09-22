@@ -160,17 +160,72 @@ def evaluate_sample(model, deterministic_control, target_np, sample_index, devic
     }
 
 
+def summarize_planner(samples):
+    """Attribute the selected NN Planner's error on the ten public samples."""
+    inherited_all, added_all, total_all, position_added_all = [], [], [], []
+    for sample in samples:
+        expected = np.repeat(np.asarray(sample["reference"]["pitch_cents"], float), 2)
+        expected_voice = np.repeat(np.asarray(sample["reference"]["voice"], bool), 2)
+        memory = sample["outputs"]["memory"]["nn-nn"]
+        planner = sample["outputs"]["planner"]["nn-nn-nn"]
+        memory_pitch = np.asarray(memory["pitch_cents"], float)
+        planner_pitch = np.asarray(planner["pitch_cents"], float)
+        valid = expected_voice & np.asarray(memory["voice"], bool)
+        inherited = memory_pitch[valid] - expected[valid]
+        added = planner_pitch[valid] - memory_pitch[valid]
+        inherited_all.append(inherited); added_all.append(added); total_all.append(planner_pitch[valid] - expected[valid])
+        ideal_position = np.clip((memory_pitch[valid] - 700.0) / 1200.0, 0, 1)
+        # Derive from the emitted-cent track rather than the compact display
+        # position (rounded for JSON size), so attribution keeps sub-cent precision.
+        planned_position = np.clip((planner_pitch[valid] - 700.0) / 1200.0, 0, 1)
+        position_added_all.append(planned_position - ideal_position)
+    inherited = np.concatenate(inherited_all); added = np.concatenate(added_all)
+    total = np.concatenate(total_all); position_added = np.concatenate(position_added_all)
+    result = {
+        "position_mae_percent_stroke": float(np.mean(np.abs(position_added)) * 100),
+        "position_p95_percent_stroke": float(np.quantile(np.abs(position_added), .95) * 100),
+        "steady_pitch_mae_cents": float(np.mean(np.abs(added))),
+        "inherited_pitch_mae_cents": float(np.mean(np.abs(inherited))),
+        "model_added_position_mae_percent_stroke": float(np.mean(np.abs(position_added)) * 100),
+        "model_added_pitch_mae_cents": float(np.mean(np.abs(added))),
+        "model_added_pitch_p95_cents": float(np.quantile(np.abs(added), .95)),
+        "output_total_pitch_mae_cents": float(np.mean(np.abs(total))),
+        "output_total_pitch_p90_cents": float(np.quantile(np.abs(total), .90)),
+        "inherited_pitch_bias_cents": float(np.mean(inherited)),
+        "model_added_pitch_bias_cents": float(np.mean(added)),
+        "output_total_pitch_bias_cents": float(np.mean(total)),
+        "net_absolute_change_cents": float(np.mean(np.abs(total)) - np.mean(np.abs(inherited))),
+        "attribution_residual_max_cents": float(np.max(np.abs(inherited + added - total))),
+        "oracle_input_pass": bool(np.mean(np.abs(added)) <= 5 and np.quantile(np.abs(added), .95) <= 10),
+        "real_input_transform_pass": bool(np.mean(np.abs(added)) <= 5 and np.quantile(np.abs(added), .95) <= 10),
+        "connected_output_pass": bool(np.mean(np.abs(total)) <= 80 and
+                                      np.mean(np.abs(total)) <= np.mean(np.abs(inherited)) + 20),
+        "split": "ten-public-hybrid-samples-v1",
+        "simulator_contract": "linear flute 700..1900 cent",
+    }
+    result["pass"] = result["oracle_input_pass"] and result["real_input_transform_pass"]
+    return result
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--checkpoint", default="runs/yamabiko_connected_composite_v1.pt")
     ap.add_argument("--out", default="docs/e2e-composite-results/hybrid-lab.json")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--summarize-existing", action="store_true",
+                    help="Recompute aggregate Planner attribution without rerunning models")
     args = ap.parse_args()
     device = args.device
+    out = pathlib.Path(args.out)
+    if args.summarize_existing:
+        document = json.loads(out.read_text(encoding="utf-8"))
+        document["planner_summary"] = summarize_planner(document["samples"])
+        out.write_text(json.dumps(document, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        print(json.dumps(document["planner_summary"], indent=2))
+        return
     model = YamabikoComposite.from_checkpoint(
         torch.load(args.checkpoint, map_location=device, weights_only=False), device).eval()
     deterministic_control = DeterministicYamabikoPipeline(model.plant.config).to(device)
-    out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     audio_dir = out.parent / "hybrid-samples"
     audio_dir.mkdir(parents=True, exist_ok=True)
@@ -191,7 +246,7 @@ def main():
         "note": ("10サンプル×全16組合せを実モデルと決定論モジュールで事前評価。"
                  "NN MemoryへDet Earを渡す場合は、共通pitch/voice契約上で学習済みMemory residualを"
                  "加えるrepresentation adapterを使用。NN Controlは遅い適応状態を保持した3回目。"),
-        "samples": samples,
+        "planner_summary": summarize_planner(samples), "samples": samples,
     }
     out.write_text(json.dumps(document, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"wrote {out} ({len(samples)} samples x 16 routes, {out.stat().st_size} bytes)")
