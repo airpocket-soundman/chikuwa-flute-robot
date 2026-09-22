@@ -70,6 +70,15 @@ def main():
                 <div><dt>rest false positive</dt><dd>{n(cm['rest_false_positive_rate'], 3)}</dd></div>
                 <div><dt>onset F1 30 ms</dt><dd>{n(cm['onset_f1_30ms'], 3)}</dd></div></dl>
                 <p class="note">正解BPM・正解セル・正解時刻を使わない frozen predicted-upstream 最終試験。単独PASSでも接続誤差が累積するため、現在はFAIL。</p></section>'''
+        if beat.get("timing_profile_trained") and beat.get("timing_profile"):
+            tm = beat["timing_profile"]; tst = "PASS" if tm.get("pass") else "FAIL"
+            beat_section += f'''<section class="card"><div class="stage"><b>T</b><span>{tst}</span></div>
+            <h2>Stored Timing Profile NN</h2><p class="flow">Tempo内部系列 → 単調な絶対セル位置列</p>
+            <div class="listen">{beat_audio(bc['timing_before'], '生のお手本')}{beat_audio(bc['timing_after'], '保存profile click')}</div>
+            <dl><div><dt>pointer MAE cells</dt><dd>{n(tm['pointer_mae_cells'], 3)}</dd></div>
+            <div><dt>pointer P95 cells</dt><dd>{n(tm['pointer_p95_cells'], 3)}</dd></div>
+            <div><dt>backward jumps</dt><dd>{n(tm['backward_jumps'], 0)}</dd></div></dl>
+            <p class="note">afterは保存されたTiming Profileの拍だけを鳴らす診断click。物理演奏音ではない。</p></section>'''
         beat_section += "</div>"
 
     stages = [

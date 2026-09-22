@@ -30,6 +30,9 @@ def main():
     ap.add_argument("--checkpoint-out", default="runs/yamabiko_temporal_connected.pt")
     ap.add_argument("--seed", type=int, default=938431); ap.add_argument("--songs", type=int, default=96)
     ap.add_argument("--split", default="frozen-final-predicted-upstream")
+    ap.add_argument("--oracle-clock", action="store_true")
+    ap.add_argument("--profile-clock", action="store_true")
+    ap.add_argument("--attention-clock", action="store_true")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); ck = torch.load(args.model, map_location=args.device); cfg = BeatGridConfig(**ck["config"])
     tempo = TempoBeatNet(cfg).to(args.device); tempo.load_state_dict(ck["tempo_beat"]); tempo.eval()
@@ -53,12 +56,43 @@ def main():
         confident = torch.nonzero(valid[0]).flatten(); start = int(confident[0]) if len(confident) else 0
         bpm = tempo.phase_bpm(beat_out, valid)
         cells = int(np.clip(round((int(lengths[0]) - start) / 100 * float(bpm[0]) / 60 * cfg.subdivision), 1, 64))
-        grid, _ = memory(features, encoded, beat_out, mask, cells)
+        grid, memory_attention = memory(features, encoded, beat_out, mask, cells)
         cell_lengths = torch.tensor([cells], device=args.device); steps = len(sample.beat.target) + 100
+        target, frame_mask, true_pointer, _ = frame_targets([sample.beat], steps, args.device)
         if duration_clock: pointer, done_logit = clock(tempo.normalized_bpm(bpm), cell_lengths, lengths, steps)
         else: pointer, done_logit = clock(tempo.normalized_bpm(bpm), cell_lengths, steps)
+        if args.oracle_clock: pointer = true_pointer
+        if args.profile_clock:
+            xy = beat_out[..., :2]
+            dot = (xy[:, 1:] * xy[:, :-1]).sum(-1)
+            cross = xy[:, 1:, 0] * xy[:, :-1, 1] - xy[:, 1:, 1] * xy[:, :-1, 0]
+            delta = torch.remainder(torch.atan2(cross, dot), 2 * torch.pi) / (2 * torch.pi)
+            delta = torch.where((delta < .5) & valid[:, 1:] & valid[:, :-1], delta, torch.zeros_like(delta))
+            profile = torch.cat([torch.zeros(1, 1, device=args.device), torch.cumsum(delta, 1)], 1) * cfg.subdivision
+            profile = profile - profile[:, start:start + 1]
+            if steps > profile.shape[1]:
+                delta = torch.median(profile[:, 1:] - profile[:, :-1])
+                tail = profile[:, -1:] + delta * torch.arange(1, steps - profile.shape[1] + 1, device=args.device)[None]
+                profile = torch.cat([profile, tail], 1)
+            pointer = profile[:, :steps]
+        if args.attention_clock:
+            frame_ids = torch.arange(memory_attention.shape[-1], device=args.device, dtype=memory_attention.dtype)
+            centers_t = torch.einsum("bct,t->bc", memory_attention, frame_ids)
+            centers_p = torch.arange(cells, device=args.device, dtype=memory_attention.dtype) + .5
+            # Diagnostic inversion of the learned memory attention.  Linear
+            # interpolation is replaced by a learned readout if this upper
+            # bound proves useful.
+            ct = centers_t[0].cpu().numpy().copy(); cp = centers_p.cpu().numpy(); query = np.arange(steps)
+            ct[0] = np.clip(ct[0], 0, int(lengths[0]) - 1)
+            for j in range(1, len(ct)): ct[j] = max(ct[j], ct[j - 1] + 1.0)
+            mapped = np.interp(query, ct, cp)
+            if cells > 1:
+                left_rate = (cp[1] - cp[0]) / max(ct[1] - ct[0], 1e-3)
+                right_rate = (cp[-1] - cp[-2]) / max(ct[-1] - ct[-2], 1e-3)
+                mapped[query < ct[0]] = cp[0] + (query[query < ct[0]] - ct[0]) * left_rate
+                mapped[query > ct[-1]] = cp[-1] + (query[query > ct[-1]] - ct[-1]) * right_rate
+            pointer = torch.from_numpy(mapped.astype(np.float32)).to(args.device)[None]
         pred, _ = aligner(grid, cell_lengths, pointer)
-        target, frame_mask, true_pointer, _ = frame_targets([sample.beat], steps, args.device)
         voiced = frame_mask & target[..., 1].bool(); rests = frame_mask & ~target[..., 1].bool()
         pitch_errors.append((pred[..., 0][voiced] - target[..., 0][voiced]).abs().cpu() * SCALE)
         truth_pitch.append(target[..., 0][voiced].cpu()); pred_pitch.append(pred[..., 0][voiced].cpu())

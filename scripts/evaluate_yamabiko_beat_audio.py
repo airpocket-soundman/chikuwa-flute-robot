@@ -17,7 +17,7 @@ from flute_rl.audio import room, synth_self, synth_source  # noqa: E402
 from flute_rl.targets import make_beat_target  # noqa: E402
 from flute_rl.yamabiko.beat_grid import (BeatAlignedMusicalMemoryNet, BeatGridConfig,
                                          DurationConditionedPerformanceClock, MusicalMemoryNet, NeuralPerformanceClock,
-                                         NeuralTemporalAligner, TempoBeatNet)  # noqa: E402
+                                         NeuralTemporalAligner, ReferenceTimingProfileNet, TempoBeatNet)  # noqa: E402
 from flute_rl.yamabiko.e2e import E2EImitator  # noqa: E402
 from flute_rl.yamabiko.e2e_io import HOP, SAMPLE_RATE, frame_audio_numpy  # noqa: E402
 
@@ -31,6 +31,17 @@ def click_track(phase_xy, confidence, steps):
     for frame in wraps:
         at = frame * HOP; stop = min(len(y), at + length); y[at:stop] += tone[:stop - at]
     return y, wraps
+
+
+def pointer_click_track(pointer, steps, subdivision):
+    beat = np.floor(pointer / subdivision).astype(int)
+    crossings = np.flatnonzero(beat[1:] > beat[:-1]) + 1
+    y = np.zeros(steps * HOP, np.float32); length = int(.025 * SAMPLE_RATE)
+    envelope = np.exp(-np.arange(length) / (SAMPLE_RATE * .006))
+    tone = .7 * envelope * np.sin(2 * np.pi * 1100 * np.arange(length) / SAMPLE_RATE)
+    for frame in crossings:
+        at = frame * HOP; stop = min(len(y), at + length); y[at:stop] += tone[:stop - at]
+    return y
 
 
 @torch.inference_mode()
@@ -52,6 +63,10 @@ def main():
               else MusicalMemoryNet(cfg)).to(args.device)
     memory.load_state_dict(ck["musical_memory"]); memory.eval()
     clock = aligner = None
+    timing_profile = None
+    if ck.get("timing_profile_trained"):
+        timing_profile = ReferenceTimingProfileNet(cfg).to(args.device)
+        timing_profile.load_state_dict(ck["timing_profile"]); timing_profile.eval()
     if ck.get("temporal_aligner_trained"):
         clock = (DurationConditionedPerformanceClock(cfg) if ck.get("performance_clock_kind") == "duration-conditioned"
                  else NeuralPerformanceClock(cfg)).to(args.device)
@@ -78,6 +93,12 @@ def main():
                 "tempo_relative_error": tempo_errors[-1], "phase_circular_mae_cycle": phase_errors[-1],
                 "detected_beats": int(len(wraps)), "tempo_before": str(before.relative_to(out)).replace("\\", "/"),
                 "tempo_after": str(after.relative_to(out)).replace("\\", "/")}
+        if timing_profile is not None:
+            stored_pointer = timing_profile(encoded, beat_out, mask)[0].cpu().numpy()
+            timing_wave = pointer_click_track(stored_pointer, len(example.target), cfg.subdivision)
+            timing_after = audio / f"{name}_timing_profile_clicks.wav"; write_wav(timing_after, timing_wave, SAMPLE_RATE)
+            item["timing_before"] = item["tempo_before"]
+            item["timing_after"] = str(timing_after.relative_to(out)).replace("\\", "/")
         if ck.get("musical_memory_trained"):
             confident = np.flatnonzero(confidence >= .5); start_frame = int(confident[0]) if len(confident) else 0
             cells = int(np.clip(round((len(example.target) - start_frame) / 100 * predicted_bpm / 60 * cfg.subdivision), 1, 64))
@@ -120,6 +141,8 @@ def main():
                 "musical_memory": ck.get("musical_memory_metrics"),
                 "temporal_aligner_trained": bool(ck.get("temporal_aligner_trained")),
                 "temporal_aligner": ck.get("temporal_aligner_metrics"),
+                "timing_profile_trained": bool(ck.get("timing_profile_trained")),
+                "timing_profile": ck.get("timing_profile_metrics"),
                 "temporal_connected": ck.get("temporal_connected_metrics"), "cases": cases}
     out.mkdir(parents=True, exist_ok=True); (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"wrote {out / 'manifest.json'}")

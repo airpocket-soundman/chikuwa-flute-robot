@@ -269,6 +269,26 @@ class DurationConditionedPerformanceClock(nn.Module):
         return pointer, done
 
 
+class ReferenceTimingProfileNet(nn.Module):
+    """Offline NN that stores a denoised monotone cell-position trajectory."""
+
+    def __init__(self, config: BeatGridConfig):
+        super().__init__(); self.config = config; h = config.clock_hidden
+        self.encoder = nn.GRU(2 * config.beat_hidden + 3, h, batch_first=True, bidirectional=True)
+        self.start = nn.Sequential(nn.Linear(2 * h, h), nn.SiLU(), nn.Linear(h, 1))
+        self.delta = nn.Sequential(nn.Linear(2 * h, h), nn.SiLU(), nn.Linear(h, 1))
+
+    def forward(self, beat_encoded: torch.Tensor, beat_outputs: torch.Tensor, mask: torch.Tensor):
+        encoded, _ = self.encoder(torch.cat([beat_encoded, beat_outputs], -1))
+        pooled = (encoded * mask[..., None]).sum(1) / mask.sum(1, keepdim=True).clamp_min(1)
+        pointer0 = -torch.nn.functional.softplus(self.start(pooled)[:, 0])
+        delta = torch.nn.functional.softplus(self.delta(encoded)[..., 0]) * .12
+        delta = delta * mask
+        travelled = torch.cat([torch.zeros(len(encoded), 1, device=encoded.device, dtype=encoded.dtype),
+                               torch.cumsum(delta[:, :-1], 1)], 1)
+        return pointer0[:, None] + travelled
+
+
 class NeuralTemporalAligner(nn.Module):
     """Render remembered beat cells onto 100 Hz using a neural clock pointer."""
 
