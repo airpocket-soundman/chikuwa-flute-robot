@@ -84,7 +84,7 @@ def main():
     ck = torch.load(args.init, map_location=args.device); config = BeatGridConfig(**ck["config"])
     tempo, memory = TempoBeatNet(config).to(args.device), BeatAlignedMusicalMemoryNet(config).to(args.device)
     tempo.load_state_dict(ck["tempo_beat"])
-    if ck.get("musical_memory_kind") == "beat-aligned-v2": memory.load_state_dict(ck["musical_memory"])
+    if ck.get("musical_memory_kind") == "beat-aligned-v4": memory.load_state_dict(ck["musical_memory"])
     tempo.eval()
     ear = E2EImitator.from_checkpoint(torch.load(ck["ear_checkpoint"], map_location=args.device), args.device).eval()
     for module in (ear, tempo):
@@ -110,7 +110,7 @@ def main():
     metrics["pass"] = (metrics["pitch_mae_cents"] <= 50 and metrics["trajectory_correlation"] >= .95 and
                        metrics["voice_f1"] >= .95 and metrics["onset_f1"] >= .9 and metrics["offset_f1"] >= .9)
     metrics.update({"seed": args.seed, "split": "frozen-unknown-bpm", "official_path": "predicted_upstream"})
-    ck["musical_memory"] = memory.state_dict(); ck["musical_memory_kind"] = "beat-aligned-v2"
+    ck["musical_memory"] = memory.state_dict(); ck["musical_memory_kind"] = "beat-aligned-v4"
     ck["musical_memory_trained"] = True; ck["musical_memory_metrics"] = metrics
     torch.save(ck, args.out); pathlib.Path(args.report).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2)); print(f"saved {args.out}")

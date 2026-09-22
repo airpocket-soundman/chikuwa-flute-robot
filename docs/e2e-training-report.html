@@ -23,9 +23,9 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
         </section><section class="card"><div class="stage"><b>M</b><span>FAIL</span></div>
             <h2>Musical Memory NN</h2><p class="flow">予測beat + 音響表現 → 音程・休符・onset/offsetセル</p>
             <div class="listen"><div class="audio"><span>NNの前</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>記憶から再合成</span><audio controls preload="none" src="e2e-beat-results/audio/bpm_137_memory_after_recall.wav"></audio></div></div>
-            <dl><div><dt>pitch MAE cents</dt><dd>79.0</dd></div>
-            <div><dt>voice F1</dt><dd>0.978</dd></div><div><dt>onset F1</dt><dd>0.923</dd></div>
-            <div><dt>correlation</dt><dd>0.914</dd></div></dl>
+            <dl><div><dt>pitch MAE cents</dt><dd>60.5</dd></div>
+            <div><dt>voice F1</dt><dd>0.975</dd></div><div><dt>onset F1</dt><dd>0.913</dd></div>
+            <div><dt>correlation</dt><dd>0.924</dd></div></dl>
             <p class="note">raw音声と正解セル数を捨て、予測BPM・予測位相から求めたセル数で再生した診断音。</p></section></div>
 <div class="verdict"><b>現在の総合判定: 未完成</b> — 全段がPASSするまでE2E成功とは呼ばない。Feedback Residualは trained=false / pass=false（feedback residual training is the next gated stage）。</div>
 <div class="pipeline"><span>raw reference</span><i>→</i><span>Neural Ear</span><i>→</i><span>Reference Memory</span><i>→</i><span>FF Policy</span><i>→</i><span>plant + self audio</span><i>→</i><span>Error Comparator</span><i>→</i><span>Feedback Residual</span></div>

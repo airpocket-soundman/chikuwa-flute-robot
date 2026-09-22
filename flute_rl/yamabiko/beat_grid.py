@@ -119,8 +119,10 @@ class MusicalMemoryNet(nn.Module):
 class BeatAlignedMusicalMemoryNet(nn.Module):
     """Soft-resample neural audio memory onto the NN-predicted beat grid."""
 
-    def __init__(self, config: BeatGridConfig, pitch_skip: bool = True):
+    def __init__(self, config: BeatGridConfig, pitch_skip: bool = True, sharp_alignment: bool = True,
+                 stable_clock: bool = True):
         super().__init__(); self.config = config; self.pitch_skip = pitch_skip
+        self.sharp_alignment = sharp_alignment; self.stable_clock = stable_clock
         source_dim = config.input_dim + 2 * config.beat_hidden + 3
         self.source = nn.Sequential(nn.Linear(source_dim, config.memory_hidden), nn.SiLU(),
                                     nn.Linear(config.memory_hidden, config.memory_hidden))
@@ -140,13 +142,23 @@ class BeatAlignedMusicalMemoryNet(nn.Module):
         # beat advances far less than half a cycle per frame.
         delta = torch.where(delta < .5, delta, torch.zeros_like(delta))
         confidence = torch.sigmoid(beat_outputs[..., 2])
-        valid_delta = frame_mask[:, 1:] & frame_mask[:, :-1] & (confidence[:, 1:] >= .5) & (confidence[:, :-1] >= .5)
-        delta = delta * valid_delta
-        beat_position = torch.cat([torch.zeros(len(source), 1, device=source.device), torch.cumsum(delta, 1)], 1)
+        valid = frame_mask & (confidence >= .5)
+        valid_delta = valid[:, 1:] & valid[:, :-1]
+        if self.stable_clock:
+            bpm = TempoBeatNet.phase_bpm(beat_outputs, valid)
+            first = valid.float().argmax(1)
+            row = torch.arange(len(source), device=source.device)
+            phase0 = torch.remainder(torch.atan2(xy[row, first, 0], xy[row, first, 1]) / (2 * torch.pi), 1.0)
+            time = torch.arange(source.shape[1], device=source.device)[None] - first[:, None]
+            beat_position = phase0[:, None] + time * bpm[:, None] / 6000.0
+        else:
+            delta = delta * valid_delta
+            beat_position = torch.cat([torch.zeros(len(source), 1, device=source.device), torch.cumsum(delta, 1)], 1)
         cell_position = beat_position * self.config.subdivision
         centers = torch.arange(cells, device=source.device, dtype=source.dtype)[None, :, None] + .5
         distance = cell_position[:, None, :] - centers
-        weights = torch.exp(-.5 * (distance / .55) ** 2) * (frame_mask & (confidence >= .5))[:, None]
+        sigma = .30 if self.sharp_alignment else .55
+        weights = torch.exp(-.5 * (distance / sigma) ** 2) * valid[:, None]
         if cell_lengths is not None:
             cell_mask = torch.arange(cells, device=source.device)[None] < cell_lengths[:, None]
             weights = weights * cell_mask[..., None]
@@ -158,7 +170,9 @@ class BeatAlignedMusicalMemoryNet(nn.Module):
         # bottleneck.  The decoder learns only a bounded contextual residual;
         # it cannot replace cell alignment with an unrelated shortcut.
         if self.pitch_skip:
-            pooled_ear_pitch = torch.einsum("bct,bt->bc", weights, audio_features[..., -2])
+            pitch_weights = weights * torch.sigmoid(audio_features[..., -1])[:, None]
+            pitch_weights = pitch_weights / pitch_weights.sum(-1, keepdim=True).clamp_min(1e-6)
+            pooled_ear_pitch = torch.einsum("bct,bt->bc", pitch_weights, audio_features[..., -2])
             decoded = torch.cat([pooled_ear_pitch[..., None] + .1 * decoded[..., :1], decoded[..., 1:]], -1)
         return decoded, weights
 
