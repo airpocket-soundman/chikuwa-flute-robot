@@ -1,0 +1,88 @@
+{
+  "summary": {
+    "format": "yamabiko-flute-model-audit-v1",
+    "checkpoint": "runs/yamabiko_connected_composite_v1.pt",
+    "rigs": 64,
+    "seed": 4242,
+    "reference": "four-note step phrase of evaluate_yamabiko_composite.py, 0.5x replay",
+    "linearity": {
+      "octave_stroke_fraction": 0.6256158921499032,
+      "octave_travel_mm": 65.68966867573984,
+      "octave_slope_cents_per_mm": [
+        13.180664759100917,
+        26.3415700455009
+      ],
+      "octave_best_line_error_cents": 51.64277989746677,
+      "full_stroke_cents": [
+        700.0,
+        3479.5097972328426
+      ],
+      "full_stroke_slope_cents_per_mm": [
+        13.182637884269104,
+        65.49814538853487
+      ],
+      "full_stroke_best_line_error_cents": 269.4610666180122,
+      "period_line_residual_s": 6.505213034913027e-19,
+      "linear_model_slope_cents_per_mm": 11.428571428571429
+    },
+    "rig_spread": {
+      "rigs": 512,
+      "nominal_inverse_mae_cents": 96.33742801514371,
+      "nominal_inverse_p95_cents": 209.87621275305634,
+      "low_note_mae_cents": 66.44998770393471,
+      "high_note_mae_cents": 133.3987622296354
+    },
+    "matrix": [
+      {
+        "flute": "linear",
+        "rigs": "nominal",
+        "neural_mae_cents": 170.30245000748408,
+        "deterministic_oracle_mae_cents": 83.35478660946801
+      },
+      {
+        "flute": "linear",
+        "rigs": "randomized",
+        "neural_mae_cents": 185.70115828059969,
+        "deterministic_oracle_mae_cents": 90.65126174745106
+      },
+      {
+        "flute": "closed_tube",
+        "rigs": "nominal",
+        "neural_mae_cents": 269.50781884420485,
+        "deterministic_oracle_mae_cents": 79.530857921782
+      },
+      {
+        "flute": "closed_tube",
+        "rigs": "randomized",
+        "neural_mae_cents": 526.2538439750672,
+        "deterministic_oracle_mae_cents": 93.54495643888201
+      }
+    ],
+    "practice_linear_randomized": {
+      "carry_context": [
+        185.70115828059969,
+        206.42688765752882,
+        204.9853985059829,
+        206.5840738773346
+      ],
+      "reset_context": [
+        185.70115828059969,
+        185.70115828059969,
+        185.70115828059969,
+        185.70115828059969
+      ]
+    },
+    "feedback_linear_randomized": {
+      "with_residual_mae_cents": 185.70115828059969,
+      "without_residual_mae_cents": 195.5252852984837
+    },
+    "rest_plan": {
+      "neural_mean_position": 0.38281959295272827,
+      "first_note_position": 0.25
+    },
+    "deterministic_is_oracle": true,
+    "real_rig_validated": false,
+    "note": "Existing checkpoints were trained on the linear flute; closed-tube rows measure transfer, not retrained models."
+  },
+  "plot": "flute_curve.svg"
+}

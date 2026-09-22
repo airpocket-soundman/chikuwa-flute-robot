@@ -104,7 +104,8 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
         <div><dt>39.4 mm移動</dt><dd>430 ms</dd></div></dl>
         <p class="note">実機未計測の暫定設定。旧設定は最大141.8 mm/s、90%到達370 ms、39.4 mm移動490 ms。</p></section><section class="card pass"><div class="stage"><b>F</b><span class="pass">PASS</span></div>
         <h2>Linear Flute Simulator</h2><p class="flow">実変位 → 線形音程 / valve → 発音ON・OFF</p>
-        <p>笛の変位と音程を線形対応させた解析モデル。学習対象ではなく、モータの実変位を評価可能な音へ変換する。</p></section><section class="card"><div class="stage"><b>W</b><span class="fail">FAIL</span></div>
+        <p>笛の変位と音程を線形対応させた解析モデル。学習対象ではなく、モータの実変位を評価可能な音へ変換する。</p>
+        <p class="note"><b>見直し中:</b> 実際の閉管は f = c/4(L−x) で、変位に線形なのは周期であり音程（cent）ではない。閉管モデル（<code>flute_model="closed_tube"</code>）を追加し、下の「シミュレーター妥当性の検証」で比較した。</p></section><section class="card"><div class="stage"><b>W</b><span class="fail">FAIL</span></div>
         <h2>Physical simulation WAV / plots</h2><p class="flow">目標 → Feedforward物理演奏 → Feedback補正後</p>
         <div class="listen"><div class="audio"><span>目標</span><audio controls preload="none" src="e2e-physical-results/target.wav"></audio></div><div class="audio"><span>Feedforward</span><audio controls preload="none" src="e2e-physical-results/feedforward.wav"></audio></div><div class="audio"><span>Feedback後</span><audio controls preload="none" src="e2e-physical-results/feedback_play3.wav"></audio></div></div><figure class="pitch-plot"><img loading="lazy" src="e2e-physical-results/pitch.svg" alt="横軸: 時間 [s] / 縦軸: 音程 [cent] — 目標・Feedforward・Feedback後"><figcaption>横軸: 時間 [s] / 縦軸: 音程 [cent] — 目標・Feedforward・Feedback後</figcaption></figure><figure class="pitch-plot"><img loading="lazy" src="e2e-physical-results/position.svg" alt="横軸: 時間 [s] / 縦軸: 正規化変位 — 目標位置と物理シミュレータ変位"><figcaption>横軸: 時間 [s] / 縦軸: 正規化変位 — 目標位置と物理シミュレータ変位</figcaption></figure><figure class="pitch-plot"><img loading="lazy" src="e2e-physical-results/control.svg" alt="横軸: 時間 [s] / 縦軸: PWM — Feedforward出力とFeedback補正"><figcaption>横軸: 時間 [s] / 縦軸: PWM — Feedforward出力とFeedback補正</figcaption></figure>
         <p class="note">これは内部シミュレータの音であり、実機録音ではない。real_rig_validated=false。</p></section></div></section><section class="process-section" id="process-4"><header><span>4</span><div><h2>工程 4: 聴いて差を直す</h2><p>自己音と目標を比較し、次の操作を補正する。</p></div></header><div class="grid"><section class="card">
@@ -168,7 +169,42 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
       <div><dt>ONNX容量</dt><dd>2.62 MiB</dd></div>
       <div><dt>反復MAE</dt><dd>93.7 → 63.1 → 60.0 cent</dd></div></dl>
       <p class="note">実測環境: aarch64 / ONNX Runtime 1.28.0。マイク・モーターは使わず、物理装置だけを同じUNO Q内の決定論的シミュレータへ置換。これは速度調整前モデルの実機CPU計測であり、新しいfast-riseモデルはUNO Qで再測定が必要。実モーター演奏の合格ではない。</p>
-    </section></div><h2>知覚・記憶・Positionの試行履歴</h2><p class="history-count">21試行 — PASS 9 / FAIL 12</p><details open><summary>Tempo / Beat — PASS 2 / FAIL 4</summary><div class="attempt-grid"><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
+    </section></div><h2 id="flute-audit">シミュレーター妥当性と役割分担の検証</h2>
+      <p>接続済みCompositeを、笛モデル・機体ばらつき・反復練習・補正の有無を変えて測り直した（乱数化機体 64 台、seed 4242）。数値は <code>scripts/evaluate_yamabiko_flute_model.py</code> が書く manifest から生成。</p>
+      <div class="grid">
+        <section class="card fail"><div class="stage"><b>F</b><span class="fail">線形仮定 FAIL</span></div>
+          <h2>閉管の音程は変位に線形ではない</h2><p class="flow">f = c / 4(L − x) → 周期 1/f は変位に厳密に線形、cent は対数</p>
+          <figure class="pitch-plot"><img loading="lazy" src="e2e-flute-model-results/flute_curve.svg" alt="横軸: プランジャ変位 [mm] / 縦軸: 音程 [cent] — 線形モデル・閉管公称・乱数化機体"><figcaption>横軸: プランジャ変位 [mm] / 縦軸: 音程 [cent] — 線形モデル・閉管公称・乱数化機体</figcaption></figure>
+          <dl><div><dt>1オクターブ(700→1900 cent)の移動量</dt><dd>65.7 mm</dd></div>
+          <div><dt>その範囲の傾き</dt><dd>13.2→26.3 cent/mm</dd></div>
+          <div><dt>最良直線の誤差（1オクターブ）</dt><dd>±51.6 cent</dd></div>
+          <div><dt>最良直線の誤差（全ストローク）</dt><dd>±269.5 cent</dd></div></dl>
+          <p class="note">線形笛は全域 11.4 cent/mm で1オクターブに105 mm使うが、閉管では約66 mmで1オクターブ上がる。周期の直線あてはめ残差は 6.5e-19 s（数値誤差のみ）。</p></section>
+        <section class="card partial"><div class="stage"><b>R</b><span class="partial">個体差</span></div>
+          <h2>機体差は「切片と傾き」に集約できる</h2><p class="flow">周期 T = (4/c)·L − (4/c)·x：切片 = 実効管長 L、傾き = 音速 c（温度）</p>
+          <p>管長 ±10 mm・温度 ±8 ℃・吹圧 ±10 cent の機体に公称の逆変換で位置を出すと、次の誤差が残る。これをFeedbackが記憶し、Plannerへ渡して鳴り始めから直すのが新しい役割分担。</p>
+          <dl><div><dt>公称逆変換 MAE</dt><dd>96.3 cent</dd></div>
+          <div><dt>P95</dt><dd>209.9 cent</dd></div>
+          <div><dt>低音 / 高音</dt><dd>66.4 / 133.4 cent</dd></div></dl></section>
+        <section class="card fail"><div class="stage"><b>ALL</b><span class="fail">転移 FAIL</span></div>
+          <h2>既存Compositeを閉管笛へ載せ替え</h2><p class="flow">同じ4音フレーズ・0.5倍再生・演奏MAE [cent]</p>
+          <div class="table"><table><thead><tr><th>笛</th><th>機体</th><th>全NN接続</th><th>決定論 oracle</th></tr></thead><tbody><tr><td>線形笛</td><td>公称機体</td><td>170.3</td><td>83.4</td></tr><tr><td>線形笛</td><td>乱数化機体</td><td>185.7</td><td>90.7</td></tr><tr><td>閉管</td><td>公称機体</td><td>269.5</td><td>79.5</td></tr><tr><td>閉管</td><td>乱数化機体</td><td>526.3</td><td>93.5</td></tr></tbody></table></div>
+          <p class="note">既存NNは線形笛で学習したため、閉管では転移しない（再学習前の値）。決定論版はplantの真の位置・速度を読むPD制御で、エンコーダ付きの上限であり、公平な比較相手ではない。</p></section>
+        <section class="card fail"><div class="stage"><b>A</b><span class="fail">反復適応 FAIL</span></div>
+          <h2>遅い文脈は練習を持ち越せていない</h2><p class="flow">線形笛・乱数化機体・演奏1〜4回目のMAE [cent]</p>
+          <div class="table"><table><thead><tr><th>slow context</th><th>1</th><th>2</th><th>3</th><th>4</th></tr></thead><tbody><tr><td>文脈を引き継ぐ</td><td>185.7</td><td>206.4</td><td>205.0</td><td>206.6</td></tr><tr><td>毎回リセット</td><td>185.7</td><td>185.7</td><td>185.7</td><td>185.7</td></tr></tbody></table></div>
+          <dl><div><dt>Feedback補正あり</dt><dd>185.7 cent</dd></div>
+          <div><dt>補正なし</dt><dd>195.5 cent</dd></div>
+          <div><dt>冒頭休符中の計画位置</dt><dd>0.383</dd></div>
+          <div><dt>最初の音に必要な位置</dt><dd>0.250</dd></div></dl>
+          <p class="note">slow contextの更新率0.04/stepは時定数約0.25 sで、曲の内容まで覚えてしまう。単独学習では28.5%改善したが、接続後は引き継ぐと悪化した。休符中は次の音へ先回りしていない。</p></section>
+      </div>
+      <div class="pipeline-explainer"><h3>ここから決めた役割分担</h3>
+        <dl><div><dt>Planner</dt><dd>音階→変位の計画。記憶した音程・休符と個体差文脈（切片・傾き）から、休符中の先回りを含む目標軌道を作る</dd></div>
+        <div><dt>Controller</dt><dd>目標軌道をPWMで追う</dd></div>
+        <div><dt>Feedback</dt><dd>自己音とのずれの速い補正と、笛の切片・傾きのNN内記憶（演奏をまたいで保持）</dd></div>
+        <div><dt>決定論の対照</dt><dd>閉管逆変換 + RLSで切片・傾き推定 + 推測航法 + 端点ホーミング + PID（エンコーダなし）</dd></div></dl>
+      </div><h2>知覚・記憶・Positionの試行履歴</h2><p class="history-count">21試行 — PASS 9 / FAIL 12</p><details open><summary>Tempo / Beat — PASS 2 / FAIL 4</summary><div class="attempt-grid"><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
         <h3>yamabiko_tempo_beat_timbre_v2</h3><p>採用候補または合格checkpoint</p><p class="metrics">tempo relative error median 0.011 / tempo relative error p90 0.068 / tempo head relative error median 0.074 / phase circular mae cycle 0.057 / phase confidence mean 0.998 / half double confusion rate 0.000</p>
         <p class="note">split: frozen-heldout-bpm / seed: 14449</p><div class="listen"><div class="audio"><span>before</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/audio/bpm_137_tempo_before_reference.wav"></audio></div><div class="audio"><span>after</span><audio controls preload="none" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/audio/bpm_137_tempo_after_clicks.wav"></audio></div></div><figure class="pitch-plot"><img loading="lazy" src="e2e-beat-attempts/yamabiko_tempo_beat_timbre_v2/plots/bpm_137_tempo_pitch.svg" alt="横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）"><figcaption>横軸: 時間 / 縦軸: お手本音程 — 橙の縦線: 拍イベント（音程出力なし）</figcaption></figure></article><article class="attempt"><div class="stage"><b>試</b><span class="pass">PASS</span></div>
         <h3>yamabiko_tempo_beat_v4_phase</h3><p>採用候補または合格checkpoint</p><p class="metrics">tempo relative error median 0.008 / tempo relative error p90 0.035 / tempo head relative error median 0.045 / phase circular mae cycle 0.040 / phase confidence mean 0.999 / half double confusion rate 0.000</p>

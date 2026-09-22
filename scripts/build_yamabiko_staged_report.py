@@ -113,6 +113,8 @@ def main():
             composite_prefix = composite_path.parent.relative_to(docs_root).as_posix().rstrip("/") + "/"
         except ValueError:
             composite_prefix = composite_path.parent.as_posix().rstrip("/") + "/"
+    flute_audit_path = docs_root / "e2e-flute-model-results" / "manifest.json"
+    flute_audit = json.loads(flute_audit_path.read_text(encoding="utf-8")) if flute_audit_path.exists() else {}
     history_path = docs_root / "e2e-beat-results" / "attempt-history.json"
     history = json.loads(history_path.read_text(encoding="utf-8"))["attempts"] if history_path.exists() else []
     if hybrid_lab.get("planner_summary") and not any(
@@ -357,7 +359,8 @@ def main():
         <p class="note">実機未計測の暫定設定。旧設定は最大141.8 mm/s、90%到達370 ms、39.4 mm移動490 ms。</p></section>''',
         f'''<section class="card {flute_state}"><div class="stage"><b>F</b><span class="{flute_state}">{state_label(flute_state)}</span></div>
         <h2>Linear Flute Simulator</h2><p class="flow">実変位 → 線形音程 / valve → 発音ON・OFF</p>
-        <p>笛の変位と音程を線形対応させた解析モデル。学習対象ではなく、モータの実変位を評価可能な音へ変換する。</p></section>''',
+        <p>笛の変位と音程を線形対応させた解析モデル。学習対象ではなく、モータの実変位を評価可能な音へ変換する。</p>
+        <p class="note"><b>見直し中:</b> 実際の閉管は f = c/4(L−x) で、変位に線形なのは周期であり音程（cent）ではない。閉管モデル（<code>flute_model="closed_tube"</code>）を追加し、下の「シミュレーター妥当性の検証」で比較した。</p></section>''',
     ])
 
     physical_cases = physical.get("cases", [])
@@ -595,6 +598,58 @@ def main():
       <p class="note">各工程には決定論的な対応モジュール（FFT Ear、自己相関Tempo、完全Timeline Memory、線形Position、PD Motor Control、差分Comparator、PID Feedback）も実装し、NNの故障箇所を切り分けられる。</p>
     </section>''' if composite_summary else '<p>全工程Compositeの評価記録はまだありません。</p>'
 
+    audit = flute_audit.get("summary", {})
+    if audit:
+        lin, spread = audit["linearity"], audit["rig_spread"]
+        practice, fb, rest = audit["practice_linear_randomized"], audit["feedback_linear_randomized"], audit["rest_plan"]
+        flute_names = {"linear": "線形笛", "closed_tube": "閉管"}
+        rig_names = {"nominal": "公称機体", "randomized": "乱数化機体"}
+        matrix_rows = "".join(
+            f"<tr><td>{flute_names[row['flute']]}</td><td>{rig_names[row['rigs']]}</td>"
+            f"<td>{n(row['neural_mae_cents'])}</td><td>{n(row['deterministic_oracle_mae_cents'])}</td></tr>"
+            for row in audit["matrix"])
+        practice_rows = "".join(
+            f"<tr><td>{label}</td>{''.join(f'<td>{n(v)}</td>' for v in practice[key])}</tr>"
+            for key, label in (("carry_context", "文脈を引き継ぐ"), ("reset_context", "毎回リセット")))
+        flute_audit_html = f'''<h2 id="flute-audit">シミュレーター妥当性と役割分担の検証</h2>
+      <p>接続済みCompositeを、笛モデル・機体ばらつき・反復練習・補正の有無を変えて測り直した（乱数化機体 {audit['rigs']} 台、seed {audit['seed']}）。数値は <code>scripts/evaluate_yamabiko_flute_model.py</code> が書く manifest から生成。</p>
+      <div class="grid">
+        <section class="card fail"><div class="stage"><b>F</b><span class="fail">線形仮定 FAIL</span></div>
+          <h2>閉管の音程は変位に線形ではない</h2><p class="flow">f = c / 4(L − x) → 周期 1/f は変位に厳密に線形、cent は対数</p>
+          {figure(flute_audit.get('plot'), '横軸: プランジャ変位 [mm] / 縦軸: 音程 [cent] — 線形モデル・閉管公称・乱数化機体', 'e2e-flute-model-results/')}
+          <dl><div><dt>1オクターブ(700→1900 cent)の移動量</dt><dd>{n(lin['octave_travel_mm'])} mm</dd></div>
+          <div><dt>その範囲の傾き</dt><dd>{n(lin['octave_slope_cents_per_mm'][0])}→{n(lin['octave_slope_cents_per_mm'][1])} cent/mm</dd></div>
+          <div><dt>最良直線の誤差（1オクターブ）</dt><dd>±{n(lin['octave_best_line_error_cents'])} cent</dd></div>
+          <div><dt>最良直線の誤差（全ストローク）</dt><dd>±{n(lin['full_stroke_best_line_error_cents'])} cent</dd></div></dl>
+          <p class="note">線形笛は全域 {n(lin['linear_model_slope_cents_per_mm'])} cent/mm で1オクターブに105 mm使うが、閉管では約{n(lin['octave_travel_mm'], 0)} mmで1オクターブ上がる。周期の直線あてはめ残差は {lin['period_line_residual_s']:.1e} s（数値誤差のみ）。</p></section>
+        <section class="card partial"><div class="stage"><b>R</b><span class="partial">個体差</span></div>
+          <h2>機体差は「切片と傾き」に集約できる</h2><p class="flow">周期 T = (4/c)·L − (4/c)·x：切片 = 実効管長 L、傾き = 音速 c（温度）</p>
+          <p>管長 ±10 mm・温度 ±8 ℃・吹圧 ±10 cent の機体に公称の逆変換で位置を出すと、次の誤差が残る。これをFeedbackが記憶し、Plannerへ渡して鳴り始めから直すのが新しい役割分担。</p>
+          <dl><div><dt>公称逆変換 MAE</dt><dd>{n(spread['nominal_inverse_mae_cents'])} cent</dd></div>
+          <div><dt>P95</dt><dd>{n(spread['nominal_inverse_p95_cents'])} cent</dd></div>
+          <div><dt>低音 / 高音</dt><dd>{n(spread['low_note_mae_cents'])} / {n(spread['high_note_mae_cents'])} cent</dd></div></dl></section>
+        <section class="card fail"><div class="stage"><b>ALL</b><span class="fail">転移 FAIL</span></div>
+          <h2>既存Compositeを閉管笛へ載せ替え</h2><p class="flow">同じ4音フレーズ・0.5倍再生・演奏MAE [cent]</p>
+          <div class="table"><table><thead><tr><th>笛</th><th>機体</th><th>全NN接続</th><th>決定論 oracle</th></tr></thead><tbody>{matrix_rows}</tbody></table></div>
+          <p class="note">既存NNは線形笛で学習したため、閉管では転移しない（再学習前の値）。決定論版はplantの真の位置・速度を読むPD制御で、エンコーダ付きの上限であり、公平な比較相手ではない。</p></section>
+        <section class="card fail"><div class="stage"><b>A</b><span class="fail">反復適応 FAIL</span></div>
+          <h2>遅い文脈は練習を持ち越せていない</h2><p class="flow">線形笛・乱数化機体・演奏1〜4回目のMAE [cent]</p>
+          <div class="table"><table><thead><tr><th>slow context</th><th>1</th><th>2</th><th>3</th><th>4</th></tr></thead><tbody>{practice_rows}</tbody></table></div>
+          <dl><div><dt>Feedback補正あり</dt><dd>{n(fb['with_residual_mae_cents'])} cent</dd></div>
+          <div><dt>補正なし</dt><dd>{n(fb['without_residual_mae_cents'])} cent</dd></div>
+          <div><dt>冒頭休符中の計画位置</dt><dd>{n(rest['neural_mean_position'], 3)}</dd></div>
+          <div><dt>最初の音に必要な位置</dt><dd>{n(rest['first_note_position'], 3)}</dd></div></dl>
+          <p class="note">slow contextの更新率0.04/stepは時定数約0.25 sで、曲の内容まで覚えてしまう。単独学習では28.5%改善したが、接続後は引き継ぐと悪化した。休符中は次の音へ先回りしていない。</p></section>
+      </div>
+      <div class="pipeline-explainer"><h3>ここから決めた役割分担</h3>
+        <dl><div><dt>Planner</dt><dd>音階→変位の計画。記憶した音程・休符と個体差文脈（切片・傾き）から、休符中の先回りを含む目標軌道を作る</dd></div>
+        <div><dt>Controller</dt><dd>目標軌道をPWMで追う</dd></div>
+        <div><dt>Feedback</dt><dd>自己音とのずれの速い補正と、笛の切片・傾きのNN内記憶（演奏をまたいで保持）</dd></div>
+        <div><dt>決定論の対照</dt><dd>閉管逆変換 + RLSで切片・傾き推定 + 推測航法 + 端点ホーミング + PID（エンコーダなし）</dd></div></dl>
+      </div>'''
+    else:
+        flute_audit_html = ""
+
     pipeline_tabs = f'''<section class="pipeline-lab" aria-labelledby="pipeline-tabs-title"><h2 id="pipeline-tabs-title">パイプライン別の結果と試行記録</h2>
     <p>採用予定と代替案を混在させず、同じパイプラインのフロー・結果・WAV・グラフ・失敗試行を一つのタブへまとめた。</p>
     <div class="tab-list" role="tablist" aria-label="パイプライン別結果">
@@ -611,7 +666,7 @@ def main():
         <dl><div><dt>Feedforward</dt><dd>Position Planner（別Policyは置かない）</dd></div><div><dt>関係学習</dt><dd>PWM履歴 → 可聴音程のWorld Model</dd></div><div><dt>訓練環境</dt><dd>決定論的なtorque rise・摩擦・慣性 + 線形笛</dd></div><div><dt>検証範囲</dt><dd>内部simulationのみ / 実機未検証</dd></div></dl>
       </div>
       <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner (= Feedforward) → Motor Controller → Motor Physics → Linear Flute → deterministic waveform → Neural Ear (self) → Comparator → Adaptive Feedback ↩ PWM<br>学習時: PWM/audio → Motor Audio World Model → Motor Controller</p>
-      {process_results}{hybrid_lab_html}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div><h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
+      {process_results}{hybrid_lab_html}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div>{flute_audit_html}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
       <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p>{physical_history}
     </section>
     <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">

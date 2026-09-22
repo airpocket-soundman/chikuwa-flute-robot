@@ -214,6 +214,33 @@ def test_minimal_physical_plant_has_torque_rise_motion_and_linear_flute():
     assert not silent.item()
 
 
+def test_closed_tube_flute_period_is_linear_in_position_but_cents_are_not():
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig(flute_model="closed_tube"))
+    params = plant.parameters(1, "cpu", dtype=torch.float64)
+    position = torch.linspace(0.0, .6, 7, dtype=torch.float64)[:, None]
+    period = plant.period_s(position, params)[:, 0]
+    torch.testing.assert_close(period[1:] - period[:-1], (period[1] - period[0]).expand(6))
+    cents = plant.cents_at(position, params)[:, 0]
+    steps = cents[1:] - cents[:-1]
+    assert cents[0].item() == pytest.approx(700.0, abs=1e-6)
+    assert steps[-1] > 1.5 * steps[0]
+    # One octave up halves the effective length.
+    octave = plant.position_for_cents(torch.tensor([1900.0], dtype=torch.float64), params)
+    length = plant.acoustic_length(octave, params)
+    assert length.item() == pytest.approx(plant.config.effective_length_m / 2, rel=1e-9)
+
+
+def test_closed_tube_inverse_matches_each_randomized_rig():
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig(flute_model="closed_tube"))
+    params = plant.parameters(32, "cpu", dtype=torch.float64, spread=1.0,
+                              generator=torch.Generator().manual_seed(5))
+    position = torch.rand(32, dtype=torch.float64, generator=torch.Generator().manual_seed(6)) * .6 + .1
+    cents = plant.cents_at(position, params)
+    torch.testing.assert_close(plant.position_for_cents(cents, params), position)
+    nominal = plant.parameters(32, "cpu", dtype=torch.float64)
+    assert (plant.position_for_cents(cents, nominal) - position).abs().max() > .02
+
+
 def test_motor_physics_is_deterministic_for_fixed_parameters_and_inputs():
     plant = DifferentiableMotorFlute()
     params = plant.parameters(2, "cpu", spread=0.0)

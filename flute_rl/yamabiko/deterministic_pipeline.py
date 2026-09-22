@@ -94,10 +94,27 @@ class DeterministicTimelineMemory(nn.Module):
 
 
 class DeterministicPositionPlanner(nn.Module):
-    """Linear flute inverse: normalized musical pitch equals stroke fraction."""
+    """Nominal flute inverse from normalized musical pitch to stroke fraction.
+
+    The linear flute maps pitch straight to stroke.  The closed tube inverts
+    f = c / 4(L - x) with the nominal rig; per-rig intercept/slope errors are
+    left to feedback.
+    """
+
+    def __init__(self, plant: DifferentiableMotorFlute | None = None,
+                 pitch_center_cents=1300.0, pitch_scale_cents=600.0):
+        super().__init__(); self.plant = plant
+        self.pitch_center_cents, self.pitch_scale_cents = pitch_center_cents, pitch_scale_cents
 
     def forward(self, profile: DeterministicProfile) -> torch.Tensor:
-        return ((profile.pitch + 1.0) * .5).clamp(0, 1)
+        if self.plant is None or self.plant.config.flute_model == "linear":
+            return ((profile.pitch + 1.0) * .5).clamp(0, 1)
+        pitch = profile.pitch
+        nominal = self.plant.parameters(pitch.shape[0], pitch.device, pitch.dtype)
+        nominal = type(nominal)(*(value[:, None] if value is not None else None
+                                  for value in vars(nominal).values()))
+        cents = self.pitch_center_cents + self.pitch_scale_cents * pitch
+        return self.plant.position_for_cents(cents, nominal)
 
 
 class DeterministicMotorController(nn.Module):
@@ -152,9 +169,9 @@ class DeterministicYamabikoPipeline(nn.Module):
                  articulation_frames=4):
         super().__init__(); self.ear = DeterministicEar()
         self.tempo = DeterministicTempoBeat(); self.memory = DeterministicTimelineMemory()
-        self.planner = DeterministicPositionPlanner(); self.controller = DeterministicMotorController()
-        self.comparator = DeterministicComparator(); self.feedback = DeterministicFeedback(limit=config.feedback_limit)
         self.plant = DifferentiableMotorFlute(config)
+        self.planner = DeterministicPositionPlanner(self.plant); self.controller = DeterministicMotorController()
+        self.comparator = DeterministicComparator(); self.feedback = DeterministicFeedback(limit=config.feedback_limit)
         self.tempo_scale, self.articulation_frames = tempo_scale, articulation_frames
 
     def listen(self, reference_frames: torch.Tensor):
