@@ -27,7 +27,7 @@ footer{color:var(--muted);margin-top:50px;border-top:1px solid var(--line);paddi
 <h2>工程別の最新結果</h2><p>現行の採用経路と旧方式をカード内で明記し、入力→出力の順に並べた。</p><section class="process-section" id="process-1"><header><span>1</span><div><h2>工程 1: 聞く・拍を取る</h2><p>生音声から音程・発音、BPM、拍位相を推定する。</p></div></header><div class="grid"><section class="card">
           <div class="stage"><b>1</b><span class="pass">PASS</span></div>
           <h2>Neural Ear</h2><p class="flow">生の20 ms波形 → 音程・発音状態</p>
-          <div class="listen"><div class="audio"><span>NNの前</span><audio controls preload="none" src="e2e-results/audio/step_up_down/01_ear_before_reference.wav"></audio></div><div class="audio"><span>NNの後</span><audio controls preload="none" src="e2e-results/audio/step_up_down/01_ear_after_prediction.wav"></audio></div></div>
+          <div class="listen"><div class="audio"><span>NNの前</span><audio controls preload="none" src="e2e-results/audio/step_up_down/01_ear_before_reference.wav"></audio></div><div class="audio"><span>NNの後</span><audio controls preload="none" src="e2e-results/audio/step_up_down/01_ear_after_prediction.wav"></audio></div></div><figure class="pitch-plot"><img loading="lazy" src="e2e-results/plots/step_up_down_ear_pitch.svg" alt="横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: お手本 / 橙: Neural Ear出力"><figcaption>横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: お手本 / 橙: Neural Ear出力</figcaption></figure>
           <dl><div><dt>mae</dt><dd>11.900</dd></div><div><dt>correlation</dt><dd>0.996</dd></div></dl><p class="note">afterはNNが推定した音程を診断用音色で再合成。外部の音程解析器は推論入力に使わない。</p>
         </section><section class="card"><div class="stage"><b>B</b><span class="pass">PASS</span></div>
         <h2>Tempo / Beat NN</h2><p class="flow">raw reference → BPM・連続beat phase</p>

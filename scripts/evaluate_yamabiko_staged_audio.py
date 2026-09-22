@@ -45,6 +45,30 @@ def sonify(normalized_pitch, voice, seed):
     return synth_self(cents, np.asarray(voice, bool), np.random.default_rng(seed), sr=SAMPLE_RATE)
 
 
+def write_pitch_plot(path, target, predicted_pitch, predicted_voice):
+    """Plot the exact Ear output used for scoring; do not re-estimate it from WAV."""
+    import matplotlib
+    matplotlib.use("Agg")
+    matplotlib.rcParams["svg.hashsalt"] = "yamabiko-ear-pitch-v1"
+    import matplotlib.pyplot as plt
+
+    prediction = np.asarray(predicted_pitch, dtype=float) * SCALE + CENTER
+    prediction[~np.asarray(predicted_voice, dtype=bool)] = np.nan
+    fig, ax = plt.subplots(figsize=(8.4, 3.0), facecolor="#0b1620")
+    ax.set_facecolor("#0b1620")
+    time = np.arange(len(target)) / 100.0
+    ax.plot(time, target, color="#5ee9ff", lw=1.8, label="Reference pitch")
+    ax.plot(time, prediction, color="#ffb45e", lw=1.5, label="Neural Ear output")
+    ax.set_xlim(0, len(target) / 100.0); ax.set_ylim(400, 2100)
+    ax.set_xlabel("Time [s]"); ax.set_ylabel("Pitch [cent, A4 = 0]")
+    ax.grid(color="#274052", alpha=.65, linewidth=.6); ax.tick_params(colors="#c6d5de")
+    ax.xaxis.label.set_color("#c6d5de"); ax.yaxis.label.set_color("#c6d5de")
+    for spine in ax.spines.values(): spine.set_color("#365164")
+    ax.legend(loc="upper right", facecolor="#101d29", edgecolor="#365164", labelcolor="#e9f5f9")
+    fig.tight_layout(); path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, format="svg", facecolor=fig.get_facecolor(), metadata={"Date": None}); plt.close(fig)
+
+
 def load_stages(path, device):
     ck = torch.load(path, map_location=device)
     if ck.get("format") != "yamabiko-staged-nn-v1": raise ValueError("not a staged checkpoint")
@@ -111,8 +135,8 @@ def main():
     ap.add_argument("--out", default="docs/e2e-results")
     ap.add_argument("--seed", type=int, default=9471)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    args = ap.parse_args(); out = pathlib.Path(args.out); audio_dir = out / "audio"
-    audio_dir.mkdir(parents=True, exist_ok=True)
+    args = ap.parse_args(); out = pathlib.Path(args.out); audio_dir = out / "audio"; plot_dir = out / "plots"
+    audio_dir.mkdir(parents=True, exist_ok=True); plot_dir.mkdir(parents=True, exist_ok=True)
     ck, (memory, ff, comparator, feedback), position_planner, motor_inverse, motor_state, position_controller = load_stages(args.model, args.device)
     ear_path = ck["ear_checkpoint"]
     ear_model = E2EImitator.from_checkpoint(torch.load(ear_path, map_location=args.device), args.device).eval()
@@ -157,6 +181,8 @@ def main():
                  "ff_after": case / "03_feedforward_after_physical.wav"}
         write_wav(paths["ear_before"], wave, SAMPLE_RATE)
         write_wav(paths["ear_after"], sonify(ear_pitch, ear_voice, 1000 + case_index), SAMPLE_RATE)
+        ear_plot = plot_dir / f"{name}_ear_pitch.svg"
+        write_pitch_plot(ear_plot, target, ear_pitch, ear_voice)
         write_wav(paths["memory_before"], sonify(ear_pitch, ear_voice, 1100 + case_index), SAMPLE_RATE)
         write_wav(paths["memory_after"], sonify(mem_pitch, mem_voice, 1200 + case_index), SAMPLE_RATE)
         write_wav(paths["ff_before"], sonify(mem_pitch, mem_voice, 1300 + case_index), SAMPLE_RATE)
@@ -193,6 +219,7 @@ def main():
                                       "error_sign_accuracy": float((torch.sign(error[valid]) ==
                                                                     torch.sign(true_error[valid])).float().mean())})
         files.append({"case": name, **{k: str(v.relative_to(out)).replace("\\", "/") for k, v in paths.items()},
+                      "ear_plot": str(ear_plot.relative_to(out)).replace("\\", "/"),
                       "comparator_before": str(comp_before.relative_to(out)).replace("\\", "/"),
                       "comparator_after": str(comp_after.relative_to(out)).replace("\\", "/")})
 

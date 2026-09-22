@@ -208,10 +208,13 @@ def main():
             metric_lines.append(f'<div><dt>{html.escape(key.replace("_", " "))}</dt><dd>{n(value, 3)}</dd></div>')
         bucket = "perception" if number == "1" else ("memory" if number == "2" else ("planning" if number == "3" else "feedback"))
         legacy_class = " legacy" if number in ("2", "3") else ""
+        stage_plot = figure(representative.get("ear_plot"),
+                            "横軸: 時間 [s] / 縦軸: 音程 [cent, A4=0] — シアン: お手本 / 橙: Neural Ear出力",
+                            "e2e-results/") if number == "1" else ""
         card_html = f'''<section class="card{legacy_class}">
           <div class="stage"><b>{number}</b><span class="{status.lower()}">{status}</span></div>
           <h2>{title}</h2><p class="flow">{flow}</p>
-          <div class="listen">{audio(before, "NNの前")}{audio(after, "NNの後")}</div>
+          <div class="listen">{audio(before, "NNの前")}{audio(after, "NNの後")}</div>{stage_plot}
           <dl>{''.join(metric_lines)}</dl><p class="note">{note}</p>
         </section>'''
         beat_cards[bucket].insert(0, card_html) if number == "1" else beat_cards[bucket].append(card_html)
