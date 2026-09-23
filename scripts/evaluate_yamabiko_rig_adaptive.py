@@ -27,7 +27,7 @@ from flute_rl.yamabiko.deterministic_pipeline import (EncoderlessConfig,  # noqa
 from flute_rl.yamabiko.error_regions import error_regions, region_errors  # noqa: E402
 from flute_rl.yamabiko.melodies import next_voiced, note_age, random_melodies  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
-from flute_rl.yamabiko.rig_adaptive import RigAdaptivePerformer  # noqa: E402
+from flute_rl.yamabiko.performers import load_performer  # noqa: E402
 
 
 REGIONS = {}
@@ -106,7 +106,7 @@ def pitch_plot(path, target, voice, series, frame_rate=100):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--checkpoint", nargs="+",
-                    default=["runs/yamabiko_rig_adaptive_v1.pt", "runs/yamabiko_rig_adaptive_v2.pt"],
+                    default=["runs/yamabiko_rig_adaptive_v3.pt", "runs/yamabiko_adaptive_memory_v1.pt"],
                     help="rig-adaptive checkpoints; the last one is reported as the current model")
     ap.add_argument("--out", default="docs/e2e-rig-adaptive-results")
     ap.add_argument("--rigs", type=int, default=128)
@@ -165,8 +165,7 @@ def main():
     for path in map(pathlib.Path, args.checkpoint):
         if not path.exists():
             continue
-        checkpoint = torch.load(path, map_location=device, weights_only=False)
-        model = RigAdaptivePerformer.from_checkpoint(checkpoint, device).eval()
+        model, checkpoint = load_performer(path, device)
         learning_mode = bool(checkpoint.get("calibration_songs"))
         firsts, seconds, results = neural_repeat(model, learning_mode, params, songs)
         models[path.stem] = {"checkpoint": str(path), "learning_mode": learning_mode,
@@ -186,8 +185,7 @@ def main():
     last_model = None
     if models:
         last_path = pathlib.Path(list(models.values())[-1]["checkpoint"])
-        last_checkpoint = torch.load(last_path, map_location=device, weights_only=False)
-        last_model = RigAdaptivePerformer.from_checkpoint(last_checkpoint, device).eval()
+        last_model, last_checkpoint = load_performer(last_path, device)
         last_learning = bool(last_checkpoint.get("calibration_songs"))
     cfg = plant.config
     for factor in robustness["factors"]:

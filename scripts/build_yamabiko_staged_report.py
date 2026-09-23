@@ -9,6 +9,13 @@ import pathlib
 import numpy as np
 
 
+def model_label(name):
+    """Checkpoint stem -> the name used in the report."""
+    return {"yamabiko_adaptive_memory_v1": "v4（記憶3つ）", "deterministic": "決定論（エンコーダなし・較正あり）"}.get(
+        name, name.replace("yamabiko_rig_adaptive_", "").replace("(mixed memory)", "（記憶1つ）").replace(
+            "(3 memories)", "（記憶3つ）"))
+
+
 def n(value, digits=1):
     return "—" if value is None else f"{value:.{digits}f}"
 
@@ -117,6 +124,10 @@ def main():
             composite_prefix = composite_path.parent.as_posix().rstrip("/") + "/"
     integrated_path = docs_root / "e2e-integrated-results" / "manifest.json"
     integrated = json.loads(integrated_path.read_text(encoding="utf-8")) if integrated_path.exists() else {}
+    adaptation_path = docs_root / "e2e-rig-adaptive-results" / "adaptation.json"
+    adaptation = json.loads(adaptation_path.read_text(encoding="utf-8")) if adaptation_path.exists() else {}
+    loop_path = docs_root / "e2e-rig-adaptive-results" / "device_loop.json"
+    device_loop = json.loads(loop_path.read_text(encoding="utf-8")) if loop_path.exists() else {}
     probe_path = docs_root / "e2e-rig-adaptive-results" / "memory_probe.json"
     memory_probe = json.loads(probe_path.read_text(encoding="utf-8")) if probe_path.exists() else {}
     rig_eval_path = docs_root / "e2e-rig-adaptive-results" / "manifest.json"
@@ -682,11 +693,12 @@ def main():
         models = rig.get("neural_models") or ({"current": {**neural, "learning_mode": False}} if neural else {})
         nn_rows = ""
         for name, entry in models.items():
-            mode = "学習モード" if entry.get("learning_mode") else ("同じ曲2回で学習" if entry.get("protocol") == "repeat-song" else "演奏中に書き込み")
+            mode = {"repeat-song": "同じ曲2回で学習", "session-swaps": "セッション学習"}.get(
+                entry.get("protocol"), "学習モード" if entry.get("learning_mode") else "演奏中に書き込み")
             for key, label in (("first_play", "1回目"), ("second_play", "2回目（適応後）")):
                 if key in entry:
                     cells = "".join(f"<td>{n(row['all'])}</td>" for row in entry[key]["per_song"])
-                    nn_rows += (f"<tr><td>{html.escape(name.replace('yamabiko_rig_adaptive_', ''))} {mode} / {label}</td>"
+                    nn_rows += (f"<tr><td>{html.escape(model_label(name))} {mode} / {label}</td>"
                                 f"{cells}<td>{n(entry[key]['mean'].get('core'))}</td></tr>")
         song_heads = "".join(f"<th>{k + 1}曲目</th>" for k in range(rig["songs"]))
         rig_listens = "".join(doc_audio("e2e-rig-adaptive-results/" + src, label) for key, label in
@@ -699,7 +711,7 @@ def main():
             parts = []
             for name, entry in models.items():
                 gain = entry["first_play"]["mean"]["all"] - entry["second_play"]["mean"]["all"]
-                parts.append(f"{html.escape(name.replace('yamabiko_rig_adaptive_', ''))}: 2回目 {n(entry['second_play']['mean']['all'])} cent"
+                parts.append(f"{html.escape(model_label(name))}: 2回目 {n(entry['second_play']['mean']['all'])} cent"
                              f"（1回目からの改善 {n(gain)} cent）")
             memory_note = (f'<p class="note"><b>評価:</b> 同じ曲を同じ機体で2回演奏し、1回目で書いた記憶を持ち越した2回目で採点する'
                            f'（未知のモーターで1回目がずれるのは当然で、適応後で比べる）。{" ／ ".join(parts)}。'
@@ -711,7 +723,7 @@ def main():
                        "deadband": "不感帯", "hearing_delay_steps": "聴こえの遅れ"}
         if memory_probe.get("models"):
             probe_models = memory_probe["models"]
-            heads = "".join(f"<th>{html.escape(name.replace('yamabiko_rig_adaptive_', ''))}</th>" for name in probe_models)
+            heads = "".join(f"<th>{html.escape(model_label(name))}</th>" for name in probe_models)
             body = "".join(f"<tr><td>{label}</td>" + "".join(f"<td>{m['r2'][field]:.2f}</td>" for m in probe_models.values())
                            + "</tr>" for field, label in probe_names.items())
             probe_table = (f'<div class="table"><table><thead><tr><th>記憶から読める機体の値（R²）</th>{heads}</tr></thead>'
@@ -757,6 +769,52 @@ def main():
       {figure(rig_eval.get('plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — 1台目の機体・1曲目', 'e2e-rig-adaptive-results/')}'''
     else:
         rig_adaptive_html = ""
+
+    players = adaptation.get("players", {})
+    if players:
+        def curve_rows(key):
+            return "".join(
+                f"<tr><td>{html.escape(model_label(name))}</td>"
+                + "".join(f"<td>{n(row['all'])}</td>" for row in outcome[key]) + "</tr>"
+                for name, outcome in players.items() if key in outcome)
+        count = adaptation["repeats"]
+        heads = lambda label: "".join(f"<th>{k + 1}{label}</th>" for k in range(count))
+        adaptation_html = f'''<h2 id="adaptation">適応の種類ごとの評価（他の適応を止めて測る）</h2>
+      <p>曲・モーター・笛への適応を、対象の記憶だけ書き込みを許して別々に測った（乱数化機体 {adaptation["rigs"]} 台、単位は cent）。モーターと笛のテストでは毎回別の曲を吹くので「曲に慣れた」分は混ざらない。決定論版はモーター交換時に較正でモーター速度を測り直す。記憶が1つのモデルは他の適応を止められないため参考。</p>
+      <div class="grid">
+        <section class="card partial"><div class="stage"><b>曲</b><span class="partial">繰り返し</span></div>
+          <h2>同じ曲を繰り返す（曲の記憶だけ）</h2>
+          <div class="table"><table><thead><tr><th>モデル</th>{heads("回目")}</tr></thead><tbody>{curve_rows("song_curve")}</tbody></table></div></section>
+        <section class="card partial"><div class="stage"><b>M</b><span class="partial">モーター交換</span></div>
+          <h2>モーター交換後、別の曲を順に（モーターの記憶だけ）</h2>
+          <div class="table"><table><thead><tr><th>モデル</th>{heads("曲目")}</tr></thead><tbody>{curve_rows("motor_swap")}</tbody></table></div></section>
+        <section class="card partial"><div class="stage"><b>F</b><span class="partial">笛交換</span></div>
+          <h2>笛交換後、別の曲を順に（笛の記憶だけ）</h2>
+          <div class="table"><table><thead><tr><th>モデル</th>{heads("曲目")}</tr></thead><tbody>{curve_rows("flute_swap")}</tbody></table></div></section>
+        <section class="card partial"><div class="stage"><b>ALL</b><span class="partial">総合</span></div>
+          <h2>新しい機体で、曲ごとに3回（全記憶）</h2>
+          <div class="table"><table><thead><tr><th>モデル</th><th>1回目</th><th>2回目</th><th>3回目</th></tr></thead><tbody>{curve_rows("overall")}</tbody></table></div></section>
+      </div>'''
+    else:
+        adaptation_html = ""
+
+    loop_summary = device_loop.get("summary", {})
+    if loop_summary:
+        rounds = len(loop_summary["memory_only"])
+        round_heads = "".join(f"<th>{k}</th>" for k in range(rounds))
+        loop_rows = "".join(
+            f"<tr><td>{label}</td>" + "".join(f"<td>{n(v)}</td>" for v in loop_summary[key]) + "</tr>"
+            for key, label in (("memory_only", "記憶だけで適応（重みは固定）"), ("on_rig_learning", "機体上で重みも学習")))
+        rig_rows = "".join(
+            f"<tr><td>{r['motor_factor']:.2f}倍</td>" + "".join(f"<td>{n(v)}</td>" for v in r["memory_only"])
+            + "".join(f"<td>{n(v)}</td>" for v in r["on_rig_learning"]) + f"<td>{len(r.get('rollbacks', []))}</td></tr>"
+            for r in device_loop["rigs"])
+        loop_html = f'''<h2 id="device-loop">実機想定の学習ループ（ブラックボックスの機体）</h2>
+      <p>シミュレーターを実機と同じブラックボックス（PWMとバルブを送り、聞こえた音程だけを受け取る。勾配・機体の値は出さない）として扱い、実機でも回せる手順だけで学習した。1ラウンド＝演奏して記録 → その機体の記録だけで world model を当てはめる → world model の中で方策を微調整 → 機体に戻して演奏。更新後に聞こえた音程が悪化したら取り消し、事前学習の重みから離れすぎないよう引き留める。採点だけにシミュレーターの真の音程を使う（単位は cent）。</p>
+      <div class="table"><table><thead><tr><th>ラウンド（{len(device_loop["rigs"])}台平均）</th>{round_heads}</tr></thead><tbody>{loop_rows}</tbody></table></div>
+      <div class="table"><table><thead><tr><th>モーター</th><th colspan="{rounds}">記憶だけ</th><th colspan="{rounds}">重みも学習</th><th>取り消し回数</th></tr></thead><tbody>{rig_rows}</tbody></table></div>'''
+    else:
+        loop_html = ""
 
     whole = integrated.get("summary", {})
     if whole:
@@ -812,7 +870,7 @@ def main():
         <dl><div><dt>Feedforward</dt><dd>Position Planner（別Policyは置かない）</dd></div><div><dt>関係学習</dt><dd>PWM履歴 → 可聴音程のWorld Model</dd></div><div><dt>訓練環境</dt><dd>決定論的なtorque rise・摩擦・慣性 + 線形笛</dd></div><div><dt>検証範囲</dt><dd>内部simulationのみ / 実機未検証</dd></div></dl>
       </div>
       <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner (= Feedforward) → Motor Controller → Motor Physics → Linear Flute → deterministic waveform → Neural Ear (self) → Comparator → Adaptive Feedback ↩ PWM<br>学習時: PWM/audio → Motor Audio World Model → Motor Controller</p>
-      {process_results}{hybrid_lab_html}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div>{flute_audit_html}{rig_adaptive_html}{integrated_html}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
+      {process_results}{hybrid_lab_html}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div>{flute_audit_html}{rig_adaptive_html}{adaptation_html}{loop_html}{integrated_html}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
       <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p>{physical_history}
     </section>
     <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">

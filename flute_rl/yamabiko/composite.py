@@ -91,7 +91,7 @@ class YamabikoComposite(nn.Module):
         staged_config = StagedConfig(**comparator_ck["config"])
         comparator = ErrorComparator(staged_config).to(device); comparator.load_state_dict(comparator_ck["comparator"])
         controller = MotorTrajectoryController().to(device); controller.load_state_dict(physical_ck["controller"])
-        plant_config = PhysicalPlantConfig(**physical_ck["plant_config"])
+        plant_config = PhysicalPlantConfig.from_dict(physical_ck["plant_config"])
         feedback = AcousticFeedbackResidual(limit=plant_config.feedback_limit).to(device)
         feedback.load_state_dict(physical_ck["feedback"])
         return cls(ear, tempo, timeline, planner, controller, comparator, feedback, plant_config).to(device)
@@ -128,7 +128,7 @@ class YamabikoComposite(nn.Module):
         controller.load_state_dict(checkpoint["controller"])
         comparator = ErrorComparator(StagedConfig(comparator_hidden=checkpoint["comparator_hidden"])).to(device)
         comparator.load_state_dict(checkpoint["comparator"])
-        plant_config = PhysicalPlantConfig(**checkpoint["plant_config"])
+        plant_config = PhysicalPlantConfig.from_dict(checkpoint["plant_config"])
         feedback = AcousticFeedbackResidual(hidden=checkpoint["feedback_hidden"],
                                             limit=plant_config.feedback_limit).to(device)
         feedback.load_state_dict(checkpoint["feedback"])

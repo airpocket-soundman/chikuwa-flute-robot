@@ -27,7 +27,7 @@ from flute_rl.yamabiko.e2e_io import frame_audio_numpy  # noqa: E402
 from flute_rl.yamabiko.error_regions import error_regions, region_errors  # noqa: E402
 from flute_rl.yamabiko.melodies import ARTICULATION_FRAMES, note_age  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
-from flute_rl.yamabiko.rig_adaptive import RigAdaptivePerformer  # noqa: E402
+from flute_rl.yamabiko.performers import load_performer  # noqa: E402
 
 TEMPO_SCALE = 2
 TAIL_STEPS = 60  # let the last note finish before the song ends
@@ -73,7 +73,7 @@ def average(rows):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--composite", default="runs/yamabiko_connected_composite_v2.pt")
-    ap.add_argument("--downstream", default="runs/yamabiko_rig_adaptive_v2.pt")
+    ap.add_argument("--downstream", default="runs/yamabiko_adaptive_memory_v1.pt")
     ap.add_argument("--out", default="docs/e2e-integrated-results")
     ap.add_argument("--rigs", type=int, default=64)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -81,8 +81,7 @@ def main():
     torch.set_grad_enabled(False); device = args.device
     composite = YamabikoComposite.from_checkpoint(
         torch.load(args.composite, map_location=device, weights_only=False), device).eval()
-    downstream_checkpoint = torch.load(args.downstream, map_location=device, weights_only=False)
-    downstream = RigAdaptivePerformer.from_checkpoint(downstream_checkpoint, device).eval()
+    downstream, downstream_checkpoint = load_performer(args.downstream, device)
     learning_mode = bool(downstream_checkpoint.get("calibration_songs"))
     plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
     deterministic = EncoderlessDeterministicPerformer(plant)

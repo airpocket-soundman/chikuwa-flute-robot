@@ -18,7 +18,7 @@ from flute_rl.yamabiko.deterministic_pipeline import (DeterministicEar, Determin
 from flute_rl.yamabiko.e2e_io import frame_audio_numpy  # noqa: E402
 from flute_rl.yamabiko.deterministic_pipeline import EncoderlessDeterministicPerformer  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
-from flute_rl.yamabiko.rig_adaptive import RigAdaptivePerformer  # noqa: E402
+from flute_rl.yamabiko.performers import load_performer  # noqa: E402
 
 # Closed-tube controls take the remembered target directly and plan inside.
 CLOSED_TUBE_CONTROLS = ("ra", "enc")
@@ -178,8 +178,7 @@ def add_closed_tube_controls(document, checkpoint_path, device):
     plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
     params = plant.parameters(CLOSED_TUBE_RIGS, device, spread=1.0,
                               generator=torch.Generator(device).manual_seed(2718))
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    neural = RigAdaptivePerformer.from_checkpoint(checkpoint, device).eval()
+    neural, checkpoint = load_performer(checkpoint_path, device)
     learning_mode = bool(checkpoint.get("calibration_songs"))
     deterministic = EncoderlessDeterministicPerformer(plant)
     motor_ratio = deterministic.measure_motor(params, torch.Generator(device).manual_seed(998))
@@ -272,7 +271,7 @@ def main():
     ap.add_argument("--checkpoint", default="runs/yamabiko_connected_composite_v2.pt")
     ap.add_argument("--out", default="docs/e2e-composite-results/hybrid-lab.json")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--closed-tube-downstream", default="runs/yamabiko_rig_adaptive_v2.pt",
+    ap.add_argument("--closed-tube-downstream", default="runs/yamabiko_adaptive_memory_v1.pt",
                     help="rig-adaptive NN checkpoint for the closed-tube controls ('' to skip)")
     ap.add_argument("--extend-existing", action="store_true",
                     help="Only (re)compute the closed-tube controls on the existing JSON")

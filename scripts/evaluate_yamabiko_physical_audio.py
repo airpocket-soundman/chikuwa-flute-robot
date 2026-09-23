@@ -76,7 +76,7 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); out = pathlib.Path(args.out); out.mkdir(parents=True, exist_ok=True)
     checkpoint = torch.load(args.checkpoint, map_location=args.device)
-    cfg = PhysicalPlantConfig(**checkpoint["plant_config"]); plant = DifferentiableMotorFlute(cfg)
+    cfg = PhysicalPlantConfig.from_dict(checkpoint["plant_config"]); plant = DifferentiableMotorFlute(cfg)
     world = MotorAudioWorldModel().to(args.device); world.load_state_dict(checkpoint["world_model"]); world.eval()
     controller = MotorTrajectoryController().to(args.device); controller.load_state_dict(checkpoint["controller"]); controller.eval()
     feedback = AcousticFeedbackResidual(limit=cfg.feedback_limit).to(args.device); feedback.load_state_dict(checkpoint["feedback"]); feedback.eval()

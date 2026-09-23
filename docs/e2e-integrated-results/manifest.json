@@ -5,32 +5,51 @@
     "samples": 10,
     "simulator": "PhysicalPlantConfig.realistic()",
     "upstream_checkpoint": "runs/yamabiko_connected_composite_v2.pt",
-    "downstream_checkpoint": "runs/yamabiko_rig_adaptive_v2.pt",
-    "downstream_learning_mode": true,
+    "downstream_checkpoint": "runs/yamabiko_adaptive_memory_v1.pt",
+    "downstream_learning_mode": false,
+    "protocol": "NN routes play each phrase twice on the same rig and score the second play; the deterministic routes use the motor calibration (measure_motor)",
     "routes": {
       "nn_listen+nn_play": {
-        "all": 48.296705200401306,
-        "settled": 33.052117019052965,
+        "all": 68.64268232729464,
+        "settled": 47.206339609198075,
         "missing_voice": 0.02122673392046707,
-        "extra_voice": 0.002439024390243902
+        "extra_voice": 0.002439024390243902,
+        "first_play_all": 82.14261248127438,
+        "transit": 111.57109832763672,
+        "departing": 52.123477935791016,
+        "core": 41.91571388244629,
+        "core_frames": 0.4710534527897835
       },
       "nn_listen+det_play": {
-        "all": 41.7169090244358,
-        "settled": 29.24303214455898,
+        "all": 49.738073216557034,
+        "settled": 36.272433856165016,
         "missing_voice": 0.02122673392046707,
-        "extra_voice": 0.002439024390243902
+        "extra_voice": 0.002439024390243902,
+        "transit": 82.38033464219835,
+        "departing": 49.286675771077476,
+        "core": 26.938932609558105,
+        "core_frames": 0.4710534527897835
       },
       "score+nn_play": {
-        "all": 39.91686567788106,
-        "settled": 27.97704519468139,
+        "all": 61.31062156703001,
+        "settled": 39.949303931775205,
         "missing_voice": 0.0,
-        "extra_voice": 0.0
+        "extra_voice": 0.0,
+        "first_play_all": 77.32461278851099,
+        "transit": 104.95288297865126,
+        "departing": 51.01524416605631,
+        "core": 31.13411674499512,
+        "core_frames": 0.46566439121961595
       },
       "score+det_play": {
-        "all": 37.16298520420035,
-        "settled": 21.334812064524634,
+        "all": 45.21067164361096,
+        "settled": 28.984165652796435,
         "missing_voice": 0.0,
-        "extra_voice": 0.0
+        "extra_voice": 0.0,
+        "transit": 83.15153079562717,
+        "departing": 44.43862120310465,
+        "core": 18.368384456634523,
+        "core_frames": 0.46566439121961595
       }
     },
     "memory": {
@@ -55,28 +74,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 40.253217533656525,
-          "settled": 31.01275016784668,
+          "all": 58.14355870087941,
+          "settled": 41.21144275029501,
           "missing_voice": 0.009433962264150943,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 64.50752887839363,
+          "transit": 111.55793762207031,
+          "departing": 50.99803924560547,
+          "core": 35.354469299316406,
+          "core_frames": 0.5375372171401978
         },
         "nn_listen+det_play": {
-          "all": 42.97856176240104,
-          "settled": 30.060753412246704,
+          "all": 45.92446903047107,
+          "settled": 33.942536274592086,
           "missing_voice": 0.009433962264150943,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 80.04069519042969,
+          "departing": 50.9621467590332,
+          "core": 27.696104049682617,
+          "core_frames": 0.5375372171401978
         },
         "score+nn_play": {
-          "all": 32.144332080517174,
-          "settled": 21.44112172565962,
+          "all": 46.74685236418023,
+          "settled": 28.476866104100882,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 61.7855735724827,
+          "transit": 103.05357360839844,
+          "departing": 49.352088928222656,
+          "core": 18.799753189086914,
+          "core_frames": 0.5324661135673523
         },
         "score+det_play": {
-          "all": 32.10054106982249,
-          "settled": 15.738563628573168,
+          "all": 36.38110138335318,
+          "settled": 21.685524664427106,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 77.9458999633789,
+          "departing": 46.99197006225586,
+          "core": 12.27382755279541,
+          "core_frames": 0.5324661135673523
         }
       },
       "audio": {
@@ -97,28 +134,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 32.80077503597926,
-          "settled": 25.153511124427872,
+          "all": 48.26984979488231,
+          "settled": 37.096233295671865,
           "missing_voice": 0.015625,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 57.13437817714832,
+          "transit": 73.64799499511719,
+          "departing": 27.200368881225586,
+          "core": 42.277103424072266,
+          "core_frames": 0.43245700001716614
         },
         "nn_listen+det_play": {
-          "all": 38.97617006554175,
-          "settled": 24.398672079799148,
+          "all": 43.20783392840592,
+          "settled": 27.564609908094308,
           "missing_voice": 0.015625,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 74.0945053100586,
+          "departing": 16.922412872314453,
+          "core": 36.29220962524414,
+          "core_frames": 0.43245700001716614
         },
         "score+nn_play": {
-          "all": 25.301736041903496,
-          "settled": 22.322243681140975,
+          "all": 38.4970499239862,
+          "settled": 29.596917900384643,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 49.55207117895286,
+          "transit": 63.039302825927734,
+          "departing": 30.608503341674805,
+          "core": 25.648488998413086,
+          "core_frames": 0.4256998598575592
         },
         "score+det_play": {
-          "all": 25.263212795058887,
-          "settled": 10.203068906185674,
+          "all": 28.92401752869288,
+          "settled": 12.771831582574283,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 61.46707534790039,
+          "departing": 12.70577621459961,
+          "core": 15.484057426452637,
+          "core_frames": 0.4256998598575592
         }
       }
     },
@@ -134,28 +189,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 44.33628584476227,
-          "settled": 31.59662029207969,
+          "all": 82.09439104288181,
+          "settled": 60.19945763081921,
           "missing_voice": 0.020833333333333332,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 99.35684668256883,
+          "transit": 150.69964599609375,
+          "departing": 66.31968688964844,
+          "core": 41.78661346435547,
+          "core_frames": 0.4293965995311737
         },
         "nn_listen+det_play": {
-          "all": 34.34971832975428,
-          "settled": 19.10986925144585,
+          "all": 58.156655598194035,
+          "settled": 38.188616971580345,
           "missing_voice": 0.020833333333333332,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 124.6673812866211,
+          "departing": 42.36152648925781,
+          "core": 19.382061004638672,
+          "core_frames": 0.4293965995311737
         },
         "score+nn_play": {
-          "all": 31.614422532419365,
-          "settled": 17.545493233437632,
+          "all": 70.46381517251334,
+          "settled": 43.83635605550279,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 87.45536877214909,
+          "transit": 148.04815673828125,
+          "departing": 51.23941421508789,
+          "core": 26.66792106628418,
+          "core_frames": 0.4204508364200592
         },
         "score+det_play": {
-          "all": 36.900432224075004,
-          "settled": 13.725603080263324,
+          "all": 60.2831059868137,
+          "settled": 32.48817369049671,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 138.98838806152344,
+          "departing": 33.80441665649414,
+          "core": 20.405094146728516,
+          "core_frames": 0.4204508364200592
         }
       }
     },
@@ -171,28 +244,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 55.94446465293354,
-          "settled": 43.398032139758676,
+          "all": 78.39322723934357,
+          "settled": 55.92388943750031,
           "missing_voice": 0.026041666666666664,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 96.17123855116533,
+          "transit": 114.65692901611328,
+          "departing": 60.63152313232422,
+          "core": 40.5811767578125,
+          "core_frames": 0.265290766954422
         },
         "nn_listen+det_play": {
-          "all": 55.75826659942055,
-          "settled": 38.47346962228114,
+          "all": 63.042456935433776,
+          "settled": 47.64502483971265,
           "missing_voice": 0.026041666666666664,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 85.54910278320312,
+          "departing": 58.52714538574219,
+          "core": 32.031394958496094,
+          "core_frames": 0.265290766954422
         },
         "score+nn_play": {
-          "all": 54.190929474929966,
-          "settled": 44.77375268936157,
+          "all": 73.36910788839062,
+          "settled": 52.99330010133631,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 93.0901593429347,
+          "transit": 107.17829895019531,
+          "departing": 63.31499481201172,
+          "core": 30.657072067260742,
+          "core_frames": 0.2583821713924408
         },
         "score+det_play": {
-          "all": 52.31142619500557,
-          "settled": 34.05791294808481,
+          "all": 59.44105911999941,
+          "settled": 43.93493718259475,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 83.91616821289062,
+          "departing": 58.737606048583984,
+          "core": 20.377452850341797,
+          "core_frames": 0.2583821713924408
         }
       }
     },
@@ -208,28 +299,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 61.813610718283854,
-          "settled": 23.200503122238885,
+          "all": 70.87327603722962,
+          "settled": 40.182789507366365,
           "missing_voice": 0.013888888888888892,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 83.8861902079112,
+          "transit": null,
+          "departing": null,
+          "core": 70.87327575683594,
+          "core_frames": 1.0
         },
         "nn_listen+det_play": {
-          "all": 19.04261403352442,
-          "settled": 9.275542429515294,
+          "all": 27.344591117241016,
+          "settled": 13.581323867752438,
           "missing_voice": 0.013888888888888892,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": null,
+          "departing": null,
+          "core": 27.34459114074707,
+          "core_frames": 1.0
         },
         "score+nn_play": {
-          "all": 35.2422097325325,
-          "settled": 14.046178034373693,
+          "all": 63.52082080311246,
+          "settled": 33.74121206714993,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 79.48587156004376,
+          "transit": null,
+          "departing": null,
+          "core": 63.52082061767578,
+          "core_frames": 1.0
         },
         "score+det_play": {
-          "all": 14.771480576859581,
-          "settled": 5.1997605335144765,
+          "all": 23.922127736939323,
+          "settled": 10.577454311507088,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": null,
+          "departing": null,
+          "core": 23.922128677368164,
+          "core_frames": 1.0
         }
       }
     },
@@ -245,28 +354,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 87.62790479812216,
-          "settled": 63.291410840790846,
+          "all": 110.41710336411253,
+          "settled": 70.96120780500871,
           "missing_voice": 0.03589743589743589,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 135.95938698281634,
+          "transit": 157.79873657226562,
+          "departing": 86.71160125732422,
+          "core": 34.403831481933594,
+          "core_frames": 0.21812666952610016
         },
         "nn_listen+det_play": {
-          "all": 80.16556904163765,
-          "settled": 76.94686951308415,
+          "all": 94.17693331140154,
+          "settled": 89.72921909134965,
           "missing_voice": 0.03589743589743589,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 95.52790832519531,
+          "departing": 145.38531494140625,
+          "core": 23.529050827026367,
+          "core_frames": 0.21812666952610016
         },
         "score+nn_play": {
-          "all": 88.05849145253498,
-          "settled": 61.39540096521378,
+          "all": 108.2685767601698,
+          "settled": 68.95643972953161,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 133.0845186636998,
+          "transit": 153.8604278564453,
+          "departing": 89.17781066894531,
+          "core": 28.473281860351562,
+          "core_frames": 0.21029646694660187
         },
         "score+det_play": {
-          "all": 81.67258869806926,
-          "settled": 70.71149088144303,
+          "all": 95.70891912166888,
+          "settled": 85.40343382358552,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 102.62532806396484,
+          "departing": 137.5760498046875,
+          "core": 20.343341827392578,
+          "core_frames": 0.21029646694660187
         }
       },
       "audio": {
@@ -287,28 +414,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 35.10106943796078,
-          "settled": 22.430898874233932,
+          "all": 57.73129035780827,
+          "settled": 38.0712773698008,
           "missing_voice": 0.02040816326530612,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 71.90996089080969,
+          "transit": 108.01841735839844,
+          "departing": 42.05854034423828,
+          "core": 36.239383697509766,
+          "core_frames": 0.51171875
         },
         "nn_listen+det_play": {
-          "all": 35.89118071397145,
-          "settled": 21.27088856085753,
+          "all": 41.1220406194528,
+          "settled": 25.287811075520313,
           "missing_voice": 0.02040816326530612,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 79.61290740966797,
+          "departing": 32.399776458740234,
+          "core": 23.356698989868164,
+          "core_frames": 0.51171875
         },
         "score+nn_play": {
-          "all": 31.893066817400406,
-          "settled": 21.674437834211616,
+          "all": 49.03887674516561,
+          "settled": 32.24521837943842,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 66.6749507699694,
+          "transit": 94.96056365966797,
+          "departing": 44.31111145019531,
+          "core": 25.75569725036621,
+          "core_frames": 0.5012755393981934
         },
         "score+det_play": {
-          "all": 31.071501921634287,
-          "settled": 13.450726146540365,
+          "all": 35.97182338091792,
+          "settled": 17.71984488904969,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 80.95941925048828,
+          "departing": 28.30144500732422,
+          "core": 14.506453514099121,
+          "core_frames": 0.5012755393981934
         }
       }
     },
@@ -324,28 +469,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 44.74159745247133,
-          "settled": 37.278024781610554,
+          "all": 66.29217213456349,
+          "settled": 44.986650697963746,
           "missing_voice": 0.03125,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 75.71719724132168,
+          "transit": 99.49968719482422,
+          "departing": 51.97077560424805,
+          "core": 33.971214294433594,
+          "core_frames": 0.27818381786346436
         },
         "nn_listen+det_play": {
-          "all": 43.027384511886105,
-          "settled": 30.345727114333318,
+          "all": 47.83663736620257,
+          "settled": 37.40488046469147,
           "missing_voice": 0.03125,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 64.35954284667969,
+          "departing": 45.03019332885742,
+          "core": 26.861539840698242,
+          "core_frames": 0.27818381786346436
         },
         "score+nn_play": {
-          "all": 43.49131490041812,
-          "settled": 38.2050142288208,
+          "all": 58.74356213212013,
+          "settled": 43.539875722398946,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 74.74954223011932,
+          "transit": 85.62905883789062,
+          "departing": 53.62150955200195,
+          "core": 25.218294143676758,
+          "core_frames": 0.2694905698299408
         },
         "score+det_play": {
-          "all": 42.762173200647034,
-          "settled": 24.001337967666924,
+          "all": 47.214070945978165,
+          "settled": 31.855554767683444,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 70.17103576660156,
+          "departing": 41.64779281616211,
+          "core": 20.053930282592773,
+          "core_frames": 0.2694905698299408
         }
       }
     },
@@ -361,28 +524,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 26.871069808801018,
-          "settled": 21.332698354534074,
+          "all": 41.630824333677694,
+          "settled": 32.1985742297827,
           "missing_voice": 0.0,
-          "extra_voice": 0.024390243902439022
+          "extra_voice": 0.024390243902439022,
+          "first_play_all": 53.9293979331851,
+          "transit": 73.3324966430664,
+          "departing": 24.772268295288086,
+          "core": 33.06596755981445,
+          "core_frames": 0.4948323667049408
         },
         "nn_listen+det_play": {
-          "all": 30.508414521813393,
-          "settled": 18.963819952572095,
+          "all": 34.88969812045495,
+          "settled": 22.46174355581695,
           "missing_voice": 0.0,
-          "extra_voice": 0.024390243902439022
+          "extra_voice": 0.024390243902439022,
+          "transit": 67.4835205078125,
+          "departing": 15.878131866455078,
+          "core": 26.906457901000977,
+          "core_frames": 0.4948323667049408
         },
         "score+nn_play": {
-          "all": 23.14505637685458,
-          "settled": 18.274235575806863,
+          "all": 38.59047403062384,
+          "settled": 27.34065961370281,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 54.35905452196796,
+          "transit": 72.19750213623047,
+          "departing": 26.336219787597656,
+          "core": 26.757732391357422,
+          "core_frames": 0.4948323667049408
         },
         "score+det_play": {
-          "all": 23.167543378969036,
-          "settled": 9.418720759597479,
+          "all": 27.06415480871995,
+          "settled": 11.99038800538755,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 63.132572174072266,
+          "departing": 10.850207328796387,
+          "core": 15.865528106689453,
+          "core_frames": 0.4948323667049408
         }
       }
     },
@@ -398,28 +579,46 @@
       },
       "routes": {
         "nn_listen+nn_play": {
-          "all": 53.477056721042345,
-          "settled": 31.826720493008395,
+          "all": 72.58113026756772,
+          "settled": 51.231873367771954,
           "missing_voice": 0.03888888888888889,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 82.85399926742377,
+          "transit": 114.92803955078125,
+          "departing": 58.4484977722168,
+          "core": 50.604103088378906,
+          "core_frames": 0.5429913401603699
         },
         "nn_listen+det_play": {
-          "all": 36.471210664407366,
-          "settled": 23.584709509454594,
+          "all": 41.67941613831272,
+          "settled": 26.918572512539953,
           "missing_voice": 0.03888888888888889,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 70.08744812011719,
+          "departing": 36.113433837890625,
+          "core": 25.98921775817871,
+          "core_frames": 0.5429913401603699
         },
         "score+nn_play": {
-          "all": 34.0870973693,
-          "settled": 20.092573978787378,
+          "all": 65.8670798500379,
+          "settled": 38.76619364420573,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "first_play_all": 73.00901727279027,
+          "transit": 116.60906219482422,
+          "departing": 51.17554473876953,
+          "core": 39.842105865478516,
+          "core_frames": 0.543749988079071
         },
         "score+det_play": {
-          "all": 31.608951981862386,
-          "settled": 16.840935793377103,
+          "all": 37.196336423026196,
+          "settled": 21.41451361065819,
           "missing_voice": 0.0,
-          "extra_voice": 0.0
+          "extra_voice": 0.0,
+          "transit": 69.15789031982422,
+          "departing": 29.332326889038086,
+          "core": 20.452030181884766,
+          "core_frames": 0.543749988079071
         }
       },
       "audio": {

@@ -69,6 +69,14 @@ class PhysicalPlantConfig:
     motor_scale_range: tuple[float, float] | None = None
 
     @classmethod
+    def from_dict(cls, values: dict) -> "PhysicalPlantConfig":
+        """Rebuild a saved config, ignoring keys that are no longer fields
+        (e.g. ``effective_length_m``, which is now derived from ``home_cents``)."""
+        from dataclasses import fields
+        known = {f.name for f in fields(cls)}
+        return cls(**{key: value for key, value in values.items() if key in known})
+
+    @classmethod
     def realistic(cls, **overrides) -> "PhysicalPlantConfig":
         """Closed tube with the rig.py deadband and hearing imperfections."""
         values = dict(flute_model="closed_tube", home_cents=500.0, deadband=0.20, hearing_delay_steps=1,

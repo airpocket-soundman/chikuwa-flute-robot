@@ -11,9 +11,10 @@ heard pitch out):
 
 The rig's hidden emitted pitch is used only to score the evaluation songs.
 A "memory only" arm keeps the pre-trained weights and adapts through its
-memories alone, so the gain from on-rig weight learning is visible.  If an
-update makes what the rig hears worse, it is undone before the next round;
-that judgement uses heard pitch only, as the real rig would.
+memories alone, so the gain from on-rig weight learning is visible.  The
+weights that sounded best so far are kept; an update that makes what the rig
+hears worse is dropped and the next round fine-tunes from the best weights
+again.  That judgement uses heard pitch only, as the real rig would.
 """
 from __future__ import annotations
 
@@ -144,12 +145,16 @@ def main():
                     arm["memory"] = memory
                 arm["curve"].append(score(result["pitch_cents"], *eval_songs))
                 arm.setdefault("heard_curve", []).append(heard_error(result, *eval_songs))
-                # Safety on the rig: if the last weight update made what the rig
-                # hears worse, undo it (judged from heard pitch only).
-                if name == "on_rig_learning" and len(arm["heard_curve"]) > 1 and                         arm["heard_curve"][-1] > arm["heard_curve"][-2] and arm.get("previous_policy") is not None:
-                    arm["policy"] = arm["previous_policy"]
-                    arm["heard_curve"][-1] = arm["heard_curve"][-2]
-                    arm.setdefault("rollbacks", []).append(round_index)
+                # Safety on the rig, judged from heard pitch only: keep the weights
+                # that sounded best so far; a worse update is dropped and the next
+                # fine-tuning starts again from the best weights.
+                if name == "on_rig_learning":
+                    heard_now = arm["heard_curve"][-1]
+                    if arm.get("best_heard") is None or heard_now <= arm["best_heard"]:
+                        arm["best_heard"], arm["best_policy"] = heard_now, arm["policy"]
+                    else:
+                        arm["policy"] = arm["best_policy"]
+                        arm.setdefault("rollbacks", []).append(round_index)
             if round_index == args.rounds:
                 break
             # On-rig learning between rounds, from the play logs only.  (A random
@@ -162,7 +167,6 @@ def main():
             arms["on_rig_learning"]["world"] = world
             songs = [practice, eval_songs] + [random_melodies(rng, args.songs, args.song_steps, device, varied=True)
                                               for _ in range(2)]
-            arms["on_rig_learning"]["previous_policy"] = arms["on_rig_learning"]["policy"]
             arms["on_rig_learning"]["policy"] = fine_tune_policy(arms["on_rig_learning"]["policy"], world, context,
                                                                  songs, args.policy_steps, args.policy_lr,
                                                                  anchor=base_policy, anchor_weight=args.anchor_weight)
