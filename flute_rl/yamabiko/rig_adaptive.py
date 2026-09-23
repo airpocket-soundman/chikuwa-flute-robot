@@ -119,8 +119,14 @@ class RigAdaptivePerformer(nn.Module):
         return torch.zeros(batch, self.config.memory_hidden, device=device, dtype=dtype)
 
     def perform(self, plant: DifferentiableMotorFlute, cents, voice, parameters, memory=None,
-                generator: torch.Generator | None = None, target_delay: int = 2):
-        """One song on one rig: home, then play.  Returns logs and the kept memory."""
+                generator: torch.Generator | None = None, target_delay: int = 2,
+                write_memory: bool = True):
+        """One song on one rig: home, then play.  Returns logs and the kept memory.
+
+        ``write_memory=False`` is the performance mode of the learning-mode
+        design: the rig memory is only read, so what a calibration run wrote
+        stays fixed until the next calibration.
+        """
         cfg = self.config
         batch, steps = cents.shape; device, dtype = cents.device, cents.dtype
         memory = self.initial_memory(batch, device, dtype) if memory is None else memory
@@ -147,7 +153,8 @@ class RigAdaptivePerformer(nn.Module):
             emitted, sounding = plant.flute(state, voice[:, t].to(dtype), parameters)
             heard, valid, heard_state = listener.step(emitted, sounding, parameters, heard_state, generator)
             then = max(0, t - target_delay)
-            memory = self.memory(heard, valid, cents[:, then], voice[:, then], aim, pwm, fast, memory)
+            if write_memory:
+                memory = self.memory(heard, valid, cents[:, then], voice[:, then], aim, pwm, fast, memory)
             played.append(emitted); pwms.append(pwm); aims.append(aim)
             previous_pwm, previous_aim = pwm, aim
         return ({"pitch_cents": torch.stack(played, 1), "pwm": torch.stack(pwms, 1),

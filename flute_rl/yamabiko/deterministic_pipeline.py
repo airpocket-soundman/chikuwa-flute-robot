@@ -237,6 +237,7 @@ class EncoderlessConfig:
     anticipation_speed: float | None = 1.6
     anticipation_lag_steps: float = 6.0
     hold_fraction: float = .5
+    note_threshold_cents: float = 50.0
     kp: float = 12.0                 # PD on the estimated position
     kd: float = 2.0
     deadband_compensation: float | None = .25  # PWM offset; None = the plant's nominal deadband
@@ -293,22 +294,34 @@ class EncoderlessDeterministicPerformer(nn.Module):
         return RigMemory(torch.stack([a, b], 1), variance)
 
     def _anticipate(self, aim, voice, a, b):
-        """Switch the aim to each next note early enough to arrive on time."""
+        """Switch the aim to each next note early enough to arrive on time.
+
+        Notes are segmented first: a new note starts where the target moves
+        more than ``note_threshold_cents`` from the current note's first value.
+        A heard (neural) target wobbles a few cents every frame and glides
+        through leaps; without segmentation every wobble would look like a new
+        note and the anticipation would be lost.  The early part aims at the
+        next note's median.
+        """
         cfg = self.config
-        x = ((a[:, None] - period_ms(aim)) / b[:, None].clamp_min(.2)).clamp(0, 1)
-        result = aim.clone()
         steps_per_stroke = 1.0 / (cfg.anticipation_speed * self.plant.config.dt)
+        result = aim.clone()
         for row in range(aim.shape[0]):
-            changes = torch.nonzero(aim[row, 1:] != aim[row, :-1], as_tuple=False)[:, 0].tolist()
-            previous_start = 0
-            for change in changes:
-                onset = change + 1
-                distance = (x[row, onset] - x[row, change]).abs().item()
+            values = aim[row]
+            starts, anchor = [0], values[0].item()
+            for t in range(1, len(values)):
+                if abs(values[t].item() - anchor) > cfg.note_threshold_cents:
+                    starts.append(t); anchor = values[t].item()
+            bounds = starts + [len(values)]
+            medians = [values[bounds[k]:bounds[k + 1]].median() for k in range(len(starts))]
+            positions = [((a[row] - period_ms(m)) / b[row].clamp_min(.2)).clamp(0, 1).item() for m in medians]
+            for k in range(1, len(starts)):
+                onset = starts[k]
+                distance = abs(positions[k] - positions[k - 1])
                 lead = int(round(cfg.anticipation_lag_steps + distance * steps_per_stroke))
-                earliest = previous_start + int(cfg.hold_fraction * (onset - previous_start))
+                earliest = starts[k - 1] + int(cfg.hold_fraction * (onset - starts[k - 1]))
                 start = max(earliest, onset - lead)
-                result[row, start:onset] = aim[row, onset]
-                previous_start = onset
+                result[row, start:onset] = medians[k]
         return result
 
     @staticmethod

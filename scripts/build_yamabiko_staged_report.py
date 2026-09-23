@@ -6,6 +6,8 @@ import html
 import json
 import pathlib
 
+import numpy as np
+
 
 def n(value, digits=1):
     return "—" if value is None else f"{value:.{digits}f}"
@@ -681,6 +683,17 @@ def main():
         rig_listens = "".join(doc_audio("e2e-rig-adaptive-results/" + src, label) for key, label in
                               (("target", "目標"), ("deterministic", "決定論"), ("neural", "NN"))
                               if (src := rig_eval.get("audio", {}).get(key)))
+        if neural.get("carry_memory") and neural.get("reset_memory"):
+            later = lambda key: np.mean([row["all"] for row in neural[key]["per_song"][1:]])
+            gain = later("reset_memory") - later("carry_memory")
+            det_mean = det["observer_anticipation"]["mean"]["all"]
+            nn_mean = neural["carry_memory"]["mean"]["all"]
+            memory_note = (f'<p class="note"><b>結果:</b> NN平均 {n(nn_mean)} cent（決定論の基準 {n(det_mean)} cent）。'
+                           f'2曲目以降で記憶を持ち越した効果は {n(gain)} cent。決定論版で真の係数を与えた効果'
+                           f'（{n(det["observer_anticipation"]["mean"]["all"] - det["plus_true_coefficients"]["mean"]["all"])} cent）と同程度で、'
+                           f'このsimulatorでは笛の個体差を覚える価値が小さいことをNNでも確認した。</p>')
+        else:
+            memory_note = ""
         nn_table = (f'''<div class="table"><table><thead><tr><th>NN（演奏MAE / 曲）</th>{song_heads}<th>安定後</th></tr></thead>
           <tbody>{nn_rows}</tbody></table></div>''' if neural else '<p class="note">NNは学習中のため未評価。</p>')
         rig_adaptive_html = f'''<h2 id="rig-adaptive">閉管笛・現実的シミュレーターでの再設計（エンコーダなし）</h2>
@@ -693,6 +706,7 @@ def main():
         <section class="card {'partial' if neural else 'pending'}"><div class="stage"><b>NN</b><span class="{'partial' if neural else 'pending'}">{'評価済' if neural else '学習中'}</span></div>
           <h2>NN版：Planner + Motor/Feedback + 個体差記憶</h2><p class="flow">未来の目標窓 + 記憶z → Planner → 狙い位置 ／ 自己音・PWM履歴 → 高速GRU → PWM ／ 低速記憶zは曲をまたいで保持</p>
           {nn_table}
+          {memory_note}
           <p class="note">学習は同じ機体で別曲を連続演奏するエピソードで、微分可能シミュレーターを通したBPTT。NNはplantの位置・速度・パラメータを受け取らない。</p></section>
       </div>
       <div class="listen">{rig_listens}</div>
@@ -731,6 +745,7 @@ def main():
           <h2>お手本ごとの全体MAE</h2>
           <div class="table"><table><thead><tr><th>お手本</th><th>上流のみ</th>{sample_heads}</tr></thead><tbody>{sample_rows}</tbody></table></div></section>
       </div>
+      <p class="note"><b>読み方:</b> 正解楽譜を与えると決定論の下流が最良（上流の誤差なし）。NNが聴いた目標は1音の中でも毎フレーム数cent揺れ、跳躍では中間値を通るため、当初の決定論の先回りは揺れを「新しい音」と誤認し、先回りがほぼ効かなくなっていた。50 cent以上の変化で音を区切る処理を決定論に加えて解消した。NNの下流は学習で同じ揺れを吸収していた。一方、同音連打（articulation）はNNが苦手で、今後の改良対象。</p>
       {listens}'''
     else:
         integrated_html = ""

@@ -1,0 +1,431 @@
+{
+  "summary": {
+    "format": "yamabiko-integrated-eval-v1",
+    "rigs": 64,
+    "samples": 10,
+    "simulator": "PhysicalPlantConfig.realistic()",
+    "upstream_checkpoint": "runs/yamabiko_connected_composite_v1.pt",
+    "downstream_checkpoint": "runs/yamabiko_rig_adaptive_v1.pt",
+    "routes": {
+      "nn_listen+nn_play": {
+        "all": 54.36782478758344,
+        "settled": 46.26347503714254,
+        "missing_voice": 0.019685492423868432,
+        "extra_voice": 0.002439024390243902
+      },
+      "nn_listen+det_play": {
+        "all": 55.53289781696443,
+        "settled": 44.72947827824048,
+        "missing_voice": 0.019685492423868432,
+        "extra_voice": 0.002439024390243902
+      },
+      "score+nn_play": {
+        "all": 43.35242943405534,
+        "settled": 28.892872815430167,
+        "missing_voice": 0.0,
+        "extra_voice": 0.0
+      },
+      "score+det_play": {
+        "all": 37.16298520420035,
+        "settled": 21.334812064524634,
+        "missing_voice": 0.0,
+        "extra_voice": 0.0
+      }
+    },
+    "memory": {
+      "all": 28.403761651059124,
+      "settled": 28.135680700935104,
+      "missing_voice": 0.019685492423868436,
+      "extra_voice": 0.0024390243902439024
+    },
+    "error_reference": "true score (not the Ear's estimate)",
+    "real_rig_validated": false
+  },
+  "samples": [
+    {
+      "id": "four-step",
+      "title": "4\u97f3\u30b9\u30c6\u30c3\u30d7",
+      "description": "\u4e0a\u4e0b\u3059\u308b4\u97f3\u3002\u5f93\u6765\u30b5\u30f3\u30d7\u30eb\u3068\u306e\u6bd4\u8f03\u7528\u3002",
+      "memory": {
+        "all": 44.709173583984374,
+        "settled": 43.88107503255208,
+        "missing_voice": 0.009433962264150943,
+        "extra_voice": 0.0
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 58.731395056134176,
+          "settled": 52.66243675231934,
+          "missing_voice": 0.009433962264150943,
+          "extra_voice": 0.0
+        },
+        "nn_listen+det_play": {
+          "all": 64.40243924912951,
+          "settled": 52.92210812886556,
+          "missing_voice": 0.009433962264150943,
+          "extra_voice": 0.0
+        },
+        "score+nn_play": {
+          "all": 34.4378564177819,
+          "settled": 23.009155289122933,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 32.10054106982249,
+          "settled": 15.738563628573168,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      },
+      "audio": {
+        "target": "four-step-target.wav",
+        "nn": "four-step-nn.wav",
+        "det": "four-step-det.wav"
+      }
+    },
+    {
+      "id": "ascending-scale",
+      "title": "\u4e0a\u6607\u97f3\u968e",
+      "description": "\u9806\u6b21\u4e0a\u304c\u308b\u97f3\u7a0b\u3092\u8ffd\u3048\u308b\u304b\u3092\u898b\u308b\u3002",
+      "memory": {
+        "all": 24.078552567331414,
+        "settled": 24.27906844639542,
+        "missing_voice": 0.010416666666666666,
+        "extra_voice": 0.0
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 39.481295605709676,
+          "settled": 39.25981412075534,
+          "missing_voice": 0.010416666666666666,
+          "extra_voice": 0.0
+        },
+        "nn_listen+det_play": {
+          "all": 46.94962753496672,
+          "settled": 38.16352454742582,
+          "missing_voice": 0.010416666666666666,
+          "extra_voice": 0.0
+        },
+        "score+nn_play": {
+          "all": 25.848543564478557,
+          "settled": 21.757749931485044,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 25.263212795058887,
+          "settled": 10.203068906185674,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      }
+    },
+    {
+      "id": "descending-scale",
+      "title": "\u4e0b\u964d\u97f3\u968e",
+      "description": "\u9806\u6b21\u4e0b\u304c\u308b\u97f3\u7a0b\u3092\u8ffd\u3048\u308b\u304b\u3092\u898b\u308b\u3002",
+      "memory": {
+        "all": 36.871519381407076,
+        "settled": 37.54500757082544,
+        "missing_voice": 0.015625,
+        "extra_voice": 0.0
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 57.78149730692465,
+          "settled": 52.594636372845585,
+          "missing_voice": 0.015625,
+          "extra_voice": 0.0
+        },
+        "nn_listen+det_play": {
+          "all": 53.21475397342097,
+          "settled": 46.640770719508936,
+          "missing_voice": 0.015625,
+          "extra_voice": 0.0
+        },
+        "score+nn_play": {
+          "all": 38.657891499499485,
+          "settled": 21.693999355914546,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 36.900432224075004,
+          "settled": 13.725603080263324,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      }
+    },
+    {
+      "id": "zigzag",
+      "title": "\u30b8\u30b0\u30b6\u30b0\u65cb\u5f8b",
+      "description": "\u4e0a\u6607\u3068\u4e0b\u964d\u304c\u4ea4\u4e92\u306b\u73fe\u308c\u308b\u3002",
+      "memory": {
+        "all": 33.06754372336648,
+        "settled": 34.1338407555405,
+        "missing_voice": 0.026041666666666668,
+        "extra_voice": 0.0
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 67.06481291776035,
+          "settled": 63.4493378425131,
+          "missing_voice": 0.026041666666666664,
+          "extra_voice": 0.0
+        },
+        "nn_listen+det_play": {
+          "all": 70.35045947620574,
+          "settled": 52.826015778950286,
+          "missing_voice": 0.026041666666666664,
+          "extra_voice": 0.0
+        },
+        "score+nn_play": {
+          "all": 54.66158080846071,
+          "settled": 44.611024973439235,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 52.31142619500557,
+          "settled": 34.05791294808481,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      }
+    },
+    {
+      "id": "articulation",
+      "title": "\u540c\u97f3\u9023\u6253\u3068\u4f11\u7b26",
+      "description": "\u540c\u3058\u97f3\u3092\u4f11\u7b26\u3067\u533a\u5207\u3063\u3066\u518d\u767a\u97f3\u3067\u304d\u308b\u304b\u3092\u898b\u308b\u3002",
+      "memory": {
+        "all": 23.94546895631602,
+        "settled": 23.082481747581845,
+        "missing_voice": 0.013888888888888888,
+        "extra_voice": 0.0
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 44.516207919993874,
+          "settled": 30.809897513616654,
+          "missing_voice": 0.013888888888888892,
+          "extra_voice": 0.0
+        },
+        "nn_listen+det_play": {
+          "all": 38.140275827595886,
+          "settled": 29.755543544178916,
+          "missing_voice": 0.013888888888888892,
+          "extra_voice": 0.0
+        },
+        "score+nn_play": {
+          "all": 51.12360074122747,
+          "settled": 16.309877259390696,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 14.771480576859581,
+          "settled": 5.1997605335144765,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      }
+    },
+    {
+      "id": "large-leaps",
+      "title": "\u5927\u8df3\u8e8d",
+      "description": "\u30e2\u30fc\u30bf\u30fc\u306b\u53b3\u3057\u3044\u5927\u304d\u306a\u97f3\u7a0b\u8df3\u8e8d\u3002",
+      "memory": {
+        "all": 39.37921045181599,
+        "settled": 37.609777516332166,
+        "missing_voice": 0.035897435897435895,
+        "extra_voice": 0.0
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 88.79744333662886,
+          "settled": 70.93852919956733,
+          "missing_voice": 0.03589743589743589,
+          "extra_voice": 0.0
+        },
+        "nn_listen+det_play": {
+          "all": 98.81553485545707,
+          "settled": 93.32683897429499,
+          "missing_voice": 0.03589743589743589,
+          "extra_voice": 0.0
+        },
+        "score+nn_play": {
+          "all": 87.66493053925343,
+          "settled": 61.76547223329544,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 81.67258869806926,
+          "settled": 70.71149088144303,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      },
+      "audio": {
+        "target": "large-leaps-target.wav",
+        "nn": "large-leaps-nn.wav",
+        "det": "large-leaps-det.wav"
+      }
+    },
+    {
+      "id": "rhythm",
+      "title": "\u9577\u77ed\u30ea\u30ba\u30e0",
+      "description": "\u97f3\u4fa1\u306e\u9577\u77ed\u3092\u8a18\u61b6\u3067\u304d\u308b\u304b\u3092\u898b\u308b\u3002",
+      "memory": {
+        "all": 23.85114028773357,
+        "settled": 22.97117601923582,
+        "missing_voice": 0.01020408163265306,
+        "extra_voice": 0.0
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 49.144513307158476,
+          "settled": 38.8308263145575,
+          "missing_voice": 0.01020408163265306,
+          "extra_voice": 0.0
+        },
+        "nn_listen+det_play": {
+          "all": 52.957761078765714,
+          "settled": 39.48154183796474,
+          "missing_voice": 0.01020408163265306,
+          "extra_voice": 0.0
+        },
+        "score+nn_play": {
+          "all": 34.34600285851225,
+          "settled": 22.34190857705991,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 31.071501921634287,
+          "settled": 13.450726146540365,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      }
+    },
+    {
+      "id": "arpeggio",
+      "title": "\u5206\u6563\u548c\u97f3",
+      "description": "\u8df3\u8e8d\u3092\u542b\u3080\u898f\u5247\u7684\u306a\u4e0a\u6607\u30fb\u4e0b\u964d\u3002",
+      "memory": {
+        "all": 13.719994001491095,
+        "settled": 11.678930538216816,
+        "missing_voice": 0.03125,
+        "extra_voice": 0.0
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 50.4004682366566,
+          "settled": 41.48898398015917,
+          "missing_voice": 0.03125,
+          "extra_voice": 0.0
+        },
+        "nn_listen+det_play": {
+          "all": 47.69913875159397,
+          "settled": 30.606807777562093,
+          "missing_voice": 0.03125,
+          "extra_voice": 0.0
+        },
+        "score+nn_play": {
+          "all": 44.45418337235848,
+          "settled": 39.42175545879439,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 42.762173200647034,
+          "settled": 24.001337967666924,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      }
+    },
+    {
+      "id": "chromatic",
+      "title": "\u534a\u97f3\u9032\u884c",
+      "description": "\u5c0f\u3055\u306a\u97f3\u7a0b\u5dee\u3092\u8b58\u5225\u30fb\u518d\u73fe\u3067\u304d\u308b\u304b\u3092\u898b\u308b\u3002",
+      "memory": {
+        "all": 15.364163863097186,
+        "settled": 16.484340293734682,
+        "missing_voice": 0.005208333333333333,
+        "extra_voice": 0.024390243902439025
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 29.189196873709793,
+          "settled": 26.453989360846727,
+          "missing_voice": 0.005208333333333333,
+          "extra_voice": 0.024390243902439022
+        },
+        "nn_listen+det_play": {
+          "all": 33.98793354833313,
+          "settled": 25.62140119309519,
+          "missing_voice": 0.005208333333333333,
+          "extra_voice": 0.024390243902439022
+        },
+        "score+nn_play": {
+          "all": 23.743692278862,
+          "settled": 17.097362480911556,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 23.167543378969036,
+          "settled": 9.418720759597479,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      }
+    },
+    {
+      "id": "rests-and-phrase",
+      "title": "\u4f11\u7b26\u3092\u542b\u3080\u30d5\u30ec\u30fc\u30ba",
+      "description": "\u9014\u4e2d\u306e\u4f11\u7b26\u3068\u30d5\u30ec\u30fc\u30ba\u518d\u958b\u3092\u540c\u6642\u306b\u8a55\u4fa1\u3059\u308b\u3002",
+      "memory": {
+        "all": 29.05084969404805,
+        "settled": 29.691109088936237,
+        "missing_voice": 0.03888888888888889,
+        "extra_voice": 0.0
+      },
+      "routes": {
+        "nn_listen+nn_play": {
+          "all": 58.57141731515785,
+          "settled": 46.14629891424468,
+          "missing_voice": 0.03888888888888889,
+          "extra_voice": 0.0
+        },
+        "nn_listen+det_play": {
+          "all": 48.81105387417567,
+          "settled": 37.95023028055827,
+          "missing_voice": 0.03888888888888889,
+          "extra_voice": 0.0
+        },
+        "score+nn_play": {
+          "all": 38.58601226011912,
+          "settled": 20.92042259488787,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        },
+        "score+det_play": {
+          "all": 31.608951981862386,
+          "settled": 16.840935793377103,
+          "missing_voice": 0.0,
+          "extra_voice": 0.0
+        }
+      },
+      "audio": {
+        "target": "rests-and-phrase-target.wav",
+        "nn": "rests-and-phrase-nn.wav",
+        "det": "rests-and-phrase-det.wav"
+      }
+    }
+  ]
+}
