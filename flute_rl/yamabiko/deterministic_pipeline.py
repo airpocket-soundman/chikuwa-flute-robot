@@ -374,17 +374,34 @@ class EncoderlessDeterministicPerformer(nn.Module):
         # Same frames, same commands: the ratio cancels the shared acceleration phase.
         return (slope(x, ok) / slope(model_x, model_ok).clamp_min(1e-4)).clamp(.2, 5.0)
 
+    def twin_memory(self, twin):
+        """Flute coefficients of a fitted twin: T(x) is linear, so two points fix it."""
+        batch = twin.torque_gain.shape[0]; device = twin.torque_gain.device
+        zero = torch.zeros(batch, device=device, dtype=twin.torque_gain.dtype)
+        a = period_ms(self.plant.cents_at(zero, twin))
+        b = a - period_ms(self.plant.cents_at(zero + 1.0, twin))
+        return RigMemory(torch.stack([a, b], 1), torch.full((batch, 2), 1e-9, device=device, dtype=zero.dtype))
+
     def perform(self, cents, voice, parameters, memory: RigMemory | None = None,
-                generator: torch.Generator | None = None, motor_ratio: torch.Tensor | None = None):
+                generator: torch.Generator | None = None, motor_ratio: torch.Tensor | None = None,
+                twin=None):
+        """``twin``: fitted rig parameters.  With it the internal motor model,
+        the flute coefficients, the deadband compensation and the hearing
+        delay are the twin's instead of nominal guesses (never the rig's)."""
         from .melodies import next_voiced
         cfg = self.config
         batch, steps = cents.shape; device, dtype = cents.device, cents.dtype
+        if twin is not None:
+            memory = memory or self.twin_memory(twin)
+            motor_ratio = twin.max_velocity_strokes_s / self.plant.config.max_velocity_strokes_s
         memory = memory or self.nominal_memory(batch, device, dtype)
         a, b = memory.theta[:, 0].clone(), memory.theta[:, 1].clone()
         var_a = memory.variance[:, 0] + cfg.process_variance[0]
         var_b = memory.variance[:, 1] + cfg.process_variance[1]
         nominal = self.model.parameters(batch, device, dtype)
-        if motor_ratio is not None:  # measured in learning mode: scale the internal motor model
+        if twin is not None:  # the fitted rig is the internal model
+            nominal = twin
+        elif motor_ratio is not None:  # measured in learning mode: scale the internal motor model
             nominal.torque_gain = nominal.torque_gain * motor_ratio
             nominal.max_velocity_strokes_s = nominal.max_velocity_strokes_s * motor_ratio
         plant_state = self.plant.initial_state(batch, device, dtype)
@@ -400,9 +417,15 @@ class EncoderlessDeterministicPerformer(nn.Module):
             aim = self._anticipate(aim, voice, a, b, motor_ratio)
         if cfg.lead_steps > 0:
             aim = torch.cat([aim[:, cfg.lead_steps:], aim[:, -1:].expand(-1, cfg.lead_steps)], 1)
-        delay = self.plant.config.hearing_delay_steps + 1
-        x_history = torch.zeros(batch, delay, device=device, dtype=dtype)
-        voice_history = torch.zeros(batch, delay, device=device, dtype=torch.bool)
+        # Position/voice history, newest last; the heard pitch left the flute
+        # `delay` steps ago (the twin's per-rig delay, else the nominal one).
+        span = 6
+        delay = (twin.hearing_delay_steps.clamp(0, span - 1) if twin is not None and
+                 twin.hearing_delay_steps is not None else
+                 torch.full((batch,), self.plant.config.hearing_delay_steps, device=device, dtype=torch.long))
+        heard_index = (span - 1 - delay)[:, None]
+        x_history = torch.zeros(batch, span, device=device, dtype=dtype)
+        voice_history = torch.zeros(batch, span, device=device, dtype=torch.bool)
         dead_reckoned = torch.zeros(batch, device=device, dtype=dtype)  # since homing, uncorrected
         anchor_period = torch.zeros(batch, device=device, dtype=dtype)
         anchor_reckoned = torch.zeros(batch, device=device, dtype=dtype)
@@ -411,6 +434,8 @@ class EncoderlessDeterministicPerformer(nn.Module):
         previous_period = torch.zeros(batch, device=device, dtype=dtype)
         band = (self.plant.config.deadband if cfg.deadband_compensation is None
                 else cfg.deadband_compensation)
+        if twin is not None and twin.deadband is not None:
+            band = (twin.deadband + .03).clamp(max=.6)
         integral = torch.zeros(batch, device=device, dtype=dtype)
         heard_recently = torch.zeros(batch, device=device, dtype=torch.bool)
         logs = {key: [] for key in ("pitch_cents", "heard", "pwm", "command", "estimate")}
@@ -430,10 +455,10 @@ class EncoderlessDeterministicPerformer(nn.Module):
             x_history = torch.cat([x_history[:, 1:], estimate.position[:, None]], 1)
             voice_history = torch.cat([voice_history[:, 1:], voice[:, t, None]], 1)
             period = period_ms(heard)
-            usable = valid & voice_history[:, 0]
+            usable = valid & voice_history.gather(1, heard_index)[:, 0]
             heard_recently = usable
             # Observer: the heard pitch left the flute `delay` steps ago.
-            innovation = torch.where(usable, (a - period) / b.clamp_min(.2) - x_history[:, 0],
+            innovation = torch.where(usable, (a - period) / b.clamp_min(.2) - x_history.gather(1, heard_index)[:, 0],
                                      torch.zeros_like(heard))
             shift = cfg.observer_gain * innovation
             estimate.position = (estimate.position + shift).clamp(0, 1)
