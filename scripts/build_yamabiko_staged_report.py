@@ -675,23 +675,30 @@ def main():
             f"<tr><td>{label}</td><td>{n(det[key]['mean']['all'])}</td><td>{n(det[key]['mean']['onset'])}</td>"
             f"<td>{n(det[key]['mean']['settled'])}</td></tr>" for key, label in det_names if key in det)
         neural = rig.get("neural", {})
-        nn_rows = "".join(
-            f"<tr><td>{label}</td>{''.join(f'<td>{n(row[metric])}</td>' for row in neural[key]['per_song'] for metric in ('all',))}"
-            f"<td>{n(neural[key]['mean']['settled'])}</td></tr>"
-            for key, label in (("carry_memory", "記憶を曲間で持ち越す"), ("reset_memory", "毎曲リセット")) if key in neural)
+        models = rig.get("neural_models") or ({"current": {**neural, "learning_mode": False}} if neural else {})
+        nn_rows = ""
+        for name, entry in models.items():
+            mode = "学習モード（較正後は読むだけ）" if entry.get("learning_mode") else "演奏中に書き込み"
+            for key, label in (("carry_memory", "記憶あり"), ("reset_memory", "記憶なし")):
+                if key in entry:
+                    cells = "".join(f"<td>{n(row['all'])}</td>" for row in entry[key]["per_song"])
+                    nn_rows += (f"<tr><td>{html.escape(name.replace('yamabiko_rig_adaptive_', ''))} {mode} / {label}</td>"
+                                f"{cells}<td>{n(entry[key]['mean']['settled'])}</td></tr>")
         song_heads = "".join(f"<th>{k + 1}曲目</th>" for k in range(rig["songs"]))
         rig_listens = "".join(doc_audio("e2e-rig-adaptive-results/" + src, label) for key, label in
                               (("target", "目標"), ("deterministic", "決定論"), ("neural", "NN"))
                               if (src := rig_eval.get("audio", {}).get(key)))
-        if neural.get("carry_memory") and neural.get("reset_memory"):
-            later = lambda key: np.mean([row["all"] for row in neural[key]["per_song"][1:]])
-            gain = later("reset_memory") - later("carry_memory")
+        if models:
             det_mean = det["observer_anticipation"]["mean"]["all"]
-            nn_mean = neural["carry_memory"]["mean"]["all"]
-            memory_note = (f'<p class="note"><b>結果:</b> NN平均 {n(nn_mean)} cent（決定論の基準 {n(det_mean)} cent）。'
-                           f'2曲目以降で記憶を持ち越した効果は {n(gain)} cent。決定論版で真の係数を与えた効果'
-                           f'（{n(det["observer_anticipation"]["mean"]["all"] - det["plus_true_coefficients"]["mean"]["all"])} cent）と同程度で、'
-                           f'このsimulatorでは笛の個体差を覚える価値が小さいことをNNでも確認した。</p>')
+            true_gain = det_mean - det["plus_true_coefficients"]["mean"]["all"]
+            parts = []
+            for name, entry in models.items():
+                gain = entry["reset_memory"]["mean"]["all"] - entry["carry_memory"]["mean"]["all"]
+                parts.append(f"{html.escape(name.replace('yamabiko_rig_adaptive_', ''))}: 平均 {n(entry['carry_memory']['mean']['all'])} cent、記憶の効果 {n(gain)} cent")
+            memory_note = (f'<p class="note"><b>結果:</b> {" ／ ".join(parts)}（決定論の基準 {n(det_mean)} cent、'
+                           f'決定論に真の係数を与えた効果 {n(true_gain)} cent）。v2は同音反復・短い休符を加えた旋律で、'
+                           f'固定の較正曲を1曲吹いて記憶を書き、以後は読むだけの学習モードで学習した。どちらの方式でも'
+                           f'機体の記憶の効果は数cent以下で、このsimulatorでは笛の個体差を覚える価値が小さいことをNNでも確認した。</p>')
         else:
             memory_note = ""
         nn_table = (f'''<div class="table"><table><thead><tr><th>NN（演奏MAE / 曲）</th>{song_heads}<th>安定後</th></tr></thead>

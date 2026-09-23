@@ -78,3 +78,23 @@ def test_rig_adaptive_performer_carries_memory_and_backpropagates():
     assert model.planner.net[0].weight.grad.abs().sum() > 0
     restored = RigAdaptivePerformer.from_checkpoint(model.checkpoint())
     torch.testing.assert_close(restored.core.head[0].weight, model.core.head[0].weight)
+
+
+def test_varied_melodies_repeat_notes_and_keep_default_songs():
+    cents, voice = random_melodies(np.random.default_rng(3), 32, 800, varied=True)
+    onsets = voice[:, 1:] & ~voice[:, :-1]
+    rows, steps = torch.nonzero(onsets, as_tuple=True)
+    same = [(cents[r, s + 1] == cents[r, s - 8]).item() for r, s in zip(rows.tolist(), steps.tolist()) if s >= 8]
+    assert any(same)
+    first = random_melodies(np.random.default_rng(3), 4, 300)
+    second = random_melodies(np.random.default_rng(3), 4, 300, varied=False)
+    assert torch.equal(first[0], second[0]) and torch.equal(first[1], second[1])
+
+
+def test_timeline_pitch_residual_zero_stores_the_ear_pitch():
+    from flute_rl.yamabiko.beat_grid import BeatGridConfig, BeatTimelineRecallNet
+    torch.manual_seed(0)
+    timeline = BeatTimelineRecallNet(BeatGridConfig(), pitch_residual=0.0)
+    stored = torch.randn(2, 7, 2 * BeatGridConfig().memory_hidden + 2)
+    decoded = timeline.decode(stored)
+    torch.testing.assert_close(decoded[..., 0], stored[..., -2])

@@ -64,6 +64,8 @@ def main():
                     help="first steps use 2 short songs so the tracker learns before the memory")
     ap.add_argument("--calibration-songs", type=int, default=None,
                     help="learning-mode design: only the first N songs write the rig memory")
+    ap.add_argument("--varied-melodies", action="store_true",
+                    help="train on repeated notes and short rests as well")
     ap.add_argument("--init", default=None, help="start from this rig-adaptive checkpoint")
     ap.add_argument("--seed", type=int, default=20260923)
     ap.add_argument("--eval-every", type=int, default=50)
@@ -86,7 +88,8 @@ def main():
     for step in range(1, args.steps + 1):
         params = plant.parameters(args.batch, device, spread=1.0, generator=generator)
         warm = step <= args.warmup_steps
-        songs = [random_melodies(rng, args.batch, 250 if warm else args.song_steps, device)
+        songs = [random_melodies(rng, args.batch, 250 if warm else args.song_steps, device,
+                                 varied=args.varied_melodies)
                  for _ in range(2 if warm else args.songs)]
         loss, maes = episode_loss(model, plant, songs, params, generator,
                                   calibration_songs=None if warm else args.calibration_songs)
@@ -103,8 +106,9 @@ def main():
             print(f"eval {step}: carry {metrics['carry']} reset {metrics['reset']}", flush=True)
             if best is None or score < best["score"]:
                 best = {"step": step, "score": score, **metrics}
-                torch.save(model.checkpoint(plant_config=vars(plant.config), best=best, seed=args.seed), args.out)
-    report = {"best": best, "warmup_steps": args.warmup_steps, "calibration_songs": args.calibration_songs,
+                torch.save(model.checkpoint(plant_config=vars(plant.config), best=best, seed=args.seed,
+                                            calibration_songs=args.calibration_songs), args.out)
+    report = {"best": best, "warmup_steps": args.warmup_steps, "varied_melodies": args.varied_melodies, "calibration_songs": args.calibration_songs,
               "init": args.init, "lr": args.lr, "history": history, "seed": args.seed, "steps": args.steps,
               "batch": args.batch, "songs": args.songs, "song_steps": args.song_steps,
               "simulator": "PhysicalPlantConfig.realistic()", "training": "bptt-through-differentiable-simulator",

@@ -71,8 +71,8 @@ def average(rows):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--composite", default="runs/yamabiko_connected_composite_v1.pt")
-    ap.add_argument("--downstream", default="runs/yamabiko_rig_adaptive_v1.pt")
+    ap.add_argument("--composite", default="runs/yamabiko_connected_composite_v2.pt")
+    ap.add_argument("--downstream", default="runs/yamabiko_rig_adaptive_v2.pt")
     ap.add_argument("--out", default="docs/e2e-integrated-results")
     ap.add_argument("--rigs", type=int, default=64)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -80,12 +80,16 @@ def main():
     torch.set_grad_enabled(False); device = args.device
     composite = YamabikoComposite.from_checkpoint(
         torch.load(args.composite, map_location=device, weights_only=False), device).eval()
-    downstream = RigAdaptivePerformer.from_checkpoint(
-        torch.load(args.downstream, map_location=device, weights_only=False), device).eval()
+    downstream_checkpoint = torch.load(args.downstream, map_location=device, weights_only=False)
+    downstream = RigAdaptivePerformer.from_checkpoint(downstream_checkpoint, device).eval()
+    learning_mode = bool(downstream_checkpoint.get("calibration_songs"))
     plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
     deterministic = EncoderlessDeterministicPerformer(plant)
     params = plant.parameters(args.rigs, device, spread=1.0, generator=torch.Generator(device).manual_seed(4711))
     n = args.rigs
+    # Learning mode: each rig plays the fixed calibration piece once; every
+    # evaluated phrase then only reads that rig memory.
+    rig_memory = downstream.calibrate(plant, params, torch.Generator(device).manual_seed(999)) if learning_mode else None
 
     routes = ("nn_listen+nn_play", "nn_listen+det_play", "score+nn_play", "score+det_play")
     samples, per_route = [], {route: [] for route in routes}
@@ -112,7 +116,8 @@ def main():
             voice = torch.tensor(voice_np, device=device)[None].expand(n, -1).contiguous()
             generator = torch.Generator(device).manual_seed(index)
             if route.endswith("nn_play"):
-                result, _ = downstream.perform(plant, cents, voice, params, None, generator)
+                result, _ = downstream.perform(plant, cents, voice, params, rig_memory, generator,
+                                               write_memory=not learning_mode)
             else:
                 result, _ = deterministic.perform(cents, voice, params, None, generator)
             played = result["pitch_cents"].cpu().numpy()
@@ -135,6 +140,7 @@ def main():
         "format": "yamabiko-integrated-eval-v1", "rigs": n, "samples": len(samples),
         "simulator": "PhysicalPlantConfig.realistic()",
         "upstream_checkpoint": args.composite, "downstream_checkpoint": args.downstream,
+        "downstream_learning_mode": learning_mode,
         "routes": {route: average(rows) for route, rows in per_route.items()},
         "memory": average([s["memory"] for s in samples]),
         "error_reference": "true score (not the Ear's estimate)",

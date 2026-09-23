@@ -95,7 +95,9 @@ def pitch_plot(path, target, voice, series, frame_rate=100):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--checkpoint", default="runs/yamabiko_rig_adaptive_v1.pt")
+    ap.add_argument("--checkpoint", nargs="+",
+                    default=["runs/yamabiko_rig_adaptive_v1.pt", "runs/yamabiko_rig_adaptive_v2.pt"],
+                    help="rig-adaptive checkpoints; the last one is reported as the current model")
     ap.add_argument("--out", default="docs/e2e-rig-adaptive-results")
     ap.add_argument("--rigs", type=int, default=128)
     ap.add_argument("--songs", type=int, default=4)
@@ -134,22 +136,33 @@ def main():
     variants["encoder_oracle"] = [errors(encoder_oracle(plant, performer, c, v, params, oracle_memory), c, v)
                                   for c, v in songs]
 
-    neural = {}
-    neural_results = None
-    checkpoint_path = pathlib.Path(args.checkpoint)
-    training = {}
-    if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    models, neural_results, training = {}, None, {}
+    for path in map(pathlib.Path, args.checkpoint):
+        if not path.exists():
+            continue
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
         model = RigAdaptivePerformer.from_checkpoint(checkpoint, device).eval()
-        training = {"best_step": checkpoint.get("best", {}).get("step"), "seed": checkpoint.get("seed")}
+        calibrated = bool(checkpoint.get("calibration_songs"))
+        entry = {"checkpoint": str(path), "learning_mode": calibrated,
+                 "best_step": checkpoint.get("best", {}).get("step"), "seed": checkpoint.get("seed")}
         for label, carry in (("carry_memory", True), ("reset_memory", False)):
             memory, rows, results = None, [], []
+            if calibrated and carry:  # learning mode: calibrate once, then only read
+                memory = model.calibrate(plant, params, generator(999))
             for k, (cents, voice) in enumerate(songs):
-                result, new = model.perform(plant, cents, voice, params, memory, generator(k))
+                result, new = model.perform(plant, cents, voice, params, memory, generator(k),
+                                            write_memory=not calibrated)
                 rows.append(errors(result["pitch_cents"], cents, voice)); results.append(result)
-                memory = new if carry else None
-            neural[label] = rows
+                if not calibrated:
+                    memory = new if carry else None
+            entry[label] = {"per_song": rows, "mean": mean_rows(rows)}
             if carry: neural_results = results
+        models[path.stem] = entry
+    neural = {key: value for key, value in list(models.values())[-1].items()
+              if key in ("carry_memory", "reset_memory")} if models else {}
+    if models:
+        training = {key: value for key, value in list(models.values())[-1].items()
+                    if key not in ("carry_memory", "reset_memory")}
 
     cents, voice = songs[0][0][0].cpu().numpy(), songs[0][1][0].cpu().numpy()
     series = [("deterministic encoder-less", det_results[0]["pitch_cents"][0].cpu().numpy(), "#f59e0b")]
@@ -170,7 +183,8 @@ def main():
         "simulator": "PhysicalPlantConfig.realistic(): closed tube, deadband 0.20, hearing delay 1+-1, noise 3 cent, dropout 2%",
         "settle_steps": 30,
         "deterministic": {key: {"per_song": rows, "mean": mean_rows(rows)} for key, rows in variants.items()},
-        "neural": {key: {"per_song": rows, "mean": mean_rows(rows)} for key, rows in neural.items()},
+        "neural": neural,
+        "neural_models": models,
         "neural_training": training,
         "network_received_simulator_internal_state": False,
         "real_rig_validated": False,
@@ -178,7 +192,8 @@ def main():
     manifest = {"summary": summary, "audio": audio, "plot": "pitch.svg"}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps({k: v["mean"] for k, v in summary["deterministic"].items()}, indent=2))
-    print(json.dumps({k: [round(r["all"], 1) for r in v["per_song"]] for k, v in summary["neural"].items()}, indent=2))
+    for name, entry in models.items():
+        print(name, {k: [round(r["all"], 1) for r in entry[k]["per_song"]] for k in ("carry_memory", "reset_memory")})
 
 
 if __name__ == "__main__":

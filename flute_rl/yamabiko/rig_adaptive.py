@@ -160,6 +160,14 @@ class RigAdaptivePerformer(nn.Module):
         return ({"pitch_cents": torch.stack(played, 1), "pwm": torch.stack(pwms, 1),
                  "aim": torch.stack(aims, 1)}, memory)
 
+    def calibrate(self, plant: DifferentiableMotorFlute, parameters, generator=None, steps: int = 450):
+        """Learning mode: play the fixed calibration piece and return the written rig memory."""
+        from .melodies import calibration_melody
+        batch = parameters.torque_gain.shape[0]; device = parameters.torque_gain.device
+        cents, voice = calibration_melody(batch, steps, device)
+        _, memory = self.perform(plant, cents, voice, parameters, None, generator, write_memory=True)
+        return memory
+
     def checkpoint(self, **metadata):
         return {"format": "yamabiko-rig-adaptive-v1", "config": asdict(self.config),
                 "state_dict": self.state_dict(), **metadata}

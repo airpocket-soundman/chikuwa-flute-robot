@@ -14,8 +14,14 @@ ARTICULATION_FRAMES = 4
 
 
 def random_melodies(rng: np.random.Generator, batch: int, steps: int, device="cpu",
-                    low_cents=700.0, high_cents=1900.0, lead_rest=(20, 60)):
-    """Return ``(cents, voice)`` of shape ``(B, T)``; cents hold during rests."""
+                    low_cents=700.0, high_cents=1900.0, lead_rest=(20, 60), varied=False):
+    """Return ``(cents, voice)`` of shape ``(B, T)``; cents hold during rests.
+
+    ``varied=True`` also repeats the same note (re-articulated after a rest or
+    a valve gap) and uses short rests, as in the reference phrases; the
+    default keeps the original distribution for reproducible evaluations.
+    """
+    steps_choice = [-7, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 7, 12, -12] + ([0, 0, 0] if varied else [])
     cents = np.zeros((batch, steps), np.float32)
     voice = np.zeros((batch, steps), np.float32)
     semitones = int((high_cents - low_cents) // 100)
@@ -24,17 +30,32 @@ def random_melodies(rng: np.random.Generator, batch: int, steps: int, device="cp
         note = int(rng.integers(0, semitones + 1))
         cents[row, :t] = low_cents + 100 * note
         while t < steps:
-            length = int(rng.integers(48, 131))
+            if varied:
+                rest = rng.random() < .25
+                short = rest and rng.random() < .6
+                length = int(rng.integers(16, 60)) if short else int(rng.integers(48, 131))
+            else:  # original draw order, so default songs stay reproducible
+                length = int(rng.integers(48, 131))
+                rest = rng.random() < .18
             stop = min(steps, t + length)
-            if rng.random() < .18:  # rest
+            if rest:
                 cents[row, t:stop] = cents[row, t - 1]
             else:
-                step = int(rng.choice([-7, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 7, 12, -12]))
+                step = int(rng.choice(steps_choice))
                 note = int(np.clip(note + step, 0, semitones))
                 cents[row, t:stop] = low_cents + 100 * note
                 voice[row, min(stop, t + ARTICULATION_FRAMES):stop] = 1.0
             t = stop
     return (torch.from_numpy(cents).to(device), torch.from_numpy(voice).to(device).bool())
+
+
+CALIBRATION_SEED = 20260923
+
+
+def calibration_melody(batch: int, steps: int = 450, device="cpu"):
+    """The fixed learning-mode piece: the same varied melody on every rig."""
+    cents, voice = random_melodies(np.random.default_rng(CALIBRATION_SEED), 1, steps, device, varied=True)
+    return cents.expand(batch, -1).contiguous(), voice.expand(batch, -1).contiguous()
 
 
 def next_voiced(cents: torch.Tensor, voice: torch.Tensor) -> torch.Tensor:

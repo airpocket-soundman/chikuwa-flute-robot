@@ -103,6 +103,7 @@ class YamabikoComposite(nn.Module):
             "ear_config": asdict(self.ear.config), "ear": self.ear.state_dict(),
             "beat_config": asdict(self.tempo.config), "tempo": self.tempo.state_dict(),
             "timeline": self.timeline.state_dict(), "timeline_direct_pitch": self.timeline.direct_pitch,
+            "timeline_pitch_residual": self.timeline.pitch_residual,
             "planner": self.planner.state_dict(), "controller": self.controller.state_dict(),
             "controller_hidden": self.controller.hidden,
             "comparator_hidden": self.comparator.net[0].out_features,
@@ -119,7 +120,8 @@ class YamabikoComposite(nn.Module):
         ear.load_state_dict(checkpoint["ear"])
         beat_config = BeatGridConfig(**checkpoint["beat_config"])
         tempo = TempoBeatNet(beat_config).to(device); tempo.load_state_dict(checkpoint["tempo"])
-        timeline = BeatTimelineRecallNet(beat_config, direct_pitch=checkpoint["timeline_direct_pitch"]).to(device)
+        timeline = BeatTimelineRecallNet(beat_config, direct_pitch=checkpoint["timeline_direct_pitch"],
+                                         pitch_residual=checkpoint.get("timeline_pitch_residual", .10)).to(device)
         timeline.load_state_dict(checkpoint["timeline"])
         planner = TargetPositionPlanner().to(device); planner.load_state_dict(checkpoint["planner"])
         controller = MotorTrajectoryController(hidden=checkpoint["controller_hidden"]).to(device)
