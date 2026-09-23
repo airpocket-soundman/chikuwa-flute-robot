@@ -26,6 +26,7 @@ from flute_rl.yamabiko.deterministic_pipeline import (EncoderlessConfig,  # noqa
                                                        period_ms)
 from flute_rl.yamabiko.error_regions import error_regions, region_errors  # noqa: E402
 from flute_rl.yamabiko.melodies import next_voiced, note_age, random_melodies  # noqa: E402
+from flute_rl.yamabiko.musical_metrics import merge, summarize, unit_scores  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
 from flute_rl.yamabiko.performers import load_performer  # noqa: E402
 
@@ -57,10 +58,12 @@ def oracle_coefficients(plant, params):
 
 
 def encoder_oracle(plant, performer, cents, voice, params, memory):
-    """PD on the plant's true position with anticipation: an upper bound."""
+    """PD on the plant's true position, true flute coefficients and true motor
+    speed for the anticipation: a position-sensor reference (same PD gains)."""
     cfg = performer.config
     a, b = memory.theta[:, 0], memory.theta[:, 1]
-    aim = performer._anticipate(next_voiced(cents, voice), voice, a, b)
+    true_ratio = params.max_velocity_strokes_s / plant.config.max_velocity_strokes_s
+    aim = performer._anticipate(next_voiced(cents, voice), voice, a, b, true_ratio)
     state = plant.initial_state(*cents.shape[:1], cents.device)
     band = cfg.deadband_compensation
     played = []
@@ -125,7 +128,7 @@ def main():
     def generator(k):
         return torch.Generator(device).manual_seed(k)
 
-    def deterministic(config, carry=False, memory=None, learn=None, calibrate=False):
+    def deterministic(name, config, carry=False, memory=None, learn=None, calibrate=False):
         performer = EncoderlessDeterministicPerformer(plant, config)
         if learn is not None: performer.learn = learn
         ratio = performer.measure_motor(params, generator(998)) if calibrate else None
@@ -134,21 +137,27 @@ def main():
             result, new = performer.perform(cents, voice, params, memory, generator(k), motor_ratio=ratio)
             rows.append(errors(result["pitch_cents"], cents, voice)); results.append(result)
             if carry: memory = new
+        musical[name] = summarize(merge(
+            [unit_scores(r["pitch_cents"], c, v) for r, (c, v) in zip(results, songs)]))
         return rows, results
 
     base = EncoderlessConfig()
-    variants = {}
-    variants["dead_reckoning_only"] = deterministic(dataclasses.replace(
+    variants, musical = {}, {}
+    variants["dead_reckoning_only"] = deterministic("dead_reckoning_only", dataclasses.replace(
         base, observer_gain=0.0, observer_velocity_gain=0.0, anticipation_speed=None))[0]
-    variants["pitch_observer"] = deterministic(dataclasses.replace(base, anticipation_speed=None))[0]
-    variants["observer_anticipation"] = deterministic(base)[0]
-    variants["observer_anticipation_calibrated"], det_results = deterministic(base, calibrate=True)
-    variants["plus_coefficient_learning"] = deterministic(base, carry=True, learn=True)[0]
+    variants["pitch_observer"] = deterministic("pitch_observer", dataclasses.replace(base, anticipation_speed=None))[0]
+    variants["observer_anticipation"] = deterministic("observer_anticipation", base)[0]
+    variants["observer_anticipation_calibrated"], det_results = deterministic(
+        "observer_anticipation_calibrated", base, calibrate=True)
+    variants["plus_coefficient_learning"] = deterministic("plus_coefficient_learning", base, carry=True, learn=True)[0]
     oracle_memory = oracle_coefficients(plant, params)
-    variants["plus_true_coefficients"] = deterministic(base, memory=oracle_memory)[0]
+    variants["plus_true_coefficients"] = deterministic("plus_true_coefficients", base, memory=oracle_memory)[0]
     performer = EncoderlessDeterministicPerformer(plant, base)
-    variants["encoder_oracle"] = [errors(encoder_oracle(plant, performer, c, v, params, oracle_memory), c, v)
-                                  for c, v in songs]
+    oracle_played = [encoder_oracle(plant, performer, c, v, params, oracle_memory) for c, v in songs]
+    variants["encoder_oracle"] = [errors(p, c, v) for p, (c, v) in zip(oracle_played, songs)]
+    musical_by_variant = musical
+    musical_by_variant["encoder_oracle"] = summarize(merge([unit_scores(p, c, v)
+                                                           for p, (c, v) in zip(oracle_played, songs)]))
 
     def neural_repeat(model, learning_mode, p, song_list):
         """Play each song twice on the same rigs; memory from play 1 carries into play 2."""
@@ -158,7 +167,7 @@ def main():
             second, _ = model.perform(plant, cents, voice, p, memory, generator(k + 100),
                                       write_memory=not learning_mode)
             firsts.append(errors(first["pitch_cents"], cents, voice))
-            seconds.append(errors(second["pitch_cents"], cents, voice)); results.append(second)
+            seconds.append(errors(second["pitch_cents"], cents, voice)); results.append((first, second))
         return firsts, seconds, results
 
     models, neural_results, training = {}, None, {}
@@ -168,12 +177,15 @@ def main():
         model, checkpoint = load_performer(path, device)
         learning_mode = bool(checkpoint.get("calibration_songs"))
         firsts, seconds, results = neural_repeat(model, learning_mode, params, songs)
-        models[path.stem] = {"checkpoint": str(path), "learning_mode": learning_mode,
+        plays = {label: summarize(merge([unit_scores(pair[i]["pitch_cents"], c, v)
+                                         for pair, (c, v) in zip(results, songs)]))
+                 for i, label in ((0, "first_play"), (1, "second_play"))}
+        models[path.stem] = {"musical": plays,"checkpoint": str(path), "learning_mode": learning_mode,
                              "protocol": checkpoint.get("protocol", "songs"),
                              "best_step": checkpoint.get("best", {}).get("step"), "seed": checkpoint.get("seed"),
                              "first_play": {"per_song": firsts, "mean": mean_rows(firsts)},
                              "second_play": {"per_song": seconds, "mean": mean_rows(seconds)}}
-        neural_results = results
+        neural_results = [pair[1] for pair in results]
     neural = {key: value for key, value in list(models.values())[-1].items()
               if key in ("first_play", "second_play")} if models else {}
     if models:
@@ -230,7 +242,8 @@ def main():
         "rigs": args.rigs, "songs": args.songs, "song_steps": args.song_steps,
         "simulator": "PhysicalPlantConfig.realistic(): closed tube, deadband 0.20, hearing delay 1+-1, noise 3 cent, dropout 2%",
         "settle_steps": 30,
-        "deterministic": {key: {"per_song": rows, "mean": mean_rows(rows)} for key, rows in variants.items()},
+        "deterministic": {key: {"per_song": rows, "mean": mean_rows(rows), "musical": musical_by_variant.get(key)}
+                          for key, rows in variants.items()},
         "neural": neural,
         "neural_models": models,
         "motor_robustness": robustness,

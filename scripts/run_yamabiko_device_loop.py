@@ -33,6 +33,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from flute_rl.yamabiko.adaptive_memory import AdaptiveMemoryPerformer  # noqa: E402
 from flute_rl.yamabiko.device import BlackBoxDevice  # noqa: E402
 from flute_rl.yamabiko.melodies import random_melodies  # noqa: E402
+from flute_rl.yamabiko.musical_metrics import merge, summarize, unit_scores  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
 from flute_rl.yamabiko.world_model import DeviceWorldModel, WorldModelConfig  # noqa: E402
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -144,6 +145,7 @@ def main():
                     result, memory = policy.play(rig, *eval_songs, memory)     # evaluation song (logged)
                     arm["memory"] = memory
                 arm["curve"].append(score(result["pitch_cents"], *eval_songs))
+                arm.setdefault("units", []).append(unit_scores(result["pitch_cents"], *eval_songs))
                 arm.setdefault("heard_curve", []).append(heard_error(result, *eval_songs))
                 # Safety on the rig, judged from heard pitch only: keep the weights
                 # that sounded best so far; a worse update is dropped and the next
@@ -175,11 +177,17 @@ def main():
                   f"  {time.time() - started:.0f}s", flush=True)
         results.append({"rig": row, "motor_factor": float(speed[row]),
                         **{name: arm["curve"] for name, arm in arms.items()},
-                        "rollbacks": arms["on_rig_learning"].get("rollbacks", [])})
+                        "rollbacks": arms["on_rig_learning"].get("rollbacks", []),
+                        "_units": {name: arm["units"] for name, arm in arms.items()}})
         print(f"rig {row}: memory-only {[round(x, 1) for x in arms['memory_only']['curve']]}  "
               f"on-rig learning {[round(x, 1) for x in arms['on_rig_learning']['curve']]}", flush=True)
     summary = {name: [float(np.mean([r[name][k] for r in results])) for k in range(args.rounds + 1)]
                for name in ("memory_only", "on_rig_learning")}
+    # Musical scores per round, with intervals over rigs x evaluation songs.
+    summary["musical"] = {name: [summarize(merge([r["_units"][name][k] for r in results]))
+                                 for k in range(args.rounds + 1)] for name in ("memory_only", "on_rig_learning")}
+    for r in results:
+        r.pop("_units")
     pathlib.Path(args.out).write_text(json.dumps({"summary": summary, "rigs": results, **vars(args)}, indent=2),
                                       encoding="utf-8")
     print(json.dumps(summary))

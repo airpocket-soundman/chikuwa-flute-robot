@@ -14,13 +14,17 @@ ARTICULATION_FRAMES = 4
 
 
 def random_melodies(rng: np.random.Generator, batch: int, steps: int, device="cpu",
-                    low_cents=700.0, high_cents=1900.0, lead_rest=(20, 60), varied=False):
+                    low_cents=700.0, high_cents=1900.0, lead_rest=(20, 60), varied=False,
+                    length_scale=1.0):
     """Return ``(cents, voice)`` of shape ``(B, T)``; cents hold during rests.
 
     ``varied=True`` also repeats the same note (re-articulated after a rest or
     a valve gap) and uses short rests, as in the reference phrases; the
     default keeps the original distribution for reproducible evaluations.
+    ``length_scale`` stretches every note and rest (0.5 = twice the tempo).
     """
+    note_range = (max(8, int(round(48 * length_scale))), max(9, int(round(131 * length_scale))))
+    short_range = (max(6, int(round(16 * length_scale))), max(7, int(round(60 * length_scale))))
     steps_choice = [-7, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 7, 12, -12] + ([0, 0, 0] if varied else [])
     cents = np.zeros((batch, steps), np.float32)
     voice = np.zeros((batch, steps), np.float32)
@@ -33,9 +37,9 @@ def random_melodies(rng: np.random.Generator, batch: int, steps: int, device="cp
             if varied:
                 rest = rng.random() < .25
                 short = rest and rng.random() < .6
-                length = int(rng.integers(16, 60)) if short else int(rng.integers(48, 131))
+                length = int(rng.integers(*short_range)) if short else int(rng.integers(*note_range))
             else:  # original draw order, so default songs stay reproducible
-                length = int(rng.integers(48, 131))
+                length = int(rng.integers(*note_range))
                 rest = rng.random() < .18
             stop = min(steps, t + length)
             if rest:

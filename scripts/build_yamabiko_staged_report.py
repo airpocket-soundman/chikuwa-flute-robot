@@ -16,6 +16,14 @@ def model_label(name):
             "(3 memories)", "（記憶3つ）"))
 
 
+def ci(summary, key="hit_rate"):
+    """'78 % [61-92]' for a bootstrapped fraction, '—' when missing."""
+    if not summary or not summary.get(key) or summary[key].get("mean") is None:
+        return "—"
+    value = summary[key]
+    return f"{value['mean'] * 100:.0f} %<small> [{value['low'] * 100:.0f}–{value['high'] * 100:.0f}]</small>"
+
+
 def n(value, digits=1):
     return "—" if value is None else f"{value:.{digits}f}"
 
@@ -128,6 +136,8 @@ def main():
     adaptation = json.loads(adaptation_path.read_text(encoding="utf-8")) if adaptation_path.exists() else {}
     loop_path = docs_root / "e2e-rig-adaptive-results" / "device_loop.json"
     device_loop = json.loads(loop_path.read_text(encoding="utf-8")) if loop_path.exists() else {}
+    requirements_path = docs_root / "e2e-rig-adaptive-results" / "actuator_requirements.json"
+    requirements = json.loads(requirements_path.read_text(encoding="utf-8")) if requirements_path.exists() else {}
     probe_path = docs_root / "e2e-rig-adaptive-results" / "memory_probe.json"
     memory_probe = json.loads(probe_path.read_text(encoding="utf-8")) if probe_path.exists() else {}
     rig_eval_path = docs_root / "e2e-rig-adaptive-results" / "manifest.json"
@@ -687,7 +697,8 @@ def main():
                      ("plus_coefficient_learning", "↑ + 切片・傾きのオンライン推定を持ち越し"))
         det_rows = "".join(
             f"<tr><td>{label}</td><td>{n(det[key]['mean']['all'])}</td><td>{n(det[key]['mean']['onset'])}</td>"
-            f"<td>{n(det[key]['mean']['settled'])}</td><td>{n(det[key]['mean'].get('core'))}</td></tr>"
+            f"<td>{n(det[key]['mean']['settled'])}</td><td>{n(det[key]['mean'].get('core'))}</td>"
+            f"<td>{ci(det[key].get('musical'))}</td></tr>"
             for key, label in det_names if key in det)
         neural = rig.get("neural", {})
         models = rig.get("neural_models") or ({"current": {**neural, "learning_mode": False}} if neural else {})
@@ -699,7 +710,8 @@ def main():
                 if key in entry:
                     cells = "".join(f"<td>{n(row['all'])}</td>" for row in entry[key]["per_song"])
                     nn_rows += (f"<tr><td>{html.escape(model_label(name))} {mode} / {label}</td>"
-                                f"{cells}<td>{n(entry[key]['mean'].get('core'))}</td></tr>")
+                                f"{cells}<td>{n(entry[key]['mean'].get('core'))}</td>"
+                                f"<td>{ci((entry.get('musical') or {}).get(key))}</td></tr>")
         song_heads = "".join(f"<th>{k + 1}曲目</th>" for k in range(rig["songs"]))
         rig_listens = "".join(doc_audio("e2e-rig-adaptive-results/" + src, label) for key, label in
                               (("target", "目標"), ("deterministic", "決定論"), ("neural", "NN"))
@@ -748,14 +760,14 @@ def main():
                             f'NNは同じ曲を2回演奏し、1回目で書いた記憶を2回目へ持ち越す。</p>')
         else:
             robust_table = ""
-        nn_table = (f'''<div class="table"><table><thead><tr><th>NN（演奏MAE / 曲）</th>{song_heads}<th>静止中</th></tr></thead>
+        nn_table = (f'''<div class="table"><table><thead><tr><th>NN（演奏MAE / 曲）</th>{song_heads}<th>静止中</th><th>命中率</th></tr></thead>
           <tbody>{nn_rows}</tbody></table></div>''' if neural else '<p class="note">NNは学習中のため未評価。</p>')
         rig_adaptive_html = f'''<h2 id="rig-adaptive">閉管笛・現実的シミュレーターでの再設計（エンコーダなし）</h2>
       <p>閉管笛、不感帯0.20、聴こえの遅れ1±1 step・音程ノイズ3 cent・欠落2%の機体 {rig['rigs']} 台で、同じ機体に別々の曲を {rig['songs']} 曲続けて演奏させた。単位は cent。「立ち上がり」は各音の最初の{rig['settle_steps']} step（0.3 s）、「安定後」はそれ以降。「静止中」は、楽譜と機体の最高速度から決めた「移動が間に合わない区間」と「次の音へ動き出すべき区間」を除いた、本来ぴったり合うべき区間（どの制御にも同じ区間を使う）。数値は <code>scripts/evaluate_yamabiko_rig_adaptive.py</code> の manifest から生成。</p>
       <div class="grid">
         <section class="card partial"><div class="stage"><b>D</b><span class="partial">基準</span></div>
           <h2>決定論版：音程を位置センサーにする</h2><p class="flow">目標cent → 周期 → x=(a−T)/b → PD（推定位置）→ PWM ／ 自己音の周期 → 位置推定を補正</p>
-          <div class="table"><table><thead><tr><th>構成</th><th>全体</th><th>立ち上がり</th><th>安定後</th><th>静止中</th></tr></thead><tbody>{det_rows}</tbody></table></div>
+          <div class="table"><table><thead><tr><th>構成</th><th>全体</th><th>立ち上がり</th><th>安定後</th><th>静止中</th><th>命中率</th></tr></thead><tbody>{det_rows}</tbody></table></div>
           <p class="note">音程オブザーバが最大の効果。発音中は切片・傾きが打ち消し合うため、真の係数を与えても改善は数centにとどまる。誤差の大半は音の立ち上がり（モーター移動時間）で、距離に応じた先回りが次に効く。</p></section>
         <section class="card {'partial' if neural else 'pending'}"><div class="stage"><b>NN</b><span class="{'partial' if neural else 'pending'}">{'評価済' if neural else '学習中'}</span></div>
           <h2>NN版：Planner + Motor/Feedback + 個体差記憶</h2><p class="flow">未来の目標窓 + 記憶z → Planner → 狙い位置 ／ 自己音・PWM履歴 → 高速GRU → PWM ／ 低速記憶zは曲をまたいで保持</p>
@@ -769,6 +781,30 @@ def main():
       {figure(rig_eval.get('plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — 1台目の機体・1曲目', 'e2e-rig-adaptive-results/')}'''
     else:
         rig_adaptive_html = ""
+
+    if requirements.get("rows"):
+        scales = sorted({row["length_scale"] for row in requirements["rows"]})
+        speeds = sorted({row["speed_mm_s"] for row in requirements["rows"]})
+        lookup = {(row["length_scale"], row["speed_mm_s"]): row for row in requirements["rows"]}
+        head = "".join(f"<th>{speed:.0f} mm/s</th>" for speed in speeds)
+
+        def table(controller):
+            body = ""
+            for scale in scales:
+                seconds = lookup[(scale, speeds[0])]["note_seconds"]
+                body += (f"<tr><td>1音 {seconds[0]:.2f}–{seconds[1]:.2f} s</td>"
+                         + "".join(f"<td>{ci(lookup[(scale, speed)][controller])}</td>" for speed in speeds) + "</tr>")
+            return f'<div class="table"><table><thead><tr><th>音の長さ</th>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+        requirements_html = f'''<h2 id="actuator-requirements">アクチュエーターの速さの要件</h2>
+      <p>曲のテンポに対してアクチュエーターが十分速いかを確かめた。速さ（トルクも同じ倍率）と音の長さを変えて、700〜1900 cent の乱数曲を演奏した（他の機体差は乱数化、各条件 {requirements["rigs"]} 台 × {requirements["songs"]} 曲）。表は<b>命中率</b>＝各音が鳴り始めから {requirements["hit_within_ms"]} ms 以内に ±{requirements["tolerance_cents"]} cent に入った割合と、その95 %区間。1オクターブの移動量は約 {requirements["octave_travel_mm"]:.0f} mm。現在の評価は1音0.48–1.31 s（お手本の0.5倍速再生）。</p>
+      <div class="grid">
+        <section class="card partial"><div class="stage"><b>D</b><span class="partial">実用</span></div>
+          <h2>決定論（エンコーダなし・較正あり）</h2>{table("deterministic")}</section>
+        <section class="card partial"><div class="stage"><b>E</b><span class="partial">参考</span></div>
+          <h2>位置センサー付き（真の位置・真の速度で先回り、同じPDゲイン）</h2>{table("encoder_oracle")}</section>
+      </div>'''
+    else:
+        requirements_html = ""
 
     players = adaptation.get("players", {})
     if players:
@@ -803,8 +839,12 @@ def main():
         rounds = len(loop_summary["memory_only"])
         round_heads = "".join(f"<th>{k}</th>" for k in range(rounds))
         loop_rows = "".join(
-            f"<tr><td>{label}</td>" + "".join(f"<td>{n(v)}</td>" for v in loop_summary[key]) + "</tr>"
+            f"<tr><td>{label}（平均誤差 cent）</td>" + "".join(f"<td>{n(v)}</td>" for v in loop_summary[key]) + "</tr>"
             for key, label in (("memory_only", "記憶だけで適応（重みは固定）"), ("on_rig_learning", "機体上で重みも学習")))
+        if loop_summary.get("musical"):
+            loop_rows += "".join(
+                f"<tr><td>{label}（命中率）</td>" + "".join(f"<td>{ci(m)}</td>" for m in loop_summary["musical"][key]) + "</tr>"
+                for key, label in (("memory_only", "記憶だけで適応"), ("on_rig_learning", "機体上で重みも学習")))
         rig_rows = "".join(
             f"<tr><td>{r['motor_factor']:.2f}倍</td>" + "".join(f"<td>{n(v)}</td>" for v in r["memory_only"])
             + "".join(f"<td>{n(v)}</td>" for v in r["on_rig_learning"]) + f"<td>{len(r.get('rollbacks', []))}</td></tr>"
@@ -825,7 +865,8 @@ def main():
         route_rows = "".join(
             f"<tr><td>{label}</td><td>{n(whole['routes'][key]['all'])}</td><td>{n(whole['routes'][key].get('first_play_all'))}</td>"
             f"<td>{n(whole['routes'][key].get('core'))}</td>"
-            f"<td>{n(whole['routes'][key].get('transit'))}</td><td>{pct(whole['routes'][key]['missing_voice'])} %</td></tr>"
+            f"<td>{n(whole['routes'][key].get('transit'))}</td><td>{pct(whole['routes'][key]['missing_voice'])} %</td>"
+            f"<td>{ci(whole['routes'][key].get('musical'))}</td></tr>"
             for key, label in route_names)
         sample_heads = "".join(f"<th>{html.escape(label.split('（')[0])}</th>" for _, label in route_names)
         sample_rows = "".join(
@@ -842,7 +883,7 @@ def main():
       <div class="grid">
         <section class="card partial"><div class="stage"><b>ALL</b><span class="partial">仮想評価</span></div>
           <h2>経路別の平均</h2>
-          <div class="table"><table><thead><tr><th>経路</th><th>全体（NNは2回目）</th><th>NN 1回目</th><th>静止中</th><th>移動中</th><th>音の欠落</th></tr></thead><tbody>{route_rows}</tbody></table></div>
+          <div class="table"><table><thead><tr><th>経路</th><th>全体（NNは2回目）</th><th>NN 1回目</th><th>静止中</th><th>移動中</th><th>音の欠落</th><th>命中率</th></tr></thead><tbody>{route_rows}</tbody></table></div>
           <dl><div><dt>上流だけの誤差（NN記憶 vs 正解）</dt><dd>{n(whole['memory']['all'])} cent</dd></div>
           <div><dt>実機</dt><dd>未検証</dd></div></dl></section>
         <section class="card"><div class="stage"><b>10</b><span>サンプル別</span></div>
@@ -870,7 +911,7 @@ def main():
         <dl><div><dt>Feedforward</dt><dd>Position Planner（別Policyは置かない）</dd></div><div><dt>関係学習</dt><dd>PWM履歴 → 可聴音程のWorld Model</dd></div><div><dt>訓練環境</dt><dd>決定論的なtorque rise・摩擦・慣性 + 線形笛</dd></div><div><dt>検証範囲</dt><dd>内部simulationのみ / 実機未検証</dd></div></dl>
       </div>
       <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner (= Feedforward) → Motor Controller → Motor Physics → Linear Flute → deterministic waveform → Neural Ear (self) → Comparator → Adaptive Feedback ↩ PWM<br>学習時: PWM/audio → Motor Audio World Model → Motor Controller</p>
-      {process_results}{hybrid_lab_html}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div>{flute_audit_html}{rig_adaptive_html}{adaptation_html}{loop_html}{integrated_html}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
+      {process_results}{hybrid_lab_html}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div>{flute_audit_html}{requirements_html}{rig_adaptive_html}{adaptation_html}{loop_html}{integrated_html}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
       <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p>{physical_history}
     </section>
     <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">

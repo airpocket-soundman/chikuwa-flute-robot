@@ -25,6 +25,7 @@ from flute_rl.yamabiko.composite import YamabikoComposite  # noqa: E402
 from flute_rl.yamabiko.deterministic_pipeline import EncoderlessDeterministicPerformer  # noqa: E402
 from flute_rl.yamabiko.e2e_io import frame_audio_numpy  # noqa: E402
 from flute_rl.yamabiko.error_regions import error_regions, region_errors  # noqa: E402
+from flute_rl.yamabiko.musical_metrics import merge, summarize, unit_scores  # noqa: E402
 from flute_rl.yamabiko.melodies import ARTICULATION_FRAMES, note_age  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
 from flute_rl.yamabiko.performers import load_performer  # noqa: E402
@@ -93,6 +94,7 @@ def main():
 
     routes = ("nn_listen+nn_play", "nn_listen+det_play", "score+nn_play", "score+det_play")
     samples, per_route = [], {route: [] for route in routes}
+    musical_units = {route: [] for route in routes}
     for index, (sample_id, title, description, notes, durations) in enumerate(sample_specs()):
         reference = note_sequence(notes, durations)
         rng = np.random.default_rng(88031 + index)
@@ -134,6 +136,7 @@ def main():
             if route.endswith("nn_play"):
                 row["routes"][route]["first_play_all"] = average(first_rows)["all"]
             both = truth_voice_t & voice
+            musical_units[route].append(unit_scores(result["pitch_cents"], truth_t, both))
             regions = region_errors(result["pitch_cents"], truth_t, both, [m & both for m in masks])
             row["routes"][route].update({key: regions[key] for key in ("transit", "departing", "core", "core_frames")})
             per_route[route].append(row["routes"][route])
@@ -156,7 +159,8 @@ def main():
         "downstream_learning_mode": learning_mode,
         "protocol": "NN routes play each phrase twice on the same rig and score the second play; "
                     "the deterministic routes use the motor calibration (measure_motor)",
-        "routes": {route: average(rows) for route, rows in per_route.items()},
+        "routes": {route: {**average(rows), "musical": summarize(merge(musical_units[route]))}
+                   for route, rows in per_route.items()},
         "memory": average([s["memory"] for s in samples]),
         "error_reference": "true score (not the Ear's estimate)",
         "real_rig_validated": False,
