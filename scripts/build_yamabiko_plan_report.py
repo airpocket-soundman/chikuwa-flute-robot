@@ -19,6 +19,9 @@ CONTROLLERS = {
     "nn_play1": ("NN 1回目", "#7aa7ff"),
     "nn_play2": ("NN 2回目", "#5cc8ff"),
     "nn_play3": ("NN 3回目", "#70f0ac"),
+    "nn_twin_play1": ("NN＋ツイン 1回目", "#b3e5ff"),
+    "nn_twin_play2": ("NN＋ツイン 2回目", "#8ff0c8"),
+    "nn_twin_play3": ("NN＋ツイン 3回目", "#3fdc8f"),
     "sensor": ("位置センサー付き（参考）", "#d6a3ff"),
 }
 
@@ -66,14 +69,20 @@ def main():
                       f"ツイン {hit('det_twin')['mean'] * 100:.0f} %／なし {hit('det_nominal')['mean'] * 100:.0f} %／理想 {hit('det_true')['mean'] * 100:.0f} %"))
     else:
         gates.append(("G2 決定論＋ツイン", "フィッティングなしより有意に高く、理想の当てはめから5ポイント以内", verdict("pending", "未評価"), ""))
-    if hit("nn_twin_play1"):
-        gates.append(("G3 NN＋ツイン", "", verdict("pending", "評価中"), ""))
+    if hit("nn_twin_play1") and hit("det_twin"):
+        first_ok = hit("det_twin")["mean"] - hit("nn_twin_play1")["mean"] <= .03
+        third_ok = hit("nn_twin_play3")["mean"] >= hit("det_twin")["mean"]
+        state = "pass" if first_ok and third_ok else ("partial" if first_ok or third_ok else "fail")
+        gates.append(("G3 NN＋ツイン", "ツインで仕上げたNNが決定論＋ツインから3ポイント以内（1回目）、3回目で決定論以上",
+                      verdict(state, {"pass": "達成", "partial": "一部達成", "fail": "未達"}[state]),
+                      f"NN＋ツイン 1回目 {hit('nn_twin_play1')['mean'] * 100:.0f} % → 3回目 {hit('nn_twin_play3')['mean'] * 100:.0f} %"
+                      f"／決定論＋ツイン {hit('det_twin')['mean'] * 100:.0f} %"))
     else:
         gates.append(("G3 NN＋ツイン", "ツインで仕上げたNNが決定論＋ツインから3ポイント以内（1回目）、3回目で決定論以上",
                       verdict("pending", "未着手"),
                       (f"参考：ツインなしのNN 1回目 {hit('nn_play1')['mean'] * 100:.0f} % → 3回目 {hit('nn_play3')['mean'] * 100:.0f} %"
                        if hit("nn_play1") else "")))
-    best = max((hit(n)["mean"] for n in ("det_twin", "nn_play3") if hit(n)), default=None)
+    best = max((hit(n)["mean"] for n in ("det_twin", "nn_play3", "nn_twin_play3") if hit(n)), default=None)
     gates.append(("G4 デモ", "参照10曲で、3回以内の繰り返しで命中率85 %以上",
                   verdict("pass" if best is not None and best >= .85 else ("fail" if best is not None else "pending"),
                           "達成" if best is not None and best >= .85 else ("未達" if best is not None else "未評価")),
@@ -108,7 +117,7 @@ def main():
     options = "".join(f'<option value="{html.escape(s["id"])}">{html.escape(s["title"])}</option>' for s in lab["samples"])
     rig_options = "".join(f'<option value="{k}">{"標準的な機体" if k == "typical" else "遅い機体"}（モーター {v["motor_factor"]:.2f} 倍）</option>'
                           for k, v in lab.get("rigs", {}).items())
-    checks = "".join(f'<label><input type="checkbox" data-series="{name}" {"checked" if name in ("det_twin", "nn_play3") else ""}>'
+    checks = "".join(f'<label><input type="checkbox" data-series="{name}" {"checked" if name in ("det_twin", "nn_twin_play3") else ""}>'
                      f'<i class="dot" style="background:{color}"></i>{label}</label>' for name, (label, color) in CONTROLLERS.items())
     audio_options = "".join(f'<option value="{name}">{label}</option>' for name, (label, _) in CONTROLLERS.items())
     scores_json = json.dumps({p["id"]: {n: (s["hit_rate"]["mean"] if s else None) for n, s in p["scores"].items()}
