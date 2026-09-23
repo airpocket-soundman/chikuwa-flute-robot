@@ -19,7 +19,7 @@ import torch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from flute_rl.yamabiko.adaptive_memory import AdaptiveMemoryPerformer  # noqa: E402
-from flute_rl.yamabiko.device import BlackBoxDevice  # noqa: E402
+from flute_rl.yamabiko.device import BlackBoxDevice, PlayLog  # noqa: E402
 from flute_rl.yamabiko.melodies import random_melodies  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
 from flute_rl.yamabiko.world_model import DeviceWorldModel, WorldModelConfig  # noqa: E402
@@ -60,13 +60,24 @@ def collect(policy, plant, rng, batch, steps, device, generator):
     return rig.logs
 
 
+def truncate(log, steps):
+    """The first ``steps`` of a log.  Every log starts at the home stop, so a
+    short prefix is a well-posed rollout; the horizon grows during training
+    because a small velocity error integrated over a whole song otherwise
+    makes the loss landscape too rough to start from."""
+    return PlayLog(*(getattr(log, name)[:, :steps] for name in
+                     ("target_cents", "target_voice", "pwm", "valve", "heard", "valid")))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--policy", default="runs/yamabiko_adaptive_memory_v1.pt")
     ap.add_argument("--steps", type=int, default=1500)
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--song-steps", type=int, default=400)
-    ap.add_argument("--lr", type=float, default=2e-3)
+    ap.add_argument("--lr", type=float, default=3e-3)
+    ap.add_argument("--horizon-curriculum", type=int, default=300,
+                    help="grow the fitted prefix from 30 steps to the whole log over this many steps")
     ap.add_argument("--seed", type=int, default=20260928)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--out", default="runs/yamabiko_world_model_v1.pt")
@@ -86,7 +97,8 @@ def main():
     for step in range(1, args.steps + 1):
         logs = collect(policy, plant, rng, args.batch, args.song_steps, device, generator)
         context = model.encoder(logs[:1])
-        loss, mae = model.loss(logs[1:], context)
+        horizon = min(args.song_steps, 30 + (args.song_steps - 30) * step // max(1, args.horizon_curriculum))
+        loss, mae = model.loss([truncate(log, horizon) for log in logs[1:]], context)
         optimizer.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step(); schedule.step()

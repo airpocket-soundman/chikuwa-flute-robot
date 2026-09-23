@@ -6,10 +6,11 @@ inside it.  No simulator state or parameter is ever a label.
 
 The structure borrows only the shape of the physics, never its values:
 
-* a latent stroke position integrates a learned velocity and stops at the
+* a latent stroke position integrates a latent velocity and stops at the
   two ends (the plunger has end stops; the home run starts it at 0);
-* the velocity comes from a small GRU over PWM and the latent motion (motor
-  dynamics: torque rise, friction, deadband, speed limit are all learned);
+* the velocity approaches a learned steady speed with a learned lag; the
+  steady speed is a learned increasing function of PWM, so deadband,
+  friction and speed limit are all learned shapes of that curve;
 * pitch is a learned monotone function of the latent position (the flute);
 * what is heard is that pitch after a learned mixture of 0-3 steps' delay.
 
@@ -85,6 +86,26 @@ class ContextEncoder(nn.Module):
         return torch.stack(contexts).mean(0)
 
 
+class MonotoneCurve(nn.Module):
+    """x in [-1, 1] -> increasing piecewise-linear value, shaped by the rig context."""
+
+    def __init__(self, knots: int, context: int, span: float):
+        super().__init__()
+        self.knots, self.span = knots, span
+        self.increments = nn.Linear(context, knots)
+        self.offset = nn.Linear(context, 1)
+
+    def forward(self, x, context):
+        steps = F.softplus(self.increments(context)) / self.knots * self.span
+        levels = torch.cat([torch.zeros_like(steps[:, :1]), steps.cumsum(1)], 1)
+        levels = levels - levels[:, self.knots // 2:self.knots // 2 + 1] + self.offset(context)
+        scaled = (x.clamp(-1, 1) + 1) * .5 * self.knots
+        index = scaled.floor().clamp(max=self.knots - 1).long()
+        frac = scaled - index
+        left = levels.gather(1, index[:, None])[:, 0]; right = levels.gather(1, index[:, None] + 1)[:, 0]
+        return left + frac * (right - left)
+
+
 class DeviceWorldModel(nn.Module):
     observable_only = False
 
@@ -93,26 +114,27 @@ class DeviceWorldModel(nn.Module):
         self.config = config
         self.encoder = ContextEncoder(config)
         self._context = None
-        self.cell = nn.GRUCell(3 + config.context, config.hidden)
-        self.velocity_head = nn.Sequential(nn.Linear(config.hidden, config.hidden), nn.SiLU(),
-                                           nn.Linear(config.hidden, 1))
+        self.speed = MonotoneCurve(16, config.context, span=2.0)     # PWM -> steady speed (strokes/s)
+        self.lag = nn.Linear(config.context, 1)                      # approach rate per step
         self.pitch = MonotonePitch(context=config.context)
         self.delay_logits = nn.Parameter(torch.tensor([0., 2., 0., -2.]))
+        with torch.no_grad():
+            self.lag.bias.fill_(-1.5)
 
     # environment interface -------------------------------------------------
     def reset(self, device, dtype=torch.float32, homing_steps=0, batch=None):
         batch = batch or self._batch
         z = torch.zeros(batch, device=device, dtype=dtype)
-        return WorldState(torch.zeros(batch, self.config.hidden, device=device, dtype=dtype), z, z.clone(),
+        return WorldState(torch.zeros(batch, 1, device=device, dtype=dtype), z, z.clone(),
                           torch.zeros(batch, MAX_DELAY, device=device, dtype=dtype),
                           torch.zeros(batch, MAX_DELAY, device=device, dtype=dtype))
 
     def step(self, state: WorldState, pwm, valve):
         cfg = self.config
         context = self._context.expand(pwm.shape[0], -1)
-        hidden = self.cell(torch.cat([pwm[:, None], state.velocity[:, None] / cfg.max_speed,
-                                      state.position[:, None], context], 1), state.hidden)
-        velocity = cfg.max_speed * torch.tanh(self.velocity_head(hidden)[:, 0])
+        steady = self.speed(pwm, context)
+        alpha = torch.sigmoid(self.lag(context))[:, 0]
+        velocity = state.velocity + alpha * (steady - state.velocity)
         raw = state.position + cfg.dt * velocity
         # End stops hold the value, but let the gradient through (straight-through):
         # a hard clamp would leave a model that starts pushing into the home stop
@@ -127,7 +149,7 @@ class DeviceWorldModel(nn.Module):
         heard_n = (pitch_history * weights).sum(1)
         valid = (valve_history * weights).sum(1) >= .5
         heard = PITCH_CENTER + PITCH_SCALE * heard_n
-        next_state = WorldState(hidden, position, velocity, pitch_history, valve_history)
+        next_state = WorldState(state.hidden, position, velocity, pitch_history, valve_history)
         # 4th value: the model's estimate of the pitch sounding now (before the hearing delay).
         return heard, valid, next_state, PITCH_CENTER + PITCH_SCALE * pitch
 
