@@ -164,4 +164,4 @@ def test_world_model_pitch_is_monotone_and_trains_from_logs():
                stacked["heard"], stacked["valid"], stacked["emitted"])
     loss, mae = world.loss(rig.logs, world.encoder(rig.logs))
     loss.backward()
-    assert torch.isfinite(loss) and world.velocity_head[0].weight.grad.abs().sum() > 0
+    assert torch.isfinite(loss) and world.speed.increments.weight.grad.abs().sum() > 0
