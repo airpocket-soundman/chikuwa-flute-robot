@@ -49,14 +49,24 @@ def row_of(params, row, copies, generator=None, jitter=0.0):
     return type(params)(**values)
 
 
-def fine_tune(base, plant, twin_rows, steps, lr, anchor_weight, batch, song_steps, seed, device):
+def practice_songs(rng, batch, song_steps, device, rest_heavy_fraction):
+    """Random songs; a fraction of them full of rests and repeated notes."""
+    heavy = int(round(batch * rest_heavy_fraction))
+    parts = [random_melodies(rng, batch - heavy, song_steps, device, varied=True)] if batch - heavy else []
+    if heavy:
+        parts.append(random_melodies(rng, heavy, song_steps, device, varied=True, rest_probability=.45, repeats=10))
+    return torch.cat([p[0] for p in parts]), torch.cat([p[1] for p in parts])
+
+
+def fine_tune(base, plant, twin_rows, steps, lr, anchor_weight, batch, song_steps, seed, device,
+              rest_heavy_fraction=0.0):
     model = copy.deepcopy(base).train()
     anchor = [p.detach().clone() for p in base.parameters()]
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     rng = np.random.default_rng(seed); generator = torch.Generator(device).manual_seed(seed)
     for _ in range(steps):
         params = row_of(twin_rows, 0, batch, generator, jitter=.10)
-        cents, voice = random_melodies(rng, batch, song_steps, device, varied=True)
+        cents, voice = practice_songs(rng, batch, song_steps, device, rest_heavy_fraction)
         memory, loss = None, 0.0
         for weight in (.3, 1.0):  # the same song twice: keep the song memory useful
             result, memory = model.perform(plant, cents, voice, params, memory, generator)
@@ -79,6 +89,8 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--anchor-weight", type=float, default=1e-3)
     ap.add_argument("--random-songs", type=int, default=3)
+    ap.add_argument("--rest-heavy-fraction", type=float, default=.5,
+                    help="share of practice songs full of rests and repeated notes")
     ap.add_argument("--nn", default="runs/yamabiko_adaptive_memory_v1.pt")
     ap.add_argument("--results", default="docs/plan-results")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -104,7 +116,7 @@ def main():
     lab_tracks = {label: {} for label in lab_rows}
     for row in range(args.rigs):
         model = fine_tune(base, plant, row_of(twin, row, 1), args.steps, args.lr, args.anchor_weight,
-                          args.batch, args.song_steps, args.seed + row, device)
+                          args.batch, args.song_steps, args.seed + row, device, args.rest_heavy_fraction)
         rig_params = row_of(true, row, 1)
         with torch.no_grad():
             for phrase in song_list:
@@ -131,7 +143,8 @@ def main():
         manifest["random"][name] = summarize(merge(units["random"][play]))
         for entry in manifest["per_phrase"]:
             entry["scores"][name] = summarize(merge(per_phrase[entry["id"]][play]))
-    manifest["nn_twin"] = {"steps": args.steps, "batch": args.batch, "lr": args.lr,
+    manifest["nn_twin"] = {"rest_heavy_fraction": args.rest_heavy_fraction, "fit_steps": args.fit_steps,
+                           "steps": args.steps, "batch": args.batch, "lr": args.lr,
                            "anchor_weight": args.anchor_weight, "twin_jitter": .10,
                            "seconds": time.time() - started}
     for sample in lab["samples"]:

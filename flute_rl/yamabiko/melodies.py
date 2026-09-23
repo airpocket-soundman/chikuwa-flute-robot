@@ -15,17 +15,20 @@ ARTICULATION_FRAMES = 4
 
 def random_melodies(rng: np.random.Generator, batch: int, steps: int, device="cpu",
                     low_cents=700.0, high_cents=1900.0, lead_rest=(20, 60), varied=False,
-                    length_scale=1.0):
+                    length_scale=1.0, rest_probability=None, repeats=3):
     """Return ``(cents, voice)`` of shape ``(B, T)``; cents hold during rests.
 
     ``varied=True`` also repeats the same note (re-articulated after a rest or
     a valve gap) and uses short rests, as in the reference phrases; the
     default keeps the original distribution for reproducible evaluations.
     ``length_scale`` stretches every note and rest (0.5 = twice the tempo).
+    With ``varied``, ``rest_probability`` (default .25) and ``repeats`` (how
+    many "same note" entries join the 14 interval choices) shape how often
+    rests and re-articulated notes appear.
     """
     note_range = (max(8, int(round(48 * length_scale))), max(9, int(round(131 * length_scale))))
     short_range = (max(6, int(round(16 * length_scale))), max(7, int(round(60 * length_scale))))
-    steps_choice = [-7, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 7, 12, -12] + ([0, 0, 0] if varied else [])
+    steps_choice = [-7, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 7, 12, -12] + ([0] * repeats if varied else [])
     cents = np.zeros((batch, steps), np.float32)
     voice = np.zeros((batch, steps), np.float32)
     semitones = int((high_cents - low_cents) // 100)
@@ -35,7 +38,7 @@ def random_melodies(rng: np.random.Generator, batch: int, steps: int, device="cp
         cents[row, :t] = low_cents + 100 * note
         while t < steps:
             if varied:
-                rest = rng.random() < .25
+                rest = rng.random() < (.25 if rest_probability is None else rest_probability)
                 short = rest and rng.random() < .6
                 length = int(rng.integers(*short_range)) if short else int(rng.integers(*note_range))
             else:  # original draw order, so default songs stay reproducible

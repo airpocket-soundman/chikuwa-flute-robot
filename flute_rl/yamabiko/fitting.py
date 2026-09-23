@@ -21,9 +21,11 @@ from torch.nn import functional as F
 from .device import PlayLog
 from .physical_plant import DifferentiableMotorFlute, PhysicalPlantParameters
 
-# (pwm, steps) segments of the calibration run, about 8 s at 100 Hz.
+# (pwm, steps) segments of the calibration run, about 9 s at 100 Hz.  The
+# full-speed runs are long enough (1 s) for the slowest motors to reach their
+# top speed; a fast motor simply rests against the far stop meanwhile.
 CALIBRATION = ([(level, 25) for level in (.10, .15, .20, .25, .30, .35, .40)] + [(0.0, 10)] +
-               [(-1.0, 60), (1.0, 35), (-1.0, 35), (.6, 50), (-.6, 50), (.35, 150), (-.35, 150)])
+               [(-1.0, 60), (1.0, 100), (-1.0, 100), (.6, 50), (-.6, 50), (.35, 150), (-.35, 150)])
 
 FITTED = ("torque_gain", "torque_tau_s", "coulomb_friction", "viscous_friction",
           "max_velocity_strokes_s", "deadband", "tube_offset_m", "temp_offset_c", "flute_offset_cents")

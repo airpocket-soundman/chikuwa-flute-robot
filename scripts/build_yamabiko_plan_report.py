@@ -46,6 +46,8 @@ def main():
     manifest_path, lab_path = pathlib.Path(args.manifest), pathlib.Path(args.lab)
     m = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     lab = json.loads(lab_path.read_text(encoding="utf-8")) if lab_path.exists() else {"samples": []}
+    history = sorted(manifest_path.parent.glob("history/round*_manifest.json"))
+    rounds = [(path.stem.replace("_manifest", ""), json.loads(path.read_text(encoding="utf-8"))) for path in history]
 
     # Gate states from the benchmark.
     fit = m.get("fit", {})
@@ -100,6 +102,19 @@ def main():
         f"<tr><td>{html.escape(p['title'])}</td>" + "".join(f"<td>{pct(p['scores'].get(name))}</td>" for name in CONTROLLERS)
         + "</tr>" for p in m.get("per_phrase", []))
     per_phrase_head = "".join(f"<th>{label}</th>" for label, _ in CONTROLLERS.values())
+
+    compared = ("det_twin", "nn_twin_play1", "nn_twin_play3", "sensor")
+    history_rows = ""
+    for label, old in rounds + [("今回", m)] if m else []:
+        cells = "".join(f"<td>{pct((old.get(section) or {}).get(name))}</td>"
+                        for section in ("phrases", "random") for name in compared)
+        history_rows += f"<tr><td>{html.escape(label.replace('round', '第') + ('回' if label.startswith('round') else ''))}</td>{cells}</tr>"
+    history_head = "".join(f"<th>{'参照曲' if section == 'phrases' else '乱数曲'}：{CONTROLLERS[name][0]}</th>"
+                           for section in ("phrases", "random") for name in compared)
+    history_html = (f'''<h3>前回からの変化</h3>
+<p class="note">第2回の変更：較正動作の全力往復を1秒に延長（約9秒）、ツインの当てはめを300回に、NNの仕上げの練習曲の半分を休符・同音連打の多い曲に。</p>
+<div class="table"><table><thead><tr><th>回</th>{history_head}</tr></thead><tbody>{history_rows}</tbody></table></div>'''
+                    if rounds else "")
 
     recovery = fit.get("recovery", {})
     fit_html = (f"""<dl class="facts">
@@ -187,6 +202,7 @@ audio{{width:100%;max-width:420px}}a{{color:var(--cyan)}}
 <div class="table"><table><thead><tr><th>方式</th><th>命中率</th><th>合っている割合</th><th>届くまで（中央値）</th></tr></thead><tbody>{comparison('phrases')}</tbody></table></div>
 <h3>制御方式の比較：乱数曲</h3>
 <div class="table"><table><thead><tr><th>方式</th><th>命中率</th><th>合っている割合</th><th>届くまで（中央値）</th></tr></thead><tbody>{comparison('random')}</tbody></table></div>
+{history_html}
 <h3>曲ごとの命中率</h3>
 <div class="table"><table><thead><tr><th>曲</th>{per_phrase_head}</tr></thead><tbody>{per_phrase_rows}</tbody></table></div>
 
