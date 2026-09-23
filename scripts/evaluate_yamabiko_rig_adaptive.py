@@ -150,36 +150,39 @@ def main():
     variants["encoder_oracle"] = [errors(encoder_oracle(plant, performer, c, v, params, oracle_memory), c, v)
                                   for c, v in songs]
 
+    def neural_repeat(model, learning_mode, p, song_list):
+        """Play each song twice on the same rigs; memory from play 1 carries into play 2."""
+        firsts, seconds, results = [], [], []
+        for k, (cents, voice) in enumerate(song_list):
+            first, memory = model.perform(plant, cents, voice, p, None, generator(k))
+            second, _ = model.perform(plant, cents, voice, p, memory, generator(k + 100),
+                                      write_memory=not learning_mode)
+            firsts.append(errors(first["pitch_cents"], cents, voice))
+            seconds.append(errors(second["pitch_cents"], cents, voice)); results.append(second)
+        return firsts, seconds, results
+
     models, neural_results, training = {}, None, {}
     for path in map(pathlib.Path, args.checkpoint):
         if not path.exists():
             continue
         checkpoint = torch.load(path, map_location=device, weights_only=False)
         model = RigAdaptivePerformer.from_checkpoint(checkpoint, device).eval()
-        calibrated = bool(checkpoint.get("calibration_songs"))
-        entry = {"checkpoint": str(path), "learning_mode": calibrated,
-                 "best_step": checkpoint.get("best", {}).get("step"), "seed": checkpoint.get("seed")}
-        for label, carry in (("carry_memory", True), ("reset_memory", False)):
-            memory, rows, results = None, [], []
-            if calibrated and carry:  # learning mode: calibrate once, then only read
-                memory = model.calibrate(plant, params, generator(999))
-            for k, (cents, voice) in enumerate(songs):
-                result, new = model.perform(plant, cents, voice, params, memory, generator(k),
-                                            write_memory=not calibrated)
-                rows.append(errors(result["pitch_cents"], cents, voice)); results.append(result)
-                if not calibrated:
-                    memory = new if carry else None
-            entry[label] = {"per_song": rows, "mean": mean_rows(rows)}
-            if carry: neural_results = results
-        models[path.stem] = entry
+        learning_mode = bool(checkpoint.get("calibration_songs"))
+        firsts, seconds, results = neural_repeat(model, learning_mode, params, songs)
+        models[path.stem] = {"checkpoint": str(path), "learning_mode": learning_mode,
+                             "protocol": checkpoint.get("protocol", "songs"),
+                             "best_step": checkpoint.get("best", {}).get("step"), "seed": checkpoint.get("seed"),
+                             "first_play": {"per_song": firsts, "mean": mean_rows(firsts)},
+                             "second_play": {"per_song": seconds, "mean": mean_rows(seconds)}}
+        neural_results = results
     neural = {key: value for key, value in list(models.values())[-1].items()
-              if key in ("carry_memory", "reset_memory")} if models else {}
+              if key in ("first_play", "second_play")} if models else {}
     if models:
         training = {key: value for key, value in list(models.values())[-1].items()
-                    if key not in ("carry_memory", "reset_memory")}
+                    if key not in ("first_play", "second_play")}
 
     # Motor robustness: the unmeasured actuator could be much slower or faster.
-    robustness = {"factors": [0.5, 0.65, 1.0, 1.35, 2.0], "rows": {}}
+    robustness = {"factors": [0.4, 0.6, 1.0, 1.6, 2.5], "rows": {}}
     last_model = None
     if models:
         last_path = pathlib.Path(list(models.values())[-1]["checkpoint"])
@@ -194,18 +197,18 @@ def main():
         trial = [random_melodies(np.random.default_rng(7000 + k), 96, args.song_steps, device) for k in range(2)]
         performer = EncoderlessDeterministicPerformer(plant, base)
         ratio = performer.measure_motor(p, generator(998))
-        memory = (last_model.calibrate(plant, p, generator(999)) if last_model is not None and last_learning else None)
-        cells = {"det_fixed": [], "det_calibrated": [], "nn_memory": [], "nn_no_memory": []}
+        cells = {"det_fixed": [], "det_calibrated": [], "nn_first": [], "nn_second": []}
         for k, (c, v) in enumerate(trial):
             masks = error_regions(plant, p, c, v)
             cells["det_fixed"].append(region_errors(performer.perform(c, v, p, None, generator(k))[0]["pitch_cents"], c, v, masks))
             cells["det_calibrated"].append(region_errors(
                 performer.perform(c, v, p, None, generator(k), motor_ratio=ratio)[0]["pitch_cents"], c, v, masks))
             if last_model is not None:
-                for key, mem in (("nn_memory", memory), ("nn_no_memory", None)):
-                    played = last_model.perform(plant, c, v, p, mem, generator(k),
-                                                write_memory=not last_learning)[0]["pitch_cents"]
-                    cells[key].append(region_errors(played, c, v, masks))
+                first, memory = last_model.perform(plant, c, v, p, None, generator(k))
+                second, _ = last_model.perform(plant, c, v, p, memory, generator(k + 100),
+                                               write_memory=not last_learning)
+                cells["nn_first"].append(region_errors(first["pitch_cents"], c, v, masks))
+                cells["nn_second"].append(region_errors(second["pitch_cents"], c, v, masks))
         robustness["rows"][str(factor)] = {
             key: {"all": float(np.mean([r["all"] for r in rows])), "core": float(np.mean([r["core"] for r in rows]))}
             for key, rows in cells.items() if rows}
@@ -241,7 +244,7 @@ def main():
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps({k: v["mean"] for k, v in summary["deterministic"].items()}, indent=2))
     for name, entry in models.items():
-        print(name, {k: [round(r["all"], 1) for r in entry[k]["per_song"]] for k in ("carry_memory", "reset_memory")})
+        print(name, {k: [round(r["all"], 1) for r in entry[k]["per_song"]] for k in ("first_play", "second_play")})
 
 
 if __name__ == "__main__":

@@ -10,7 +10,9 @@ rig parameters.  Gradients flow through the differentiable simulator.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
+import math
 import pathlib
 import sys
 import time
@@ -25,8 +27,14 @@ from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalP
 from flute_rl.yamabiko.rig_adaptive import RigAdaptiveConfig, RigAdaptivePerformer  # noqa: E402
 
 
-def episode_loss(model, plant, songs, params, generator, carry=True, calibration_songs=None):
-    """``calibration_songs=k``: only the first k songs write the rig memory."""
+def episode_loss(model, plant, songs, params, generator, carry=True, calibration_songs=None,
+                 weights=None, normalize=False):
+    """``calibration_songs=k``: only the first k songs write the rig memory.
+
+    ``weights`` weight each song's loss (e.g. 0.3 for a first play, 1.0 for
+    the repeat).  ``normalize`` divides each rig's loss by its own detached
+    error level, so rigs with very large errors do not dominate the gradient.
+    """
     memory, losses, maes = None, [], []
     for index, (cents, voice) in enumerate(songs):
         write = calibration_songs is None or index < calibration_songs
@@ -34,11 +42,28 @@ def episode_loss(model, plant, songs, params, generator, carry=True, calibration
                                            write_memory=write)
         memory = new_memory if carry else None
         error = result["pitch_cents"] - cents
-        pitch = F.smooth_l1_loss(error[voice], torch.zeros_like(error[voice]), beta=20.0) / 100.0
+        per_frame = F.smooth_l1_loss(error, torch.zeros_like(error), beta=20.0, reduction="none") / 100.0
+        per_rig = (per_frame * voice).sum(1) / voice.sum(1).clamp_min(1)
+        if normalize:
+            per_rig = per_rig / (per_rig.detach() + .2)
         pwm = result["pwm"]
         effort = 1e-3 * pwm.square().mean() + 2e-3 * (pwm[:, 1:] - pwm[:, :-1]).square().mean()
-        losses.append(pitch + effort); maes.append(error[voice].abs().mean())
-    return torch.stack(losses).mean(), torch.stack(maes)
+        weight = 1.0 if weights is None else weights[index]
+        losses.append(weight * (per_rig.mean() + effort)); maes.append(error[voice].abs().mean())
+    total = sum(losses) / (len(losses) if weights is None else sum(weights))
+    return total, torch.stack(maes)
+
+
+def repeat_evaluate(model, plant, songs, params):
+    """Play every song twice on the same rig; the second play is the score."""
+    model.eval(); first, second = [], []
+    with torch.no_grad():
+        for k, (cents, voice) in enumerate(songs):
+            generator = torch.Generator(params.torque_gain.device).manual_seed(k)
+            _, maes = episode_loss(model, plant, [(cents, voice), (cents, voice)], params, generator)
+            first.append(float(maes[0])); second.append(float(maes[1]))
+    model.train()
+    return {"first": first, "second": second}
 
 
 @torch.no_grad()
@@ -66,6 +91,12 @@ def main():
                     help="learning-mode design: only the first N songs write the rig memory")
     ap.add_argument("--varied-melodies", action="store_true",
                     help="train on repeated notes and short rests as well")
+    ap.add_argument("--motor-curriculum", type=int, default=0,
+                    help="widen the motor scale range from 0.8-1.25 to the full range over this many steps")
+    ap.add_argument("--repeat-song", action="store_true",
+                    help="each episode plays the same song twice; the repeat carries the memory and is weighted 1.0")
+    ap.add_argument("--first-play-weight", type=float, default=.3)
+    ap.add_argument("--normalize-rigs", action="store_true")
     ap.add_argument("--init", default=None, help="start from this rig-adaptive checkpoint")
     ap.add_argument("--seed", type=int, default=20260923)
     ap.add_argument("--eval-every", type=int, default=50)
@@ -86,13 +117,26 @@ def main():
     generator = torch.Generator(device).manual_seed(args.seed)
     started = time.time()
     for step in range(1, args.steps + 1):
-        params = plant.parameters(args.batch, device, spread=1.0, generator=generator)
+        train_plant = plant
+        if args.motor_curriculum and plant.config.motor_scale_range is not None:
+            low, high = plant.config.motor_scale_range
+            k = min(1.0, step / args.motor_curriculum)
+            span = (math.exp(math.log(.8) + k * (math.log(low) - math.log(.8))),
+                    math.exp(math.log(1.25) + k * (math.log(high) - math.log(1.25))))
+            train_plant = DifferentiableMotorFlute(dataclasses.replace(plant.config, motor_scale_range=span))
+        params = train_plant.parameters(args.batch, device, spread=1.0, generator=generator)
         warm = step <= args.warmup_steps
-        songs = [random_melodies(rng, args.batch, 250 if warm else args.song_steps, device,
-                                 varied=args.varied_melodies)
-                 for _ in range(2 if warm else args.songs)]
-        loss, maes = episode_loss(model, plant, songs, params, generator,
-                                  calibration_songs=None if warm else args.calibration_songs)
+        if args.repeat_song:
+            song = random_melodies(rng, args.batch, args.song_steps, device, varied=args.varied_melodies)
+            loss, maes = episode_loss(model, train_plant, [song, song], params, generator,
+                                      weights=[args.first_play_weight, 1.0], normalize=args.normalize_rigs)
+        else:
+            songs = [random_melodies(rng, args.batch, 250 if warm else args.song_steps, device,
+                                     varied=args.varied_melodies)
+                     for _ in range(2 if warm else args.songs)]
+            loss, maes = episode_loss(model, train_plant, songs, params, generator,
+                                      calibration_songs=None if warm else args.calibration_songs,
+                                      normalize=args.normalize_rigs)
         optimizer.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step(); schedule.step()
@@ -100,15 +144,23 @@ def main():
             print(f"step {step:4d} loss {float(loss.detach()):.4f} song MAE " +
                   " ".join(f"{float(m):6.1f}" for m in maes) + f"  {time.time() - started:6.0f}s", flush=True)
         if (step % args.eval_every == 0 and step > args.warmup_steps) or step == args.steps:
-            metrics = evaluate(model, plant, eval_songs, eval_params, args.calibration_songs)
-            score = float(np.mean(metrics["carry"]))
+            if args.repeat_song:
+                metrics = repeat_evaluate(model, plant, eval_songs, eval_params)
+                score = float(np.mean(metrics["second"]))
+                print(f"eval {step}: first {[round(x, 1) for x in metrics['first']]} "
+                      f"second {[round(x, 1) for x in metrics['second']]}", flush=True)
+            else:
+                metrics = evaluate(model, plant, eval_songs, eval_params, args.calibration_songs)
+                score = float(np.mean(metrics["carry"]))
+                print(f"eval {step}: carry {metrics['carry']} reset {metrics['reset']}", flush=True)
             history.append({"step": step, **metrics})
-            print(f"eval {step}: carry {metrics['carry']} reset {metrics['reset']}", flush=True)
             if best is None or score < best["score"]:
                 best = {"step": step, "score": score, **metrics}
                 torch.save(model.checkpoint(plant_config=vars(plant.config), best=best, seed=args.seed,
-                                            calibration_songs=args.calibration_songs), args.out)
-    report = {"best": best, "warmup_steps": args.warmup_steps, "varied_melodies": args.varied_melodies, "calibration_songs": args.calibration_songs,
+                                            calibration_songs=args.calibration_songs,
+                                            protocol="repeat-song" if args.repeat_song else "songs"), args.out)
+    report = {"best": best, "repeat_song": args.repeat_song, "first_play_weight": args.first_play_weight,
+              "normalize_rigs": args.normalize_rigs, "motor_curriculum": args.motor_curriculum, "warmup_steps": args.warmup_steps, "varied_melodies": args.varied_melodies, "calibration_songs": args.calibration_songs,
               "init": args.init, "lr": args.lr, "history": history, "seed": args.seed, "steps": args.steps,
               "batch": args.batch, "songs": args.songs, "song_steps": args.song_steps,
               "simulator": "PhysicalPlantConfig.realistic()", "training": "bptt-through-differentiable-simulator",

@@ -181,8 +181,6 @@ def add_closed_tube_controls(document, checkpoint_path, device):
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     neural = RigAdaptivePerformer.from_checkpoint(checkpoint, device).eval()
     learning_mode = bool(checkpoint.get("calibration_songs"))
-    rig_memory = (neural.calibrate(plant, params, torch.Generator(device).manual_seed(999))
-                  if learning_mode else None)
     deterministic = EncoderlessDeterministicPerformer(plant)
     motor_ratio = deterministic.measure_motor(params, torch.Generator(device).manual_seed(998))
     for sample_index, sample in enumerate(document["samples"]):
@@ -195,8 +193,10 @@ def add_closed_tube_controls(document, checkpoint_path, device):
             for control in CLOSED_TUBE_CONTROLS:
                 generator = torch.Generator(device).manual_seed(sample_index)
                 with torch.inference_mode():
-                    if control == "ra":
-                        result, _ = neural.perform(plant, cents, voices, params, rig_memory, generator,
+                    if control == "ra":  # second play of the same phrase, after adapting in the first
+                        _, memory = neural.perform(plant, cents, voices, params, None, generator)
+                        result, _ = neural.perform(plant, cents, voices, params, memory,
+                                                   torch.Generator(device).manual_seed(sample_index + 100),
                                                    write_memory=not learning_mode)
                     else:
                         result, _ = deterministic.perform(cents, voices, params, None, generator,
@@ -214,6 +214,7 @@ def add_closed_tube_controls(document, checkpoint_path, device):
         "checkpoint": str(checkpoint_path), "rigs": CLOSED_TUBE_RIGS, "learning_mode": learning_mode,
         "simulator": "PhysicalPlantConfig.realistic()",
         "note": ("閉管笛・不感帯・聴こえの遅れ/ノイズ/欠落を含む現実的simulatorで、乱数化機体16台を演奏。"
+                 "NNは同じフレーズを2回演奏し、適応後の2回目を表示する。決定論は較正でモーター速度を測った状態。"
                  "音と線は1台目、MAEは16台平均。計画は制御の内部で行うため、3計画の選択は影響しない。"),
     }
     return document

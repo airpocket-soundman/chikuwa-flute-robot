@@ -682,8 +682,8 @@ def main():
         models = rig.get("neural_models") or ({"current": {**neural, "learning_mode": False}} if neural else {})
         nn_rows = ""
         for name, entry in models.items():
-            mode = "学習モード（較正後は読むだけ）" if entry.get("learning_mode") else "演奏中に書き込み"
-            for key, label in (("carry_memory", "記憶あり"), ("reset_memory", "記憶なし")):
+            mode = "学習モード" if entry.get("learning_mode") else ("同じ曲2回で学習" if entry.get("protocol") == "repeat-song" else "演奏中に書き込み")
+            for key, label in (("first_play", "1回目"), ("second_play", "2回目（適応後）")):
                 if key in entry:
                     cells = "".join(f"<td>{n(row['all'])}</td>" for row in entry[key]["per_song"])
                     nn_rows += (f"<tr><td>{html.escape(name.replace('yamabiko_rig_adaptive_', ''))} {mode} / {label}</td>"
@@ -698,12 +698,12 @@ def main():
             true_gain = det["observer_anticipation"]["mean"]["all"] - det["plus_true_coefficients"]["mean"]["all"]
             parts = []
             for name, entry in models.items():
-                gain = entry["reset_memory"]["mean"]["all"] - entry["carry_memory"]["mean"]["all"]
-                parts.append(f"{html.escape(name.replace('yamabiko_rig_adaptive_', ''))}: 平均 {n(entry['carry_memory']['mean']['all'])} cent、記憶の効果 {n(gain)} cent")
-            memory_note = (f'<p class="note"><b>結果:</b> {" ／ ".join(parts)}（決定論の基準 {n(det_mean)} cent、'
-                           f'決定論に真の係数を与えた効果 {n(true_gain)} cent）。v2は同音反復・短い休符を加えた旋律で、'
-                           f'固定の較正曲を1曲吹いて記憶を書き、以後は読むだけの学習モードで学習した。どちらの方式でも'
-                           f'機体の記憶の効果は数cent以下で、このsimulatorでは笛の個体差を覚える価値が小さいことをNNでも確認した。</p>')
+                gain = entry["first_play"]["mean"]["all"] - entry["second_play"]["mean"]["all"]
+                parts.append(f"{html.escape(name.replace('yamabiko_rig_adaptive_', ''))}: 2回目 {n(entry['second_play']['mean']['all'])} cent"
+                             f"（1回目からの改善 {n(gain)} cent）")
+            memory_note = (f'<p class="note"><b>評価:</b> 同じ曲を同じ機体で2回演奏し、1回目で書いた記憶を持ち越した2回目で採点する'
+                           f'（未知のモーターで1回目がずれるのは当然で、適応後で比べる）。{" ／ ".join(parts)}。'
+                           f'決定論の基準（較正でモーター速度を測定）{n(det_mean)} cent、決定論に真の笛係数を与えた効果 {n(true_gain)} cent。</p>')
         else:
             memory_note = ""
         probe_names = {"tube_offset_m": "管長のずれ", "temp_offset_c": "温度", "flute_offset_cents": "吹圧の音程ずれ",
@@ -723,6 +723,7 @@ def main():
         robust = rig.get("motor_robustness", {}).get("rows", {})
         if robust:
             names = (("det_fixed", "決定論 較正なし"), ("det_calibrated", "決定論 較正あり"),
+                     ("nn_first", "NN 1回目"), ("nn_second", "NN 2回目（適応後）"),
                      ("nn_memory", "NN 記憶あり"), ("nn_no_memory", "NN 記憶なし"))
             present = [(k, l) for k, l in names if any(k in row for row in robust.values())]
             heads = "".join(f"<th>{l}</th>" for _, l in present)
@@ -732,7 +733,7 @@ def main():
             robust_table = (f'<div class="table"><table><thead><tr><th>モーター速度・トルク</th>{heads}<th>較正の測定値</th></tr></thead>'
                             f'<tbody>{body}</tbody></table></div><p class="note">実機のアクチュエーターは未計測のため、速度とトルクを標準の0.5〜2倍に変えて試した'
                             f'（各欄は 全体 / 静止中 の cent）。決定論の較正は、原点から全力で動かしたときの音程の変化と内部モデルの応答の比で速度を測る。'
-                            f'NNの記憶は学習モードの較正曲で書く。</p>')
+                            f'NNは同じ曲を2回演奏し、1回目で書いた記憶を2回目へ持ち越す。</p>')
         else:
             robust_table = ""
         nn_table = (f'''<div class="table"><table><thead><tr><th>NN（演奏MAE / 曲）</th>{song_heads}<th>静止中</th></tr></thead>
@@ -764,7 +765,8 @@ def main():
                        ("score+nn_play", "正解楽譜 → NN演奏（下流のみ）"),
                        ("score+det_play", "正解楽譜 → 決定論演奏（下流のみ）"))
         route_rows = "".join(
-            f"<tr><td>{label}</td><td>{n(whole['routes'][key]['all'])}</td><td>{n(whole['routes'][key].get('core'))}</td>"
+            f"<tr><td>{label}</td><td>{n(whole['routes'][key]['all'])}</td><td>{n(whole['routes'][key].get('first_play_all'))}</td>"
+            f"<td>{n(whole['routes'][key].get('core'))}</td>"
             f"<td>{n(whole['routes'][key].get('transit'))}</td><td>{pct(whole['routes'][key]['missing_voice'])} %</td></tr>"
             for key, label in route_names)
         sample_heads = "".join(f"<th>{html.escape(label.split('（')[0])}</th>" for _, label in route_names)
@@ -782,7 +784,7 @@ def main():
       <div class="grid">
         <section class="card partial"><div class="stage"><b>ALL</b><span class="partial">仮想評価</span></div>
           <h2>経路別の平均</h2>
-          <div class="table"><table><thead><tr><th>経路</th><th>全体</th><th>静止中</th><th>移動中</th><th>音の欠落</th></tr></thead><tbody>{route_rows}</tbody></table></div>
+          <div class="table"><table><thead><tr><th>経路</th><th>全体（NNは2回目）</th><th>NN 1回目</th><th>静止中</th><th>移動中</th><th>音の欠落</th></tr></thead><tbody>{route_rows}</tbody></table></div>
           <dl><div><dt>上流だけの誤差（NN記憶 vs 正解）</dt><dd>{n(whole['memory']['all'])} cent</dd></div>
           <div><dt>実機</dt><dd>未検証</dd></div></dl></section>
         <section class="card"><div class="stage"><b>10</b><span>サンプル別</span></div>

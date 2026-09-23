@@ -120,3 +120,48 @@ def test_home_margin_keeps_the_lowest_note_reachable_on_every_rig():
     params = plant.parameters(512, "cpu", spread=1.0, generator=torch.Generator().manual_seed(2))
     home = plant.cents_at(torch.zeros(512), params)
     assert home.max() < plant.config.low_cents
+
+
+def test_black_box_device_matches_simulator_without_gradient_and_logs_observables():
+    from flute_rl.yamabiko.adaptive_memory import AdaptiveMemoryConfig, AdaptiveMemoryPerformer
+    from flute_rl.yamabiko.device import BlackBoxDevice
+    torch.manual_seed(0)
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
+    params = plant.parameters(3, "cpu", spread=1.0, generator=torch.Generator().manual_seed(1))
+    model = AdaptiveMemoryPerformer(AdaptiveMemoryConfig(fast_hidden=16, planner_hidden=16, homing_steps=5))
+    cents, voice = random_melodies(np.random.default_rng(0), 3, 50, lead_rest=(2, 4))
+    simulated, memory = model.perform(plant, cents, voice, params, generator=torch.Generator().manual_seed(2))
+    rig = BlackBoxDevice(plant, params, torch.Generator().manual_seed(2))
+    played, _ = model.play(rig, cents, voice)
+    torch.testing.assert_close(simulated["pitch_cents"], played["pitch_cents"])
+    assert simulated["pitch_cents"].requires_grad and not played["pitch_cents"].requires_grad
+    assert len(rig.logs) == 1 and set(vars(rig.logs[0])) == {"target_cents", "target_voice", "pwm", "valve",
+                                                             "heard", "valid"}
+    assert memory["song"].shape == (3, 50, 4)
+    wiped = model.forget(memory, "motor", rows=torch.tensor([True, False, False]))
+    assert wiped["motor"][0].abs().sum() == 0 and torch.equal(wiped["motor"][1], memory["motor"][1])
+
+
+def test_world_model_pitch_is_monotone_and_trains_from_logs():
+    from flute_rl.yamabiko.device import BlackBoxDevice
+    from flute_rl.yamabiko.world_model import DeviceWorldModel, WorldModelConfig
+    torch.manual_seed(0)
+    world = DeviceWorldModel(WorldModelConfig(hidden=16))
+    context = torch.randn(1, world.config.context)
+    position = torch.linspace(0, 1, 50)
+    pitch = world.pitch(position, context.expand(50, -1))
+    assert (pitch[1:] >= pitch[:-1] - 1e-6).all()
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
+    rig = BlackBoxDevice(plant, plant.parameters(2, "cpu"), torch.Generator().manual_seed(0))
+    state = rig.reset("cpu", homing_steps=5); records = {"pwm": [], "heard": [], "valid": [], "emitted": []}
+    for t in range(30):
+        pwm = torch.full((2,), .6 if t < 20 else -.6)
+        heard, valid, state, emitted = rig.step(state, pwm, torch.ones(2))
+        for key, value in (("pwm", pwm), ("heard", heard), ("valid", valid), ("emitted", emitted)):
+            records[key].append(value)
+    stacked = {k: torch.stack(v, 1) for k, v in records.items()}
+    rig.record(torch.zeros(2, 30), torch.zeros(2, 30, dtype=torch.bool), stacked["pwm"], torch.ones(2, 30),
+               stacked["heard"], stacked["valid"], stacked["emitted"])
+    loss, mae = world.loss(rig.logs, world.encoder(rig.logs))
+    loss.backward()
+    assert torch.isfinite(loss) and world.velocity_head[0].weight.grad.abs().sum() > 0

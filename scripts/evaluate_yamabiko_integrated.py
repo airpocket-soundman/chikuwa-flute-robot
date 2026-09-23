@@ -90,7 +90,6 @@ def main():
     n = args.rigs
     # Learning mode: each rig plays the fixed calibration piece once; every
     # evaluated phrase then only reads that rig memory.
-    rig_memory = downstream.calibrate(plant, params, torch.Generator(device).manual_seed(999)) if learning_mode else None
     motor_ratio = deterministic.measure_motor(params, torch.Generator(device).manual_seed(998))
 
     routes = ("nn_listen+nn_play", "nn_listen+det_play", "score+nn_play", "score+det_play")
@@ -121,13 +120,20 @@ def main():
             voice = torch.tensor(voice_np, device=device)[None].expand(n, -1).contiguous()
             generator = torch.Generator(device).manual_seed(index)
             if route.endswith("nn_play"):
-                result, _ = downstream.perform(plant, cents, voice, params, rig_memory, generator,
+                # Play the phrase twice; the adapted second play is the score.
+                first, memory = downstream.perform(plant, cents, voice, params, None, generator)
+                first_rows = [errors(first["pitch_cents"].cpu().numpy()[r], truth, truth_voice, voice_np)
+                              for r in range(n)]
+                result, _ = downstream.perform(plant, cents, voice, params, memory,
+                                               torch.Generator(device).manual_seed(index + 100),
                                                write_memory=not learning_mode)
             else:
                 result, _ = deterministic.perform(cents, voice, params, None, generator, motor_ratio=motor_ratio)
             played = result["pitch_cents"].cpu().numpy()
             rig_rows = [errors(played[r], truth, truth_voice, voice_np) for r in range(n)]
             row["routes"][route] = average(rig_rows)
+            if route.endswith("nn_play"):
+                row["routes"][route]["first_play_all"] = average(first_rows)["all"]
             both = truth_voice_t & voice
             regions = region_errors(result["pitch_cents"], truth_t, both, [m & both for m in masks])
             row["routes"][route].update({key: regions[key] for key in ("transit", "departing", "core", "core_frames")})
@@ -149,6 +155,8 @@ def main():
         "simulator": "PhysicalPlantConfig.realistic()",
         "upstream_checkpoint": args.composite, "downstream_checkpoint": args.downstream,
         "downstream_learning_mode": learning_mode,
+        "protocol": "NN routes play each phrase twice on the same rig and score the second play; "
+                    "the deterministic routes use the motor calibration (measure_motor)",
         "routes": {route: average(rows) for route, rows in per_route.items()},
         "memory": average([s["memory"] for s in samples]),
         "error_reference": "true score (not the Ear's estimate)",
