@@ -24,6 +24,7 @@ from flute_rl.audio import room, synth_self, synth_source  # noqa: E402
 from flute_rl.yamabiko.composite import YamabikoComposite  # noqa: E402
 from flute_rl.yamabiko.deterministic_pipeline import EncoderlessDeterministicPerformer  # noqa: E402
 from flute_rl.yamabiko.e2e_io import frame_audio_numpy  # noqa: E402
+from flute_rl.yamabiko.error_regions import error_regions, region_errors  # noqa: E402
 from flute_rl.yamabiko.melodies import ARTICULATION_FRAMES, note_age  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
 from flute_rl.yamabiko.rig_adaptive import RigAdaptivePerformer  # noqa: E402
@@ -66,7 +67,7 @@ def errors(played, target, target_voice, played_voice):
 
 def average(rows):
     keys = rows[0].keys()
-    return {k: float(np.mean([r[k] for r in rows if r[k] is not None])) for k in keys}
+    return {k: float(np.mean([r[k] for r in rows if r.get(k) is not None])) for k in keys}
 
 
 def main():
@@ -90,6 +91,7 @@ def main():
     # Learning mode: each rig plays the fixed calibration piece once; every
     # evaluated phrase then only reads that rig memory.
     rig_memory = downstream.calibrate(plant, params, torch.Generator(device).manual_seed(999)) if learning_mode else None
+    motor_ratio = deterministic.measure_motor(params, torch.Generator(device).manual_seed(998))
 
     routes = ("nn_listen+nn_play", "nn_listen+det_play", "score+nn_play", "score+det_play")
     samples, per_route = [], {route: [] for route in routes}
@@ -109,6 +111,9 @@ def main():
         row = {"id": sample_id, "title": title, "description": description,
                "memory": memory_error, "routes": {}}
         tracks = {}
+        truth_t = torch.tensor(truth, device=device, dtype=torch.float32)[None].expand(n, -1).contiguous()
+        truth_voice_t = torch.tensor(truth_voice, device=device)[None].expand(n, -1).contiguous()
+        masks = error_regions(plant, params, truth_t, truth_voice_t)
         for route in routes:
             source = route.split("+")[0]
             cents_np, voice_np = (heard_cents, heard_voice) if source == "nn_listen" else (truth, truth_voice)
@@ -119,10 +124,13 @@ def main():
                 result, _ = downstream.perform(plant, cents, voice, params, rig_memory, generator,
                                                write_memory=not learning_mode)
             else:
-                result, _ = deterministic.perform(cents, voice, params, None, generator)
+                result, _ = deterministic.perform(cents, voice, params, None, generator, motor_ratio=motor_ratio)
             played = result["pitch_cents"].cpu().numpy()
             rig_rows = [errors(played[r], truth, truth_voice, voice_np) for r in range(n)]
             row["routes"][route] = average(rig_rows)
+            both = truth_voice_t & voice
+            regions = region_errors(result["pitch_cents"], truth_t, both, [m & both for m in masks])
+            row["routes"][route].update({key: regions[key] for key in ("transit", "departing", "core", "core_frames")})
             per_route[route].append(row["routes"][route])
             tracks[route] = played[0]
         samples.append(row)

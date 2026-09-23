@@ -24,15 +24,25 @@ from flute_rl.audio import synth_self  # noqa: E402
 from flute_rl.yamabiko.deterministic_pipeline import (EncoderlessConfig,  # noqa: E402
                                                        EncoderlessDeterministicPerformer, RigMemory,
                                                        period_ms)
+from flute_rl.yamabiko.error_regions import error_regions, region_errors  # noqa: E402
 from flute_rl.yamabiko.melodies import next_voiced, note_age, random_melodies  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
 from flute_rl.yamabiko.rig_adaptive import RigAdaptivePerformer  # noqa: E402
 
 
+REGIONS = {}
+
+
 def errors(played, cents, voice, settle=30):
     age = note_age(voice); e = (played - cents).abs()
-    return {"all": float(e[voice].mean()), "onset": float(e[voice & (age <= settle)].mean()),
-            "settled": float(e[voice & (age > settle)].mean())}
+    result = {"all": float(e[voice].mean()), "onset": float(e[voice & (age <= settle)].mean()),
+              "settled": float(e[voice & (age > settle)].mean())}
+    masks = REGIONS.get(id(cents))
+    if masks is not None:
+        regions = region_errors(played, cents, voice, masks)
+        result.update({key: regions[key] for key in ("transit", "departing", "core", "core_frames",
+                                                      "transit_frames", "departing_frames")})
+    return result
 
 
 def mean_rows(rows):
@@ -109,16 +119,19 @@ def main():
     params = plant.parameters(args.rigs, device, spread=1.0, generator=torch.Generator(device).manual_seed(31337))
     songs = [random_melodies(np.random.default_rng(5000 + k), args.rigs, args.song_steps, device)
              for k in range(args.songs)]
+    for cents, voice in songs:  # mechanism-limited regions, fixed by score and rig only
+        REGIONS[id(cents)] = error_regions(plant, params, cents, voice)
 
     def generator(k):
         return torch.Generator(device).manual_seed(k)
 
-    def deterministic(config, carry=False, memory=None, learn=None):
+    def deterministic(config, carry=False, memory=None, learn=None, calibrate=False):
         performer = EncoderlessDeterministicPerformer(plant, config)
         if learn is not None: performer.learn = learn
+        ratio = performer.measure_motor(params, generator(998)) if calibrate else None
         rows, results = [], []
         for k, (cents, voice) in enumerate(songs):
-            result, new = performer.perform(cents, voice, params, memory, generator(k))
+            result, new = performer.perform(cents, voice, params, memory, generator(k), motor_ratio=ratio)
             rows.append(errors(result["pitch_cents"], cents, voice)); results.append(result)
             if carry: memory = new
         return rows, results
@@ -128,7 +141,8 @@ def main():
     variants["dead_reckoning_only"] = deterministic(dataclasses.replace(
         base, observer_gain=0.0, observer_velocity_gain=0.0, anticipation_speed=None))[0]
     variants["pitch_observer"] = deterministic(dataclasses.replace(base, anticipation_speed=None))[0]
-    variants["observer_anticipation"], det_results = deterministic(base)
+    variants["observer_anticipation"] = deterministic(base)[0]
+    variants["observer_anticipation_calibrated"], det_results = deterministic(base, calibrate=True)
     variants["plus_coefficient_learning"] = deterministic(base, carry=True, learn=True)[0]
     oracle_memory = oracle_coefficients(plant, params)
     variants["plus_true_coefficients"] = deterministic(base, memory=oracle_memory)[0]
@@ -164,6 +178,39 @@ def main():
         training = {key: value for key, value in list(models.values())[-1].items()
                     if key not in ("carry_memory", "reset_memory")}
 
+    # Motor robustness: the unmeasured actuator could be much slower or faster.
+    robustness = {"factors": [0.5, 0.65, 1.0, 1.35, 2.0], "rows": {}}
+    last_model = None
+    if models:
+        last_path = pathlib.Path(list(models.values())[-1]["checkpoint"])
+        last_checkpoint = torch.load(last_path, map_location=device, weights_only=False)
+        last_model = RigAdaptivePerformer.from_checkpoint(last_checkpoint, device).eval()
+        last_learning = bool(last_checkpoint.get("calibration_songs"))
+    cfg = plant.config
+    for factor in robustness["factors"]:
+        p = plant.parameters(96, device, spread=1.0, generator=torch.Generator(device).manual_seed(55))
+        p.max_velocity_strokes_s = torch.full_like(p.max_velocity_strokes_s, cfg.max_velocity_strokes_s * factor)
+        p.torque_gain = torch.full_like(p.torque_gain, cfg.torque_gain * factor)
+        trial = [random_melodies(np.random.default_rng(7000 + k), 96, args.song_steps, device) for k in range(2)]
+        performer = EncoderlessDeterministicPerformer(plant, base)
+        ratio = performer.measure_motor(p, generator(998))
+        memory = (last_model.calibrate(plant, p, generator(999)) if last_model is not None and last_learning else None)
+        cells = {"det_fixed": [], "det_calibrated": [], "nn_memory": [], "nn_no_memory": []}
+        for k, (c, v) in enumerate(trial):
+            masks = error_regions(plant, p, c, v)
+            cells["det_fixed"].append(region_errors(performer.perform(c, v, p, None, generator(k))[0]["pitch_cents"], c, v, masks))
+            cells["det_calibrated"].append(region_errors(
+                performer.perform(c, v, p, None, generator(k), motor_ratio=ratio)[0]["pitch_cents"], c, v, masks))
+            if last_model is not None:
+                for key, mem in (("nn_memory", memory), ("nn_no_memory", None)):
+                    played = last_model.perform(plant, c, v, p, mem, generator(k),
+                                                write_memory=not last_learning)[0]["pitch_cents"]
+                    cells[key].append(region_errors(played, c, v, masks))
+        robustness["rows"][str(factor)] = {
+            key: {"all": float(np.mean([r["all"] for r in rows])), "core": float(np.mean([r["core"] for r in rows]))}
+            for key, rows in cells.items() if rows}
+        robustness["rows"][str(factor)]["measured_ratio"] = float(ratio.median())
+
     cents, voice = songs[0][0][0].cpu().numpy(), songs[0][1][0].cpu().numpy()
     series = [("deterministic encoder-less", det_results[0]["pitch_cents"][0].cpu().numpy(), "#f59e0b")]
     write_wav(out / "target.wav", synth_self(cents, voice, np.random.default_rng(1), sr=16_000), 16_000)
@@ -185,6 +232,7 @@ def main():
         "deterministic": {key: {"per_song": rows, "mean": mean_rows(rows)} for key, rows in variants.items()},
         "neural": neural,
         "neural_models": models,
+        "motor_robustness": robustness,
         "neural_training": training,
         "network_received_simulator_internal_state": False,
         "real_rig_validated": False,

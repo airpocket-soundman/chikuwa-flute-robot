@@ -670,12 +670,14 @@ def main():
         det_names = (("encoder_oracle", "上限: エンコーダ付きPD（真の位置を読む）"),
                      ("dead_reckoning_only", "推測航法のみ（音を使わない）"),
                      ("pitch_observer", "音程オブザーバ（音程で位置推定を補正）"),
-                     ("observer_anticipation", "オブザーバ + 距離に応じた先回り【決定論の基準】"),
+                     ("observer_anticipation", "オブザーバ + 距離に応じた先回り"),
+                     ("observer_anticipation_calibrated", "↑ + 較正でモーター速度を測定【決定論の基準】"),
                      ("plus_true_coefficients", "↑ + 真の切片・傾き（記憶の上限）"),
                      ("plus_coefficient_learning", "↑ + 切片・傾きのオンライン推定を持ち越し"))
         det_rows = "".join(
             f"<tr><td>{label}</td><td>{n(det[key]['mean']['all'])}</td><td>{n(det[key]['mean']['onset'])}</td>"
-            f"<td>{n(det[key]['mean']['settled'])}</td></tr>" for key, label in det_names if key in det)
+            f"<td>{n(det[key]['mean']['settled'])}</td><td>{n(det[key]['mean'].get('core'))}</td></tr>"
+            for key, label in det_names if key in det)
         neural = rig.get("neural", {})
         models = rig.get("neural_models") or ({"current": {**neural, "learning_mode": False}} if neural else {})
         nn_rows = ""
@@ -685,14 +687,15 @@ def main():
                 if key in entry:
                     cells = "".join(f"<td>{n(row['all'])}</td>" for row in entry[key]["per_song"])
                     nn_rows += (f"<tr><td>{html.escape(name.replace('yamabiko_rig_adaptive_', ''))} {mode} / {label}</td>"
-                                f"{cells}<td>{n(entry[key]['mean']['settled'])}</td></tr>")
+                                f"{cells}<td>{n(entry[key]['mean'].get('core'))}</td></tr>")
         song_heads = "".join(f"<th>{k + 1}曲目</th>" for k in range(rig["songs"]))
         rig_listens = "".join(doc_audio("e2e-rig-adaptive-results/" + src, label) for key, label in
                               (("target", "目標"), ("deterministic", "決定論"), ("neural", "NN"))
                               if (src := rig_eval.get("audio", {}).get(key)))
         if models:
-            det_mean = det["observer_anticipation"]["mean"]["all"]
-            true_gain = det_mean - det["plus_true_coefficients"]["mean"]["all"]
+            base_key = "observer_anticipation_calibrated" if "observer_anticipation_calibrated" in det else "observer_anticipation"
+            det_mean = det[base_key]["mean"]["all"]
+            true_gain = det["observer_anticipation"]["mean"]["all"] - det["plus_true_coefficients"]["mean"]["all"]
             parts = []
             for name, entry in models.items():
                 gain = entry["reset_memory"]["mean"]["all"] - entry["carry_memory"]["mean"]["all"]
@@ -717,20 +720,36 @@ def main():
                            f'学習モードのv2で、記憶が曲の作業状態ではなく機体の情報（主にモーター速度と聴こえの遅れ）を持つようになった。</p>')
         else:
             probe_table = ""
-        nn_table = (f'''<div class="table"><table><thead><tr><th>NN（演奏MAE / 曲）</th>{song_heads}<th>安定後</th></tr></thead>
+        robust = rig.get("motor_robustness", {}).get("rows", {})
+        if robust:
+            names = (("det_fixed", "決定論 較正なし"), ("det_calibrated", "決定論 較正あり"),
+                     ("nn_memory", "NN 記憶あり"), ("nn_no_memory", "NN 記憶なし"))
+            present = [(k, l) for k, l in names if any(k in row for row in robust.values())]
+            heads = "".join(f"<th>{l}</th>" for _, l in present)
+            body = "".join(f"<tr><td>{float(f):.2f}倍</td>" + "".join(
+                f"<td>{n(row[k]['all'])} / {n(row[k]['core'])}</td>" if k in row else "<td>—</td>" for k, _ in present)
+                + f"<td>{row.get('measured_ratio', 0):.2f}</td></tr>" for f, row in robust.items())
+            robust_table = (f'<div class="table"><table><thead><tr><th>モーター速度・トルク</th>{heads}<th>較正の測定値</th></tr></thead>'
+                            f'<tbody>{body}</tbody></table></div><p class="note">実機のアクチュエーターは未計測のため、速度とトルクを標準の0.5〜2倍に変えて試した'
+                            f'（各欄は 全体 / 静止中 の cent）。決定論の較正は、原点から全力で動かしたときの音程の変化と内部モデルの応答の比で速度を測る。'
+                            f'NNの記憶は学習モードの較正曲で書く。</p>')
+        else:
+            robust_table = ""
+        nn_table = (f'''<div class="table"><table><thead><tr><th>NN（演奏MAE / 曲）</th>{song_heads}<th>静止中</th></tr></thead>
           <tbody>{nn_rows}</tbody></table></div>''' if neural else '<p class="note">NNは学習中のため未評価。</p>')
         rig_adaptive_html = f'''<h2 id="rig-adaptive">閉管笛・現実的シミュレーターでの再設計（エンコーダなし）</h2>
-      <p>閉管笛、不感帯0.20、聴こえの遅れ1±1 step・音程ノイズ3 cent・欠落2%の機体 {rig['rigs']} 台で、同じ機体に別々の曲を {rig['songs']} 曲続けて演奏させた。単位は cent。「立ち上がり」は各音の最初の{rig['settle_steps']} step（0.3 s）、「安定後」はそれ以降。数値は <code>scripts/evaluate_yamabiko_rig_adaptive.py</code> の manifest から生成。</p>
+      <p>閉管笛、不感帯0.20、聴こえの遅れ1±1 step・音程ノイズ3 cent・欠落2%の機体 {rig['rigs']} 台で、同じ機体に別々の曲を {rig['songs']} 曲続けて演奏させた。単位は cent。「立ち上がり」は各音の最初の{rig['settle_steps']} step（0.3 s）、「安定後」はそれ以降。「静止中」は、楽譜と機体の最高速度から決めた「移動が間に合わない区間」と「次の音へ動き出すべき区間」を除いた、本来ぴったり合うべき区間（どの制御にも同じ区間を使う）。数値は <code>scripts/evaluate_yamabiko_rig_adaptive.py</code> の manifest から生成。</p>
       <div class="grid">
         <section class="card partial"><div class="stage"><b>D</b><span class="partial">基準</span></div>
           <h2>決定論版：音程を位置センサーにする</h2><p class="flow">目標cent → 周期 → x=(a−T)/b → PD（推定位置）→ PWM ／ 自己音の周期 → 位置推定を補正</p>
-          <div class="table"><table><thead><tr><th>構成</th><th>全体</th><th>立ち上がり</th><th>安定後</th></tr></thead><tbody>{det_rows}</tbody></table></div>
+          <div class="table"><table><thead><tr><th>構成</th><th>全体</th><th>立ち上がり</th><th>安定後</th><th>静止中</th></tr></thead><tbody>{det_rows}</tbody></table></div>
           <p class="note">音程オブザーバが最大の効果。発音中は切片・傾きが打ち消し合うため、真の係数を与えても改善は数centにとどまる。誤差の大半は音の立ち上がり（モーター移動時間）で、距離に応じた先回りが次に効く。</p></section>
         <section class="card {'partial' if neural else 'pending'}"><div class="stage"><b>NN</b><span class="{'partial' if neural else 'pending'}">{'評価済' if neural else '学習中'}</span></div>
           <h2>NN版：Planner + Motor/Feedback + 個体差記憶</h2><p class="flow">未来の目標窓 + 記憶z → Planner → 狙い位置 ／ 自己音・PWM履歴 → 高速GRU → PWM ／ 低速記憶zは曲をまたいで保持</p>
           {nn_table}
           {memory_note}
           {probe_table}
+          {robust_table}
           <p class="note">学習は同じ機体で別曲を連続演奏するエピソードで、微分可能シミュレーターを通したBPTT。NNはplantの位置・速度・パラメータを受け取らない。</p></section>
       </div>
       <div class="listen">{rig_listens}</div>
@@ -745,8 +764,9 @@ def main():
                        ("score+nn_play", "正解楽譜 → NN演奏（下流のみ）"),
                        ("score+det_play", "正解楽譜 → 決定論演奏（下流のみ）"))
         route_rows = "".join(
-            f"<tr><td>{label}</td><td>{n(whole['routes'][key]['all'])}</td><td>{n(whole['routes'][key]['settled'])}</td>"
-            f"<td>{pct(whole['routes'][key]['missing_voice'])} %</td></tr>" for key, label in route_names)
+            f"<tr><td>{label}</td><td>{n(whole['routes'][key]['all'])}</td><td>{n(whole['routes'][key].get('core'))}</td>"
+            f"<td>{n(whole['routes'][key].get('transit'))}</td><td>{pct(whole['routes'][key]['missing_voice'])} %</td></tr>"
+            for key, label in route_names)
         sample_heads = "".join(f"<th>{html.escape(label.split('（')[0])}</th>" for _, label in route_names)
         sample_rows = "".join(
             f"<tr><td>{html.escape(sample['title'])}</td><td>{n(sample['memory']['all'])}</td>"
@@ -758,11 +778,11 @@ def main():
                       for key, label in (("target", "正解"), ("nn", "全NN"), ("det", "決定論")))
             + "</div>" for sample in integrated["samples"] if sample.get("audio"))
         integrated_html = f'''<h2 id="integrated">統合モデルの評価（聴く → 覚える → 演奏、閉管笛・現実的機体）</h2>
-      <p>10種類のお手本を、上流（NN聴覚・Timeline記憶）と新しい下流（NN個体差記憶 / 決定論オブザーバ）でつなぎ、乱数化機体 {whole['rigs']} 台で演奏した。<b>誤差は耳の推定値ではなく正解の楽譜と比べる</b>ので、上流の聞き間違いも含まれる。単位は cent、「安定後」は各音の0.3 s以降。</p>
+      <p>10種類のお手本を、上流（NN聴覚・Timeline記憶）と新しい下流（NN個体差記憶 / 決定論オブザーバ）でつなぎ、乱数化機体 {whole['rigs']} 台で演奏した。<b>誤差は耳の推定値ではなく正解の楽譜と比べる</b>ので、上流の聞き間違いも含まれる。単位は cent。「静止中」「移動中」は楽譜と機体の最高速度だけで決めた区間（<code>error_regions.py</code>）で、機構の速さの限界と制御の良し悪しを分けて見るためのもの。</p>
       <div class="grid">
         <section class="card partial"><div class="stage"><b>ALL</b><span class="partial">仮想評価</span></div>
           <h2>経路別の平均</h2>
-          <div class="table"><table><thead><tr><th>経路</th><th>全体</th><th>安定後</th><th>音の欠落</th></tr></thead><tbody>{route_rows}</tbody></table></div>
+          <div class="table"><table><thead><tr><th>経路</th><th>全体</th><th>静止中</th><th>移動中</th><th>音の欠落</th></tr></thead><tbody>{route_rows}</tbody></table></div>
           <dl><div><dt>上流だけの誤差（NN記憶 vs 正解）</dt><dd>{n(whole['memory']['all'])} cent</dd></div>
           <div><dt>実機</dt><dd>未検証</dd></div></dl></section>
         <section class="card"><div class="stage"><b>10</b><span>サンプル別</span></div>

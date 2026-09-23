@@ -293,7 +293,7 @@ class EncoderlessDeterministicPerformer(nn.Module):
         variance = torch.tensor(self.config.prior_variance, device=device, dtype=dtype).expand(batch, 2).clone()
         return RigMemory(torch.stack([a, b], 1), variance)
 
-    def _anticipate(self, aim, voice, a, b):
+    def _anticipate(self, aim, voice, a, b, motor_ratio=None):
         """Switch the aim to each next note early enough to arrive on time.
 
         Notes are segmented first: a new note starts where the target moves
@@ -304,7 +304,7 @@ class EncoderlessDeterministicPerformer(nn.Module):
         next note's median.
         """
         cfg = self.config
-        steps_per_stroke = 1.0 / (cfg.anticipation_speed * self.plant.config.dt)
+        ratio = torch.ones(aim.shape[0], device=aim.device) if motor_ratio is None else motor_ratio
         result = aim.clone()
         for row in range(aim.shape[0]):
             values = aim[row]
@@ -318,6 +318,7 @@ class EncoderlessDeterministicPerformer(nn.Module):
             for k in range(1, len(starts)):
                 onset = starts[k]
                 distance = abs(positions[k] - positions[k - 1])
+                steps_per_stroke = 1.0 / (cfg.anticipation_speed * ratio[row].item() * self.plant.config.dt)
                 lead = int(round(cfg.anticipation_lag_steps + distance * steps_per_stroke))
                 earliest = starts[k - 1] + int(cfg.hold_fraction * (onset - starts[k - 1]))
                 start = max(earliest, onset - lead)
@@ -330,8 +331,51 @@ class EncoderlessDeterministicPerformer(nn.Module):
         return (torch.where(use, value + gain * (observation - value), value),
                 torch.where(use, (1 - gain) * variance, variance))
 
+    def measure_motor(self, parameters, generator: torch.Generator | None = None, steps: int = 70,
+                      skip: int = 20):
+        """Learning mode: estimate this rig's motor speed relative to the nominal model.
+
+        Home, then drive out at full PWM with the valve open, convert the heard
+        period back to position with the nominal flute, and fit the slope of
+        the middle of the run.  Only heard pitch is used.
+        """
+        cfg = self.config
+        batch = parameters.torque_gain.shape[0]; device = parameters.torque_gain.device
+        dtype = parameters.torque_gain.dtype
+        memory = self.nominal_memory(batch, device, dtype)
+        a, b = memory.theta[:, 0], memory.theta[:, 1]
+        state = self.plant.initial_state(batch, device, dtype)
+        for _ in range(cfg.homing_steps):
+            state = self.plant.step(state, -torch.ones(batch, device=device, dtype=dtype), parameters)
+        listener = self.listener.initial_state(batch, device, dtype)
+        nominal = self.model.parameters(batch, device, dtype)
+        model_state = self.model.initial_state(batch, device, dtype)
+        xs, oks, model_xs = [], [], []
+        delay = self.plant.config.hearing_delay_steps + 1
+        for _ in range(steps):
+            state = self.plant.step(state, torch.ones(batch, device=device, dtype=dtype), parameters)
+            model_state = self.model.step(model_state, torch.ones(batch, device=device, dtype=dtype), nominal)
+            emitted, sounding = self.plant.flute(state, torch.ones(batch, device=device, dtype=dtype), parameters)
+            heard, valid, listener = self.listener.step(emitted, sounding, parameters, listener, generator)
+            x = (a - period_ms(heard)) / b
+            xs.append(x); oks.append(valid & (x > .02) & (x < .9)); model_xs.append(model_state.position)
+        # Heard pitch is `delay` steps late; skip the acceleration phase.
+        x = torch.stack(xs, 1)[:, delay + skip:]; ok = torch.stack(oks, 1)[:, delay + skip:].to(dtype)
+        model_x = torch.stack(model_xs, 1)[:, skip:skip + x.shape[1]]
+        model_ok = ok * (model_x < .9).to(dtype)
+
+        def slope(values, weights):
+            t = torch.arange(values.shape[1], device=device, dtype=dtype)[None].expand_as(values)
+            total = weights.sum(1).clamp_min(1)
+            mt, mv = (t * weights).sum(1) / total, (values * weights).sum(1) / total
+            return (((t - mt[:, None]) * (values - mv[:, None]) * weights).sum(1) /
+                    (((t - mt[:, None]) ** 2 * weights).sum(1).clamp_min(1e-6)))
+
+        # Same frames, same commands: the ratio cancels the shared acceleration phase.
+        return (slope(x, ok) / slope(model_x, model_ok).clamp_min(1e-4)).clamp(.2, 5.0)
+
     def perform(self, cents, voice, parameters, memory: RigMemory | None = None,
-                generator: torch.Generator | None = None):
+                generator: torch.Generator | None = None, motor_ratio: torch.Tensor | None = None):
         from .melodies import next_voiced
         cfg = self.config
         batch, steps = cents.shape; device, dtype = cents.device, cents.dtype
@@ -340,6 +384,9 @@ class EncoderlessDeterministicPerformer(nn.Module):
         var_a = memory.variance[:, 0] + cfg.process_variance[0]
         var_b = memory.variance[:, 1] + cfg.process_variance[1]
         nominal = self.model.parameters(batch, device, dtype)
+        if motor_ratio is not None:  # measured in learning mode: scale the internal motor model
+            nominal.torque_gain = nominal.torque_gain * motor_ratio
+            nominal.max_velocity_strokes_s = nominal.max_velocity_strokes_s * motor_ratio
         plant_state = self.plant.initial_state(batch, device, dtype)
         # Start somewhere unknown inside the stroke, then home to the low end stop.
         plant_state.position = torch.rand(batch, generator=generator, device=device, dtype=dtype) * .8
@@ -350,7 +397,7 @@ class EncoderlessDeterministicPerformer(nn.Module):
         listener = self.listener.initial_state(batch, device, dtype)
         aim = next_voiced(cents, voice)
         if cfg.anticipation_speed is not None:
-            aim = self._anticipate(aim, voice, a, b)
+            aim = self._anticipate(aim, voice, a, b, motor_ratio)
         if cfg.lead_steps > 0:
             aim = torch.cat([aim[:, cfg.lead_steps:], aim[:, -1:].expand(-1, cfg.lead_steps)], 1)
         delay = self.plant.config.hearing_delay_steps + 1

@@ -184,6 +184,7 @@ def add_closed_tube_controls(document, checkpoint_path, device):
     rig_memory = (neural.calibrate(plant, params, torch.Generator(device).manual_seed(999))
                   if learning_mode else None)
     deterministic = EncoderlessDeterministicPerformer(plant)
+    motor_ratio = deterministic.measure_motor(params, torch.Generator(device).manual_seed(998))
     for sample_index, sample in enumerate(document["samples"]):
         performance = sample["outputs"]["performance"]
         for memory_key, memory in sample["outputs"]["memory"].items():
@@ -198,7 +199,8 @@ def add_closed_tube_controls(document, checkpoint_path, device):
                         result, _ = neural.perform(plant, cents, voices, params, rig_memory, generator,
                                                    write_memory=not learning_mode)
                     else:
-                        result, _ = deterministic.perform(cents, voices, params, None, generator)
+                        result, _ = deterministic.perform(cents, voices, params, None, generator,
+                                                          motor_ratio=motor_ratio)
                 played = result["pitch_cents"]
                 mae = (played - wanted)[:, voice].abs().mean().item() if voice.any() else None
                 entry = {**track(played[0].cpu(), voice.cpu()),

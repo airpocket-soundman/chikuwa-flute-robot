@@ -98,3 +98,25 @@ def test_timeline_pitch_residual_zero_stores_the_ear_pitch():
     stored = torch.randn(2, 7, 2 * BeatGridConfig().memory_hidden + 2)
     decoded = timeline.decode(stored)
     torch.testing.assert_close(decoded[..., 0], stored[..., -2])
+
+
+def test_motor_scale_range_keeps_other_draws_and_calibration_measures_it():
+    base = DifferentiableMotorFlute(PhysicalPlantConfig.realistic(motor_scale_range=None))
+    wide = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
+    a = base.parameters(64, "cpu", spread=1.0, generator=torch.Generator().manual_seed(1))
+    b = wide.parameters(64, "cpu", spread=1.0, generator=torch.Generator().manual_seed(1))
+    torch.testing.assert_close(a.tube_offset_m, b.tube_offset_m)
+    ratio = b.max_velocity_strokes_s / a.max_velocity_strokes_s
+    torch.testing.assert_close(b.torque_gain / a.torque_gain, ratio)
+    assert ratio.min() >= .4 - 1e-6 and ratio.max() <= 2.5 + 1e-6
+    with torch.no_grad():
+        measured = EncoderlessDeterministicPerformer(wide).measure_motor(b, torch.Generator().manual_seed(0))
+    true = b.max_velocity_strokes_s / wide.config.max_velocity_strokes_s
+    assert np.corrcoef(measured.numpy(), true.numpy())[0, 1] > .7
+
+
+def test_home_margin_keeps_the_lowest_note_reachable_on_every_rig():
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
+    params = plant.parameters(512, "cpu", spread=1.0, generator=torch.Generator().manual_seed(2))
+    home = plant.cents_at(torch.zeros(512), params)
+    assert home.max() < plant.config.low_cents

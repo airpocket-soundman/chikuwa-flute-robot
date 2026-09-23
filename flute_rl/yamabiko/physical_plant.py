@@ -44,9 +44,13 @@ class PhysicalPlantConfig:
     feedback_limit: float = 0.45
     flute_model: str = "linear"  # "linear" or "closed_tube"
     temp_c: float = 25.0
-    # Closed tube only.  Chosen so the nominal home position (x = 0) sounds
-    # low_cents; the effective length includes the open-end correction.
-    effective_length_m: float = SPEED_OF_SOUND_25C / (4.0 * A4_HZ * 2.0 ** (700.0 / 1200.0))
+    # Closed tube only.  The nominal home position (x = 0) sounds home_cents;
+    # the effective length includes the open-end correction.  home_cents=None
+    # keeps the original contract (home = low_cents, no margin); a real flute
+    # needs its lowest note above the home pitch of every rig, and the
+    # randomized tube length and temperature move that pitch by about
+    # +-150 cent, so realistic() puts home 200 cent below low_cents.
+    home_cents: float | None = None
     min_length_m: float = 0.02
     # Realism options, all off by default so older checkpoints reproduce.
     # deadband: |PWM| below this fraction produces no torque (rig.py: 0.20).
@@ -58,14 +62,25 @@ class PhysicalPlantConfig:
     hearing_delay_jitter: int = 0
     pitch_noise_cents: float = 0.0
     dropout: float = 0.0
+    # Whole-motor uncertainty: speed and torque share one log-uniform factor
+    # in this range (the real actuator is unmeasured; its rating could be off
+    # by a factor of two).  Drawn after every other parameter, so the other
+    # randomized values are unchanged.  None keeps the +-35 % spreads only.
+    motor_scale_range: tuple[float, float] | None = None
 
     @classmethod
     def realistic(cls, **overrides) -> "PhysicalPlantConfig":
         """Closed tube with the rig.py deadband and hearing imperfections."""
-        values = dict(flute_model="closed_tube", deadband=0.20, hearing_delay_steps=1,
-                      hearing_delay_jitter=1, pitch_noise_cents=3.0, dropout=0.02)
+        values = dict(flute_model="closed_tube", home_cents=500.0, deadband=0.20, hearing_delay_steps=1,
+                      hearing_delay_jitter=1, pitch_noise_cents=3.0, dropout=0.02,
+                      motor_scale_range=(0.4, 2.5))
         values.update(overrides)
         return cls(**values)
+
+    @property
+    def effective_length_m(self) -> float:
+        home = self.low_cents if self.home_cents is None else self.home_cents
+        return speed_of_sound(self.temp_c) / (4.0 * A4_HZ * 2.0 ** (home / 1200.0))
 
     @property
     def pitch_span_cents(self) -> float:
@@ -135,7 +150,7 @@ class DifferentiableMotorFlute:
             return amount * spread * r
 
         closed = cfg.flute_model == "closed_tube"
-        return PhysicalPlantParameters(
+        params = PhysicalPlantParameters(
             torque_gain=vary(cfg.torque_gain, .35),
             torque_tau_s=vary(cfg.torque_tau_s, .55).clamp_min(cfg.dt * 1.1),
             inertia=vary(cfg.inertia, .35).clamp_min(.2),
@@ -151,6 +166,13 @@ class DifferentiableMotorFlute:
             deadband=vary(cfg.deadband, .5).clamp(0.0, .6),
             hearing_delay_steps=self._delays(batch, device, spread, generator),
         )
+        if spread > 0 and cfg.motor_scale_range is not None:
+            low, high = (math.log(v) for v in cfg.motor_scale_range)
+            r = torch.rand(batch, device=device, dtype=dtype, generator=generator)
+            factor = torch.exp(low + (high - low) * r)
+            params.torque_gain = params.torque_gain * factor
+            params.max_velocity_strokes_s = params.max_velocity_strokes_s * factor
+        return params
 
     def _delays(self, batch, device, spread, generator):
         cfg = self.config
