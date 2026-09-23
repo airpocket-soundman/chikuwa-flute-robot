@@ -117,6 +117,8 @@ def main():
             composite_prefix = composite_path.parent.as_posix().rstrip("/") + "/"
     integrated_path = docs_root / "e2e-integrated-results" / "manifest.json"
     integrated = json.loads(integrated_path.read_text(encoding="utf-8")) if integrated_path.exists() else {}
+    probe_path = docs_root / "e2e-rig-adaptive-results" / "memory_probe.json"
+    memory_probe = json.loads(probe_path.read_text(encoding="utf-8")) if probe_path.exists() else {}
     rig_eval_path = docs_root / "e2e-rig-adaptive-results" / "manifest.json"
     rig_eval = json.loads(rig_eval_path.read_text(encoding="utf-8")) if rig_eval_path.exists() else {}
     flute_audit_path = docs_root / "e2e-flute-model-results" / "manifest.json"
@@ -701,6 +703,20 @@ def main():
                            f'機体の記憶の効果は数cent以下で、このsimulatorでは笛の個体差を覚える価値が小さいことをNNでも確認した。</p>')
         else:
             memory_note = ""
+        probe_names = {"tube_offset_m": "管長のずれ", "temp_offset_c": "温度", "flute_offset_cents": "吹圧の音程ずれ",
+                       "torque_gain": "トルク", "coulomb_friction": "摩擦", "max_velocity_strokes_s": "最高速度",
+                       "deadband": "不感帯", "hearing_delay_steps": "聴こえの遅れ"}
+        if memory_probe.get("models"):
+            probe_models = memory_probe["models"]
+            heads = "".join(f"<th>{html.escape(name.replace('yamabiko_rig_adaptive_', ''))}</th>" for name in probe_models)
+            body = "".join(f"<tr><td>{label}</td>" + "".join(f"<td>{m['r2'][field]:.2f}</td>" for m in probe_models.values())
+                           + "</tr>" for field, label in probe_names.items())
+            probe_table = (f'<div class="table"><table><thead><tr><th>記憶から読める機体の値（R²）</th>{heads}</tr></thead>'
+                           f'<tbody>{body}</tbody></table></div><p class="note">学習に使わない診断。較正後の記憶ベクトルから線形回帰で機体の値を読み出し、'
+                           f'別の{memory_probe["rigs_per_split"]}台で決定係数を測った（1で完全に読める、0以下で読めない）。'
+                           f'学習モードのv2で、記憶が曲の作業状態ではなく機体の情報（主にモーター速度と聴こえの遅れ）を持つようになった。</p>')
+        else:
+            probe_table = ""
         nn_table = (f'''<div class="table"><table><thead><tr><th>NN（演奏MAE / 曲）</th>{song_heads}<th>安定後</th></tr></thead>
           <tbody>{nn_rows}</tbody></table></div>''' if neural else '<p class="note">NNは学習中のため未評価。</p>')
         rig_adaptive_html = f'''<h2 id="rig-adaptive">閉管笛・現実的シミュレーターでの再設計（エンコーダなし）</h2>
@@ -714,6 +730,7 @@ def main():
           <h2>NN版：Planner + Motor/Feedback + 個体差記憶</h2><p class="flow">未来の目標窓 + 記憶z → Planner → 狙い位置 ／ 自己音・PWM履歴 → 高速GRU → PWM ／ 低速記憶zは曲をまたいで保持</p>
           {nn_table}
           {memory_note}
+          {probe_table}
           <p class="note">学習は同じ機体で別曲を連続演奏するエピソードで、微分可能シミュレーターを通したBPTT。NNはplantの位置・速度・パラメータを受け取らない。</p></section>
       </div>
       <div class="listen">{rig_listens}</div>

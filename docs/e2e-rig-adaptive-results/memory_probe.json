@@ -1,0 +1,41 @@
+{
+  "rigs_per_split": 512,
+  "fields": [
+    "tube_offset_m",
+    "temp_offset_c",
+    "flute_offset_cents",
+    "torque_gain",
+    "coulomb_friction",
+    "max_velocity_strokes_s",
+    "deadband",
+    "hearing_delay_steps"
+  ],
+  "models": {
+    "yamabiko_rig_adaptive_v1": {
+      "learning_mode": false,
+      "r2": {
+        "tube_offset_m": 0.37920257069781316,
+        "temp_offset_c": -0.02435023467272379,
+        "flute_offset_cents": -0.04972114927119087,
+        "torque_gain": 0.15692357134479407,
+        "coulomb_friction": -0.030379989176907873,
+        "max_velocity_strokes_s": 0.0701953145165739,
+        "deadband": -0.05395450652479217,
+        "hearing_delay_steps": 0.20209932937370378
+      }
+    },
+    "yamabiko_rig_adaptive_v2": {
+      "learning_mode": true,
+      "r2": {
+        "tube_offset_m": 0.5674134109635177,
+        "temp_offset_c": -0.029222121982326765,
+        "flute_offset_cents": -0.009166087112809862,
+        "torque_gain": 0.5623289754611247,
+        "coulomb_friction": 0.193463397663311,
+        "max_velocity_strokes_s": 0.7006090332074942,
+        "deadband": -0.024384369660594762,
+        "hearing_delay_steps": 0.7439718541448197
+      }
+    }
+  }
+}
