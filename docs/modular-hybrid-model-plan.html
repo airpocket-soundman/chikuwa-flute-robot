@@ -2,6 +2,26 @@
 <style>:root{--bg:#081018;--p:#112230;--ink:#edf6fb;--m:#a9bdc9;--c:#4ee1d1;--l:#294657}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 system-ui,sans-serif}main{max-width:1050px;margin:auto;padding:42px 20px 80px}h1{font-size:clamp(2rem,5vw,4rem);line-height:1.05}h2{margin-top:2.3rem;color:var(--c)}h3{margin-top:1.6rem}.lead{font-size:1.15rem;color:var(--m)}.card{background:var(--p);border:1px solid var(--l);border-radius:16px;padding:20px;margin:15px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:15px}pre{white-space:pre-wrap;background:#061018;border:1px solid var(--l);padding:16px;border-radius:12px;color:#c9fff9}table{border-collapse:collapse;width:100%;display:block;overflow:auto}th,td{border-bottom:1px solid var(--l);padding:9px;text-align:left;white-space:nowrap}a{color:var(--c)}code{color:var(--c)}</style></head><body><main>
 <p><a href="e2e-training-report.html">← 学習レポート</a></p><h1>交換可能な個別NN・<br>統合E2E・ハイブリッド計画</h1>
 <p class="lead">開発時の分離評価と、配備時の単一計算グラフを両立する。各ブロックはNN版・決定論版・Oracle診断版を同じTensor契約で交換できる。</p>
+<h2>全体構成: 1つの耳・3つのモード・2種類の記憶（2026-09-23）</h2>
+<p>お手本の入力と自分の演奏の入力は、同じマイクと同じNeural Ear（同じ重み）を通る。二本のパイプラインに見えるのは、モードによって耳の出力の行き先が変わるためで、全体としては一つのNNである。同じ耳で聴くので、マイク特性や部屋の響きによる偏りは比較の段で打ち消される。</p>
+<table><thead><tr><th>モード</th><th>入力</th><th>お手本の記憶</th><th>機体の記憶</th><th>出力（PWM）</th></tr></thead><tbody>
+<tr><td>聴く</td><td>お手本</td><td>書く</td><td>読まない</td><td>なし</td></tr>
+<tr><td>学習（較正）</td><td>自分の音</td><td>読む（較正曲）</td><td>書く</td><td>あり</td></tr>
+<tr><td>演奏</td><td>自分の音</td><td>読む</td><td>読む</td><td>あり</td></tr></tbody></table>
+<p>お手本の記憶は次のお手本を聴くまで、機体の記憶は次の学習モードまで残る。演奏中の速い補正はその場限り。鳴禽の歌学習や、発話運動制御のDIVAモデル（聴覚目標・フィードフォワード・フィードバック）と同じ構造である。</p>
+<h3>演奏側の役割分担</h3>
+<table><thead><tr><th>段</th><th>役割</th></tr></thead><tbody>
+<tr><td>Position Planner</td><td>記憶したお手本から、どのタイミングでどの位置にいるべきかを決める。休符中に次の音へ先回りする計画を含む</td></tr>
+<tr><td>Motor Control</td><td>10 msごとにPWMを計算し直す。エンコーダが無いので「今どこにいるか」の推定も含む</td></tr>
+<tr><td>Feedback（その場）</td><td>自己音の音程で位置推定と指令を直す。Motor Controlとほぼ一体</td></tr>
+<tr><td>機体の記憶（次回へ）</td><td>機体のくせを保持し、PlannerとMotor Controlへ渡す</td></tr></tbody></table>
+<h3>閉管シミュレーターでの検証から分かったこと</h3>
+<ul>
+<li>閉管笛で変位に線形なのは周期（1/f）で、音程（cent）ではない。1オクターブを直線近似すると±52 cent。<code>PhysicalPlantConfig.realistic()</code> を以後の標準とする。</li>
+<li>エンコーダ無しでは「音程を位置センサーにする」オブザーバが最も効く（推測航法のみ約300 → 90 cent）。</li>
+<li>残りの誤差の大半は音の立ち上がりのモーター移動時間で、距離に応じた先回りが効く（90 → 56 cent）。</li>
+<li>発音中は音程サーボにより笛の切片・傾きの誤差が打ち消されるため、真の係数を与えても改善は約1 cent。機体の記憶で覚える価値が高いのは、笛の係数よりモーター側（速さ・不感帯・動き出しのタイミング）である。</li>
+</ul>
 <h2>並行実装する3方式</h2><div class="grid"><section class="card"><h3>modular_learned</h3><p>各Gateで合格した個別NNを凍結して接続する。中間出力を保存でき、故障箇所を特定しやすい。</p></section><section class="card"><h3>joint_e2e</h3><p>個別NNをComposite modelへ登録し、補助損失を残して全体微調整する。配備時は一つのgraphとcheckpointにする。</p></section><section class="card"><h3>hybrid</h3><p>任意ブロックを固定BPM、物理式、dead reckoning、PID等へ交換し、学習器の必要性と性能上限を測る。</p></section></div>
 <h2>Composite pipeline</h2><pre>reference waveform
  → Neural Ear → Tempo/Beat → Musical Memory → Temporal Aligner

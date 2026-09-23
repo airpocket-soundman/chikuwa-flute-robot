@@ -48,6 +48,24 @@ class PhysicalPlantConfig:
     # low_cents; the effective length includes the open-end correction.
     effective_length_m: float = SPEED_OF_SOUND_25C / (4.0 * A4_HZ * 2.0 ** (700.0 / 1200.0))
     min_length_m: float = 0.02
+    # Realism options, all off by default so older checkpoints reproduce.
+    # deadband: |PWM| below this fraction produces no torque (rig.py: 0.20).
+    deadband: float = 0.0
+    # Audible pitch reaches the controller this many extra 10 ms steps late
+    # (the measured MCU path plus a 20 ms pitch window is about 1-2 steps),
+    # with per-rig jitter, Gaussian pitch noise and random drop-outs.
+    hearing_delay_steps: int = 0
+    hearing_delay_jitter: int = 0
+    pitch_noise_cents: float = 0.0
+    dropout: float = 0.0
+
+    @classmethod
+    def realistic(cls, **overrides) -> "PhysicalPlantConfig":
+        """Closed tube with the rig.py deadband and hearing imperfections."""
+        values = dict(flute_model="closed_tube", deadband=0.20, hearing_delay_steps=1,
+                      hearing_delay_jitter=1, pitch_noise_cents=3.0, dropout=0.02)
+        values.update(overrides)
+        return cls(**values)
 
     @property
     def pitch_span_cents(self) -> float:
@@ -80,6 +98,8 @@ class PhysicalPlantParameters:
     # Closed tube only: effective-length error [m] and temperature error [C].
     tube_offset_m: torch.Tensor | None = None
     temp_offset_c: torch.Tensor | None = None
+    deadband: torch.Tensor | None = None
+    hearing_delay_steps: torch.Tensor | None = None  # int64, extra steps late
 
 
 class DifferentiableMotorFlute:
@@ -128,7 +148,18 @@ class DifferentiableMotorFlute:
             # rig.py spreads: tube length +-8 mm, end correction +-2 mm, +-8 C.
             tube_offset_m=offset(0.010),
             temp_offset_c=offset(8.0),
+            deadband=vary(cfg.deadband, .5).clamp(0.0, .6),
+            hearing_delay_steps=self._delays(batch, device, spread, generator),
         )
+
+    def _delays(self, batch, device, spread, generator):
+        cfg = self.config
+        delay = torch.full((batch,), cfg.hearing_delay_steps, device=device, dtype=torch.long)
+        if spread > 0 and cfg.hearing_delay_jitter > 0:
+            jitter = torch.randint(-cfg.hearing_delay_jitter, cfg.hearing_delay_jitter + 1, (batch,),
+                                   generator=generator, device="cpu" if generator is None else generator.device)
+            delay = (delay + jitter.to(device)).clamp_min(0)
+        return delay
 
     def speed_of_sound(self, params: PhysicalPlantParameters) -> torch.Tensor:
         temp = self.config.temp_c + (0.0 if params.temp_offset_c is None else params.temp_offset_c)
@@ -168,6 +199,9 @@ class DifferentiableMotorFlute:
              params: PhysicalPlantParameters) -> PhysicalPlantState:
         cfg = self.config
         pwm = pwm.clamp(-1.0, 1.0)
+        if params.deadband is not None and cfg.deadband > 0:
+            band = params.deadband
+            pwm = torch.sign(pwm) * torch.relu(pwm.abs() - band) / (1.0 - band)
         alpha = (cfg.dt / params.torque_tau_s).clamp(max=1.0)
         torque = state.torque + alpha * (params.torque_gain * pwm - state.torque)
         # Smooth Coulomb friction keeps the plant differentiable around zero.
@@ -188,3 +222,47 @@ class DifferentiableMotorFlute:
         cents = self.cents_at(state.position, params)
         sounding = valve >= .5
         return cents, sounding
+
+
+@dataclass
+class ListenerState:
+    history_cents: torch.Tensor     # (B, Q), newest last
+    history_sounding: torch.Tensor  # (B, Q) bool
+    last_cents: torch.Tensor
+
+
+class AudibleListener:
+    """What the controller can hear: delayed, noisy pitch with drop-outs.
+
+    ``step`` receives the cents/sounding the flute emits *now* and returns the
+    pitch heard now, which left the flute ``hearing_delay_steps`` ago.  The
+    returned ``valid`` is false while silent or on a drop-out.
+    """
+
+    def __init__(self, config: PhysicalPlantConfig):
+        self.config = config
+        self.queue = max(1, config.hearing_delay_steps + config.hearing_delay_jitter + 1)
+
+    def initial_state(self, batch, device, dtype=torch.float32) -> ListenerState:
+        return ListenerState(torch.zeros(batch, self.queue, device=device, dtype=dtype),
+                             torch.zeros(batch, self.queue, device=device, dtype=torch.bool),
+                             torch.zeros(batch, device=device, dtype=dtype))
+
+    def step(self, cents, sounding, params: PhysicalPlantParameters, state: ListenerState,
+             generator: torch.Generator | None = None):
+        cfg = self.config
+        history_cents = torch.cat([state.history_cents[:, 1:], cents[:, None]], 1)
+        history_sounding = torch.cat([state.history_sounding[:, 1:], sounding[:, None]], 1)
+        delay = (torch.zeros_like(cents, dtype=torch.long) if params.hearing_delay_steps is None
+                 else params.hearing_delay_steps.clamp(0, self.queue - 1))
+        index = (self.queue - 1 - delay)[:, None]
+        heard = history_cents.gather(1, index)[:, 0]
+        valid = history_sounding.gather(1, index)[:, 0]
+        if cfg.pitch_noise_cents > 0:
+            noise = torch.randn(heard.shape, generator=generator, device=heard.device, dtype=heard.dtype)
+            heard = heard + cfg.pitch_noise_cents * noise
+        if cfg.dropout > 0:
+            keep = torch.rand(heard.shape, generator=generator, device=heard.device) >= cfg.dropout
+            valid = valid & keep
+        heard = torch.where(valid, heard, state.last_cents)
+        return heard, valid, ListenerState(history_cents, history_sounding, heard)

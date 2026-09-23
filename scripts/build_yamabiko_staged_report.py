@@ -113,6 +113,10 @@ def main():
             composite_prefix = composite_path.parent.relative_to(docs_root).as_posix().rstrip("/") + "/"
         except ValueError:
             composite_prefix = composite_path.parent.as_posix().rstrip("/") + "/"
+    integrated_path = docs_root / "e2e-integrated-results" / "manifest.json"
+    integrated = json.loads(integrated_path.read_text(encoding="utf-8")) if integrated_path.exists() else {}
+    rig_eval_path = docs_root / "e2e-rig-adaptive-results" / "manifest.json"
+    rig_eval = json.loads(rig_eval_path.read_text(encoding="utf-8")) if rig_eval_path.exists() else {}
     flute_audit_path = docs_root / "e2e-flute-model-results" / "manifest.json"
     flute_audit = json.loads(flute_audit_path.read_text(encoding="utf-8")) if flute_audit_path.exists() else {}
     history_path = docs_root / "e2e-beat-results" / "attempt-history.json"
@@ -556,15 +560,20 @@ def main():
         f'<option value="{html.escape(str(sample["id"]))}">{index:02d} {html.escape(str(sample["title"]))}</option>'
         for index, sample in enumerate(hybrid_samples, 1))
     first_hybrid_sample = hybrid_samples[0] if hybrid_samples else {}
+    closed_tube = hybrid_lab.get("closed_tube_controls")
+    closed_tube_options = ('<option value="ra">NN 個体差記憶（閉管・現実的機体）</option>'
+                           '<option value="enc">決定論 音程オブザーバ（閉管・エンコーダなし）</option>') if closed_tube else ""
+    closed_tube_note = (f'<p class="note"><b>4 制御の閉管モード:</b> {html.escape(closed_tube["note"])}</p>'
+                        if closed_tube else "")
     hybrid_lab_html = f'''<section class="hybrid-lab" id="hybrid-lab">
-      <header><div><span>INTERACTIVE PIPELINE</span><h2>NN／決定論モジュール交換ラボ</h2></div><strong>{len(hybrid_samples)}サンプル × 各16構成</strong></header>
+      <header><div><span>INTERACTIVE PIPELINE</span><h2>NN／決定論モジュール交換ラボ</h2></div><strong>{len(hybrid_samples)}サンプル × 各{hybrid_lab.get("route_count_per_sample", 16)}構成</strong></header>
       <p>10種類のお手本を切り替え、各工程でNNか決定論モジュールを選ぶ。選んだ工程の出力が共通pitch／voice／position契約で次工程へ渡り、下流の音とグラフも作り直される。</p>
       <div class="hybrid-sample"><label><b>お手本サンプル</b><select data-hybrid-sample>{hybrid_sample_options}</select></label><span data-hybrid-description>{html.escape(str(first_hybrid_sample.get('description', '')))}</span><audio controls preload="none" data-hybrid-reference src="{html.escape(str(first_hybrid_sample.get('reference_wav', '')))}"></audio></div>
       <div class="hybrid-controls" aria-label="工程ごとの方式選択">
         <label><span>1 聴覚</span><select data-hybrid-stage="ear"><option value="nn">NN Neural Ear</option><option value="det">決定論 FFT Ear</option></select><small>raw波形 → 音程・発音</small></label><i>→</i>
         <label><span>2 記憶</span><select data-hybrid-stage="memory"><option value="nn">NN Timeline Memory</option><option value="det">決定論 Exact Memory</option></select><small>音程・発音 → 0.5倍Timeline</small></label><i>→</i>
         <label><span>3 計画</span><select data-hybrid-stage="planner"><option value="nn">NN Position Planner</option><option value="det">決定論 Linear Planner</option></select><small>Timeline → 位置</small></label><i>→</i>
-        <label><span>4 制御</span><select data-hybrid-stage="control"><option value="nn">NN Controller＋Feedback</option><option value="det">決定論 PD＋PID</option></select><small>位置・自己音 → PWM・演奏</small></label>
+        <label><span>4 制御</span><select data-hybrid-stage="control"><option value="nn">NN Controller＋Feedback（線形笛）</option><option value="det">決定論 PD＋PID（線形笛・真の位置）</option>{closed_tube_options}</select><small>位置・自己音 → PWM・演奏</small></label>
       </div>
       <button type="button" class="hybrid-run">この構成で出力を作る</button>
       <div class="hybrid-live" aria-live="polite"><b data-hybrid-route></b><span>Planner追加MAE <strong data-hybrid-planner-mae>—</strong> cent</span><span>最終音程MAE <strong data-hybrid-mae>—</strong> cent</span><span>発音率 <strong data-hybrid-voice>—</strong></span></div>
@@ -583,6 +592,7 @@ def main():
         <section><b>3 計画の出力</b><small>位置を名目笛音へ変換した診断音</small><audio controls preload="none" data-hybrid-audio="planner"></audio></section>
         <section><b>4 最終演奏</b><small>選択した制御器による物理simulation音</small><audio controls preload="none" data-hybrid-audio="performance"></audio></section>
       </div>
+      {closed_tube_note}
       <p class="note">{html.escape(str(hybrid_lab.get('note', '')))} 音源は選択済み評価列からブラウザ内で合成する。これは自由な未評価組合せを推測した表示ではない。</p>
     </section>''' if hybrid_samples else ''
     composite_card = f'''<section class="card {composite_state}"><div class="stage"><b>ALL</b><span class="{composite_state}">{composite_status}</span></div>
@@ -650,6 +660,81 @@ def main():
     else:
         flute_audit_html = ""
 
+    rig = rig_eval.get("summary", {})
+    if rig:
+        det = rig["deterministic"]
+        det_names = (("encoder_oracle", "上限: エンコーダ付きPD（真の位置を読む）"),
+                     ("dead_reckoning_only", "推測航法のみ（音を使わない）"),
+                     ("pitch_observer", "音程オブザーバ（音程で位置推定を補正）"),
+                     ("observer_anticipation", "オブザーバ + 距離に応じた先回り【決定論の基準】"),
+                     ("plus_true_coefficients", "↑ + 真の切片・傾き（記憶の上限）"),
+                     ("plus_coefficient_learning", "↑ + 切片・傾きのオンライン推定を持ち越し"))
+        det_rows = "".join(
+            f"<tr><td>{label}</td><td>{n(det[key]['mean']['all'])}</td><td>{n(det[key]['mean']['onset'])}</td>"
+            f"<td>{n(det[key]['mean']['settled'])}</td></tr>" for key, label in det_names if key in det)
+        neural = rig.get("neural", {})
+        nn_rows = "".join(
+            f"<tr><td>{label}</td>{''.join(f'<td>{n(row[metric])}</td>' for row in neural[key]['per_song'] for metric in ('all',))}"
+            f"<td>{n(neural[key]['mean']['settled'])}</td></tr>"
+            for key, label in (("carry_memory", "記憶を曲間で持ち越す"), ("reset_memory", "毎曲リセット")) if key in neural)
+        song_heads = "".join(f"<th>{k + 1}曲目</th>" for k in range(rig["songs"]))
+        rig_listens = "".join(doc_audio("e2e-rig-adaptive-results/" + src, label) for key, label in
+                              (("target", "目標"), ("deterministic", "決定論"), ("neural", "NN"))
+                              if (src := rig_eval.get("audio", {}).get(key)))
+        nn_table = (f'''<div class="table"><table><thead><tr><th>NN（演奏MAE / 曲）</th>{song_heads}<th>安定後</th></tr></thead>
+          <tbody>{nn_rows}</tbody></table></div>''' if neural else '<p class="note">NNは学習中のため未評価。</p>')
+        rig_adaptive_html = f'''<h2 id="rig-adaptive">閉管笛・現実的シミュレーターでの再設計（エンコーダなし）</h2>
+      <p>閉管笛、不感帯0.20、聴こえの遅れ1±1 step・音程ノイズ3 cent・欠落2%の機体 {rig['rigs']} 台で、同じ機体に別々の曲を {rig['songs']} 曲続けて演奏させた。単位は cent。「立ち上がり」は各音の最初の{rig['settle_steps']} step（0.3 s）、「安定後」はそれ以降。数値は <code>scripts/evaluate_yamabiko_rig_adaptive.py</code> の manifest から生成。</p>
+      <div class="grid">
+        <section class="card partial"><div class="stage"><b>D</b><span class="partial">基準</span></div>
+          <h2>決定論版：音程を位置センサーにする</h2><p class="flow">目標cent → 周期 → x=(a−T)/b → PD（推定位置）→ PWM ／ 自己音の周期 → 位置推定を補正</p>
+          <div class="table"><table><thead><tr><th>構成</th><th>全体</th><th>立ち上がり</th><th>安定後</th></tr></thead><tbody>{det_rows}</tbody></table></div>
+          <p class="note">音程オブザーバが最大の効果。発音中は切片・傾きが打ち消し合うため、真の係数を与えても改善は数centにとどまる。誤差の大半は音の立ち上がり（モーター移動時間）で、距離に応じた先回りが次に効く。</p></section>
+        <section class="card {'partial' if neural else 'pending'}"><div class="stage"><b>NN</b><span class="{'partial' if neural else 'pending'}">{'評価済' if neural else '学習中'}</span></div>
+          <h2>NN版：Planner + Motor/Feedback + 個体差記憶</h2><p class="flow">未来の目標窓 + 記憶z → Planner → 狙い位置 ／ 自己音・PWM履歴 → 高速GRU → PWM ／ 低速記憶zは曲をまたいで保持</p>
+          {nn_table}
+          <p class="note">学習は同じ機体で別曲を連続演奏するエピソードで、微分可能シミュレーターを通したBPTT。NNはplantの位置・速度・パラメータを受け取らない。</p></section>
+      </div>
+      <div class="listen">{rig_listens}</div>
+      {figure(rig_eval.get('plot'), '横軸: 時間 [s] / 縦軸: 音程 [cent] — 1台目の機体・1曲目', 'e2e-rig-adaptive-results/')}'''
+    else:
+        rig_adaptive_html = ""
+
+    whole = integrated.get("summary", {})
+    if whole:
+        route_names = (("nn_listen+nn_play", "NN聴覚・記憶 → NN演奏（全NN統合）"),
+                       ("nn_listen+det_play", "NN聴覚・記憶 → 決定論演奏"),
+                       ("score+nn_play", "正解楽譜 → NN演奏（下流のみ）"),
+                       ("score+det_play", "正解楽譜 → 決定論演奏（下流のみ）"))
+        route_rows = "".join(
+            f"<tr><td>{label}</td><td>{n(whole['routes'][key]['all'])}</td><td>{n(whole['routes'][key]['settled'])}</td>"
+            f"<td>{pct(whole['routes'][key]['missing_voice'])} %</td></tr>" for key, label in route_names)
+        sample_heads = "".join(f"<th>{html.escape(label.split('（')[0])}</th>" for _, label in route_names)
+        sample_rows = "".join(
+            f"<tr><td>{html.escape(sample['title'])}</td><td>{n(sample['memory']['all'])}</td>"
+            + "".join(f"<td>{n(sample['routes'][key]['all'])}</td>" for key, _ in route_names) + "</tr>"
+            for sample in integrated["samples"])
+        listens = "".join(
+            f'<div class="listen"><b>{html.escape(sample["title"])}</b>'
+            + "".join(doc_audio("e2e-integrated-results/" + sample["audio"][key], label)
+                      for key, label in (("target", "正解"), ("nn", "全NN"), ("det", "決定論")))
+            + "</div>" for sample in integrated["samples"] if sample.get("audio"))
+        integrated_html = f'''<h2 id="integrated">統合モデルの評価（聴く → 覚える → 演奏、閉管笛・現実的機体）</h2>
+      <p>10種類のお手本を、上流（NN聴覚・Timeline記憶）と新しい下流（NN個体差記憶 / 決定論オブザーバ）でつなぎ、乱数化機体 {whole['rigs']} 台で演奏した。<b>誤差は耳の推定値ではなく正解の楽譜と比べる</b>ので、上流の聞き間違いも含まれる。単位は cent、「安定後」は各音の0.3 s以降。</p>
+      <div class="grid">
+        <section class="card partial"><div class="stage"><b>ALL</b><span class="partial">仮想評価</span></div>
+          <h2>経路別の平均</h2>
+          <div class="table"><table><thead><tr><th>経路</th><th>全体</th><th>安定後</th><th>音の欠落</th></tr></thead><tbody>{route_rows}</tbody></table></div>
+          <dl><div><dt>上流だけの誤差（NN記憶 vs 正解）</dt><dd>{n(whole['memory']['all'])} cent</dd></div>
+          <div><dt>実機</dt><dd>未検証</dd></div></dl></section>
+        <section class="card"><div class="stage"><b>10</b><span>サンプル別</span></div>
+          <h2>お手本ごとの全体MAE</h2>
+          <div class="table"><table><thead><tr><th>お手本</th><th>上流のみ</th>{sample_heads}</tr></thead><tbody>{sample_rows}</tbody></table></div></section>
+      </div>
+      {listens}'''
+    else:
+        integrated_html = ""
+
     pipeline_tabs = f'''<section class="pipeline-lab" aria-labelledby="pipeline-tabs-title"><h2 id="pipeline-tabs-title">パイプライン別の結果と試行記録</h2>
     <p>採用予定と代替案を混在させず、同じパイプラインのフロー・結果・WAV・グラフ・失敗試行を一つのタブへまとめた。</p>
     <div class="tab-list" role="tablist" aria-label="パイプライン別結果">
@@ -666,7 +751,7 @@ def main():
         <dl><div><dt>Feedforward</dt><dd>Position Planner（別Policyは置かない）</dd></div><div><dt>関係学習</dt><dd>PWM履歴 → 可聴音程のWorld Model</dd></div><div><dt>訓練環境</dt><dd>決定論的なtorque rise・摩擦・慣性 + 線形笛</dd></div><div><dt>検証範囲</dt><dd>内部simulationのみ / 実機未検証</dd></div></dl>
       </div>
       <p class="pipeline-route">raw audio → Neural Ear → Tempo/Beat → Timeline Memory → Position Planner (= Feedforward) → Motor Controller → Motor Physics → Linear Flute → deterministic waveform → Neural Ear (self) → Comparator → Adaptive Feedback ↩ PWM<br>学習時: PWM/audio → Motor Audio World Model → Motor Controller</p>
-      {process_results}{hybrid_lab_html}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div>{flute_audit_html}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
+      {process_results}{hybrid_lab_html}<h2>全工程を実際に接続した結果</h2><div class="grid">{composite_card}{uno_q_card}</div>{flute_audit_html}{rig_adaptive_html}{integrated_html}<h2>知覚・記憶・Positionの試行履歴</h2>{current_history}
       <h2>Physical controlの試行履歴</h2><p>失敗試行も削除せず、モデルサイズ・学習方法の変更と結果を並べる。WAVとグラフがmanifestにある試行はカード内で再生・表示する。</p>{physical_history}
     </section>
     <section class="tab-panel" role="tabpanel" id="pipeline-clock" aria-labelledby="tab-clock">
@@ -836,7 +921,7 @@ window.addEventListener('hashchange', activateHash); activateHash();
     .map(input => [input.dataset.hybridSeries, input]));
   const urls = {{}};
   let current = null;
-  const label = {{nn:'NN', det:'決定論'}};
+  const label = {{nn:'NN', det:'決定論', ra:'NN個体差記憶(閉管)', enc:'決定論オブザーバ(閉管)'}};
 
   function wavBlob(track) {{
     const sr = 16000, perFrame = 160, count = track.pitch_cents.length * perFrame;

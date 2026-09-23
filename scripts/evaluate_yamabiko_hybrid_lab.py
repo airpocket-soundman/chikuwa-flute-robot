@@ -16,6 +16,13 @@ from flute_rl.yamabiko.composite import NeuralPerformanceProfile, YamabikoCompos
 from flute_rl.yamabiko.deterministic_pipeline import (DeterministicEar, DeterministicProfile,
                                                        DeterministicYamabikoPipeline)  # noqa: E402
 from flute_rl.yamabiko.e2e_io import frame_audio_numpy  # noqa: E402
+from flute_rl.yamabiko.deterministic_pipeline import EncoderlessDeterministicPerformer  # noqa: E402
+from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
+from flute_rl.yamabiko.rig_adaptive import RigAdaptivePerformer  # noqa: E402
+
+# Closed-tube controls take the remembered target directly and plan inside.
+CLOSED_TUBE_CONTROLS = ("ra", "enc")
+CLOSED_TUBE_RIGS = 16
 
 
 def compact(values):
@@ -160,6 +167,52 @@ def evaluate_sample(model, deterministic_control, target_np, sample_index, devic
     }
 
 
+def add_closed_tube_controls(document, checkpoint_path, device):
+    """Add the rig-adaptive NN ("ra") and encoder-less deterministic ("enc") controls.
+
+    Both play every remembered target on the realistic closed-tube simulator
+    (deadband, hearing delay/noise/drop-outs) for the same randomized rigs.
+    The stored track is rig 0; the metrics average all rigs.  They plan
+    internally, so the entry is the same for either Planner choice.
+    """
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
+    params = plant.parameters(CLOSED_TUBE_RIGS, device, spread=1.0,
+                              generator=torch.Generator(device).manual_seed(2718))
+    neural = RigAdaptivePerformer.from_checkpoint(
+        torch.load(checkpoint_path, map_location=device, weights_only=False), device).eval()
+    deterministic = EncoderlessDeterministicPerformer(plant)
+    for sample_index, sample in enumerate(document["samples"]):
+        performance = sample["outputs"]["performance"]
+        for memory_key, memory in sample["outputs"]["memory"].items():
+            wanted = torch.tensor(memory["pitch_cents"], device=device, dtype=torch.float32)
+            voice = torch.tensor(memory["voice"], device=device).bool()
+            cents = wanted[None].expand(CLOSED_TUBE_RIGS, -1).contiguous()
+            voices = voice[None].expand(CLOSED_TUBE_RIGS, -1).contiguous()
+            for control in CLOSED_TUBE_CONTROLS:
+                generator = torch.Generator(device).manual_seed(sample_index)
+                with torch.inference_mode():
+                    if control == "ra":
+                        result, _ = neural.perform(plant, cents, voices, params, None, generator)
+                    else:
+                        result, _ = deterministic.perform(cents, voices, params, None, generator)
+                played = result["pitch_cents"]
+                mae = (played - wanted)[:, voice].abs().mean().item() if voice.any() else None
+                entry = {**track(played[0].cpu(), voice.cpu()),
+                         "metrics": {"final_pitch_mae_cents": mae,
+                                     "voiced_fraction": voice.float().mean().item(),
+                                     "rigs": CLOSED_TUBE_RIGS}}
+                for planner in ("nn", "det"):
+                    performance[f"{memory_key}-{planner}-{control}"] = entry
+    document["route_count_per_sample"] = 16 + 4 * len(CLOSED_TUBE_CONTROLS)
+    document["closed_tube_controls"] = {
+        "checkpoint": str(checkpoint_path), "rigs": CLOSED_TUBE_RIGS,
+        "simulator": "PhysicalPlantConfig.realistic()",
+        "note": ("閉管笛・不感帯・聴こえの遅れ/ノイズ/欠落を含む現実的simulatorで、乱数化機体16台を演奏。"
+                 "音と線は1台目、MAEは16台平均。計画は制御の内部で行うため、3計画の選択は影響しない。"),
+    }
+    return document
+
+
 def summarize_planner(samples):
     """Attribute the selected NN Planner's error on the ten public samples."""
     inherited_all, added_all, total_all, position_added_all = [], [], [], []
@@ -212,6 +265,10 @@ def main():
     ap.add_argument("--checkpoint", default="runs/yamabiko_connected_composite_v1.pt")
     ap.add_argument("--out", default="docs/e2e-composite-results/hybrid-lab.json")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--closed-tube-downstream", default="runs/yamabiko_rig_adaptive_v1.pt",
+                    help="rig-adaptive NN checkpoint for the closed-tube controls ('' to skip)")
+    ap.add_argument("--extend-existing", action="store_true",
+                    help="Only (re)compute the closed-tube controls on the existing JSON")
     ap.add_argument("--summarize-existing", action="store_true",
                     help="Recompute aggregate Planner attribution without rerunning models")
     args = ap.parse_args()
@@ -222,6 +279,12 @@ def main():
         document["planner_summary"] = summarize_planner(document["samples"])
         out.write_text(json.dumps(document, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         print(json.dumps(document["planner_summary"], indent=2))
+        return
+    if args.extend_existing:
+        document = json.loads(out.read_text(encoding="utf-8"))
+        document = add_closed_tube_controls(document, args.closed_tube_downstream, device)
+        out.write_text(json.dumps(document, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        print(f"extended {out} with closed-tube controls ({out.stat().st_size} bytes)")
         return
     model = YamabikoComposite.from_checkpoint(
         torch.load(args.checkpoint, map_location=device, weights_only=False), device).eval()
@@ -248,6 +311,8 @@ def main():
                  "加えるrepresentation adapterを使用。NN Controlは遅い適応状態を保持した3回目。"),
         "planner_summary": summarize_planner(samples), "samples": samples,
     }
+    if args.closed_tube_downstream:
+        document = add_closed_tube_controls(document, args.closed_tube_downstream, device)
     out.write_text(json.dumps(document, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"wrote {out} ({len(samples)} samples x 16 routes, {out.stat().st_size} bytes)")
 
