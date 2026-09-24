@@ -32,15 +32,32 @@ FITTED = ("torque_gain", "torque_tau_s", "coulomb_friction", "viscous_friction",
 LOG_SCALED = ("torque_gain", "torque_tau_s", "coulomb_friction", "viscous_friction", "max_velocity_strokes_s")
 
 
-def calibration_pwm(batch, device, dtype=torch.float32):
-    pwm = torch.cat([torch.full((steps,), level) for level, steps in CALIBRATION])
+def calibration_segments(max_pwm: float = 1.0, sweep: float = 1.0):
+    """The calibration run, optionally made gentler for a real rig.
+
+    ``max_pwm`` caps every level (the deadband staircase is kept as is) and
+    ``sweep`` scales the duration of the slow sweeps, so the plunger stays
+    inside the range where the flute sounds cleanly (no overblowing) and
+    end-stop hits are softer.  The defaults are the benchmark run.
+    """
+    segments = []
+    for level, steps in CALIBRATION:
+        gentle = level if abs(level) <= .4 else max(-max_pwm, min(max_pwm, level))
+        if abs(level) == .35 and steps == 150:
+            steps = int(round(steps * sweep))
+        segments.append((gentle, steps))
+    return segments
+
+
+def calibration_pwm(batch, device, dtype=torch.float32, max_pwm: float = 1.0, sweep: float = 1.0):
+    pwm = torch.cat([torch.full((steps,), level) for level, steps in calibration_segments(max_pwm, sweep)])
     return pwm.to(device=device, dtype=dtype)[None].expand(batch, -1).contiguous()
 
 
-def run_calibration(rig):
+def run_calibration(rig, max_pwm: float = 1.0, sweep: float = 1.0):
     """Play the calibration run on a rig (black box or real); returns its log."""
-    device = rig._parameters.torque_gain.device if hasattr(rig, "_parameters") else "cpu"
-    pwm = calibration_pwm(rig.batch, device)
+    device = rig._parameters.torque_gain.device if hasattr(rig, "_parameters") else getattr(rig, "device", "cpu")
+    pwm = calibration_pwm(rig.batch, device, max_pwm=max_pwm, sweep=sweep)
     with torch.no_grad():
         state = rig.reset(device)
         valve = torch.ones_like(pwm)

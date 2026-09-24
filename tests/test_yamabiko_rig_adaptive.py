@@ -182,3 +182,29 @@ def test_residual_performer_starts_as_deterministic_twin_and_learns():
     assert memory["song"].shape == (3, 120, 4)
     (played["pitch_cents"] - cents).abs()[voice].mean().backward()
     assert model.planner[-1].weight.grad.abs().sum() > 0 and model.head[-1].weight.grad.abs().sum() > 0
+
+
+def test_numpy_runtime_matches_torch_residual_performer():
+    from flute_rl.yamabiko.device import SimulatorEnv
+    from flute_rl.yamabiko.residual_numpy import Runtime, export
+    from flute_rl.yamabiko.residual_performer import ResidualConfig, ResidualTwinPerformer
+    torch.manual_seed(1)
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic(pitch_noise_cents=0.0, dropout=0.0))
+    params = plant.parameters(1, "cpu", spread=1.0, generator=torch.Generator().manual_seed(2))
+    model = ResidualTwinPerformer(plant, ResidualConfig(hidden=16))
+    for module in (model.planner[-1], model.head[-1]):  # give the residuals something to do
+        torch.nn.init.normal_(module.weight, std=.3); torch.nn.init.normal_(module.bias, std=.1)
+    cents, voice = random_melodies(np.random.default_rng(3), 1, 150, varied=True)
+    with torch.no_grad():
+        reference, memory = model.perform(plant, cents, voice, params, None, torch.Generator().manual_seed(0),
+                                          twin=params)
+    runtime = Runtime(export(model, params)); runtime.prepare(cents[0].numpy(), voice[0].numpy())
+    env = SimulatorEnv(plant, params, torch.Generator().manual_seed(0)); state = env.reset("cpu")
+    played = []
+    for t in range(150):
+        pwm, valve = runtime.command(t)
+        heard, valid, state, emitted = env.step(state, torch.tensor([pwm], dtype=torch.float32),
+                                                torch.tensor([float(valve)]))
+        runtime.observe(float(heard[0]), bool(valid[0])); played.append(float(emitted[0]))
+    assert np.abs(np.array(played) - reference["pitch_cents"][0].numpy()).max() < .05
+    assert np.abs(runtime.song - memory["song"][0].numpy()).max() < 1e-4

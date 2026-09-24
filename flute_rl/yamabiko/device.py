@@ -114,3 +114,63 @@ class BlackBoxDevice:
         self.logs.append(PlayLog(target_cents.detach(), target_voice.detach(), pwm.detach(),
                                  valve.detach(), heard.detach(), valid.detach()))
         self._score_emitted.append(emitted.detach())
+
+
+def save_logs(path, logs):
+    """Write play logs as one .npz (what the real rig can record, nothing else)."""
+    import numpy as np
+    arrays = {}
+    for index, log in enumerate(logs):
+        for name, value in vars(log).items():
+            arrays[f"{index}/{name}"] = value.detach().cpu().numpy()
+    np.savez_compressed(path, count=len(logs), **arrays)
+
+
+def load_logs(path, device="cpu"):
+    import numpy as np
+    data = np.load(path)
+    logs = []
+    for index in range(int(data["count"])):
+        fields = {name: torch.as_tensor(data[f"{index}/{name}"], device=device)
+                  for name in ("target_cents", "target_voice", "pwm", "valve", "heard", "valid")}
+        logs.append(PlayLog(**fields))
+    return logs
+
+
+class RealDevice:
+    """The real rig behind the same reset/step/record interface as the black box.
+
+    Wraps :class:`flute_rl.yamabiko.hw.RealRig` (one rig, batch of 1, real
+    time at 100 Hz).  Heard pitch comes from the 20 ms YIN window of the
+    microphone; ``valid`` is whether a pitch was found.  There is no true
+    emitted pitch on a real rig, so the 4th value returned by ``step`` is the
+    heard pitch again.  ``reset`` homes the plunger (pull against the end
+    stop with the valve shut), as scripts/yamabiko_collect.py does.
+    """
+
+    observable_only = True
+    batch = 1
+    device = "cpu"
+
+    def __init__(self, rig, homing_seconds: float = 1.3, homing_pwm: float = -1.0):
+        self.rig, self.homing_seconds, self.homing_pwm = rig, homing_seconds, homing_pwm
+        self.logs, self._score_emitted = [], []
+
+    def reset(self, device="cpu", dtype=torch.float32, homing_steps=None):
+        self.rig.resync()
+        steps = int(round(self.homing_seconds / 0.01)) if homing_steps is None else int(homing_steps)
+        for _ in range(steps):
+            self.rig.step(self.homing_pwm, False)
+        return None
+
+    def step(self, state, pwm, valve):
+        out = self.rig.step(float(pwm.reshape(-1)[0]), bool(float(valve.reshape(-1)[0]) >= .5))
+        heard = torch.tensor([float(out["heard"][0])], dtype=torch.float32)
+        valid = torch.isfinite(heard)
+        heard = torch.where(valid, heard, torch.zeros_like(heard))
+        return heard, valid, None, heard
+
+    def record(self, target_cents, target_voice, pwm, valve, heard, valid, emitted):
+        self.logs.append(PlayLog(target_cents.detach(), target_voice.detach(), pwm.detach(),
+                                 valve.detach(), heard.detach(), valid.detach()))
+        self._score_emitted.append(emitted.detach())
