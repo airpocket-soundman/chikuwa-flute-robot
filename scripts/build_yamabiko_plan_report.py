@@ -26,6 +26,8 @@ CONTROLLERS = {
     "residual_play2": ("決定論＋ツイン＋NN補正 2回目", "#ffb86b"),
     "residual_play3": ("決定論＋ツイン＋NN補正 3回目", "#ff7fb0"),
     "sensor": ("位置センサー付き（参考）", "#d6a3ff"),
+    "listen_det_twin": ("聴いて演奏：決定論＋ツイン", "#8a9bb0"),
+    "listen_residual_play2": ("聴いて演奏：骨格＋NN補正 2回目", "#ff9de2"),
 }
 
 
@@ -123,6 +125,18 @@ def main():
 <div class="table"><table><thead><tr><th>回</th>{history_head}</tr></thead><tbody>{history_rows}</tbody></table></div>'''
                     if rounds else "")
 
+    listen_names = (("listen_det_twin", "決定論＋ツイン"), ("listen_residual_play1", "決定論＋ツイン＋NN補正 1回目"),
+                    ("listen_residual_play2", "同 2回目"), ("listen_residual_play3", "同 3回目"))
+    if any(phrases.get(n) for n, _ in listen_names):
+        rows = "".join(f"<tr><td>{label}</td><td>{pct(phrases.get(name))}</td><td>{pct(phrases.get(name), 'in_tune')}</td></tr>"
+                       for name, label in listen_names if phrases.get(name))
+        memory_in_tune = (m.get("listening", {}).get("memory_in_tune") or {})
+        listen_html = f'''<h3>お手本を聴いてから演奏（全経路）</h3>
+<p class="note">参照曲をリコーダーの音として合成し、Neural Ear／Tempo／Timeline記憶が一度聴いて覚えた目標で演奏する。採点は正解の楽譜に対して行うので、聴き取りの誤差も含む（聴いて覚えた目標自体が±25 cent以内だった割合 {pct(memory_in_tune, 'in_tune')}）。</p>
+<div class="table"><table><thead><tr><th>方式</th><th>命中率</th><th>合っている割合</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    else:
+        listen_html = ""
+
     recovery = fit.get("recovery", {})
     fit_html = (f"""<dl class="facts">
       <div><dt>較正動作の長さ</dt><dd>{fit['calibration_steps'] / 100:.1f} 秒</dd></div>
@@ -208,6 +222,7 @@ audio{{width:100%;max-width:420px}}a{{color:var(--cyan)}}
 <div class="card">{fit_html}</div>
 <h3>制御方式の比較：参照10曲</h3>
 <div class="table"><table><thead><tr><th>方式</th><th>命中率</th><th>合っている割合</th><th>届くまで（中央値）</th></tr></thead><tbody>{comparison('phrases')}</tbody></table></div>
+{listen_html}
 <h3>制御方式の比較：乱数曲</h3>
 <div class="table"><table><thead><tr><th>方式</th><th>命中率</th><th>合っている割合</th><th>届くまで（中央値）</th></tr></thead><tbody>{comparison('random')}</tbody></table></div>
 {history_html}
