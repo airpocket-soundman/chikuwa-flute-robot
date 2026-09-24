@@ -22,6 +22,9 @@ CONTROLLERS = {
     "nn_twin_play1": ("NN＋ツイン 1回目", "#b3e5ff"),
     "nn_twin_play2": ("NN＋ツイン 2回目", "#8ff0c8"),
     "nn_twin_play3": ("NN＋ツイン 3回目", "#3fdc8f"),
+    "residual_play1": ("決定論＋ツイン＋NN補正 1回目", "#ffe08a"),
+    "residual_play2": ("決定論＋ツイン＋NN補正 2回目", "#ffb86b"),
+    "residual_play3": ("決定論＋ツイン＋NN補正 3回目", "#ff7fb0"),
     "sensor": ("位置センサー付き（参考）", "#d6a3ff"),
 }
 
@@ -71,20 +74,24 @@ def main():
                       f"ツイン {hit('det_twin')['mean'] * 100:.0f} %／なし {hit('det_nominal')['mean'] * 100:.0f} %／理想 {hit('det_true')['mean'] * 100:.0f} %"))
     else:
         gates.append(("G2 決定論＋ツイン", "フィッティングなしより有意に高く、理想の当てはめから5ポイント以内", verdict("pending", "未評価"), ""))
-    if hit("nn_twin_play1") and hit("det_twin"):
-        first_ok = hit("det_twin")["mean"] - hit("nn_twin_play1")["mean"] <= .03
-        third_ok = hit("nn_twin_play3")["mean"] >= hit("det_twin")["mean"]
+    nn_family = [prefix for prefix in ("residual_play", "nn_twin_play") if hit(prefix + "1")]
+    if nn_family and hit("det_twin"):
+        prefix = max(nn_family, key=lambda p: hit(p + "3")["mean"])
+        first_ok = hit("det_twin")["mean"] - hit(prefix + "1")["mean"] <= .03
+        third_ok = hit(prefix + "3")["mean"] >= hit("det_twin")["mean"]
         state = "pass" if first_ok and third_ok else ("partial" if first_ok or third_ok else "fail")
+        label = {"residual_play": "決定論＋ツイン＋NN補正", "nn_twin_play": "NN＋ツイン"}[prefix]
         gates.append(("G3 NN＋ツイン", "ツインで仕上げたNNが決定論＋ツインから3ポイント以内（1回目）、3回目で決定論以上",
                       verdict(state, {"pass": "達成", "partial": "一部達成", "fail": "未達"}[state]),
-                      f"NN＋ツイン 1回目 {hit('nn_twin_play1')['mean'] * 100:.0f} % → 3回目 {hit('nn_twin_play3')['mean'] * 100:.0f} %"
+                      f"{label} 1回目 {hit(prefix + '1')['mean'] * 100:.0f} % → 3回目 {hit(prefix + '3')['mean'] * 100:.0f} %"
                       f"／決定論＋ツイン {hit('det_twin')['mean'] * 100:.0f} %"))
     else:
         gates.append(("G3 NN＋ツイン", "ツインで仕上げたNNが決定論＋ツインから3ポイント以内（1回目）、3回目で決定論以上",
                       verdict("pending", "未着手"),
                       (f"参考：ツインなしのNN 1回目 {hit('nn_play1')['mean'] * 100:.0f} % → 3回目 {hit('nn_play3')['mean'] * 100:.0f} %"
                        if hit("nn_play1") else "")))
-    best = max((hit(n)["mean"] for n in ("det_twin", "nn_play3", "nn_twin_play3") if hit(n)), default=None)
+    best = max((hit(n)["mean"] for n in ("det_twin", "nn_play3", "nn_twin_play3", "residual_play3") if hit(n)),
+               default=None)
     gates.append(("G4 デモ", "参照10曲で、3回以内の繰り返しで命中率85 %以上",
                   verdict("pass" if best is not None and best >= .85 else ("fail" if best is not None else "pending"),
                           "達成" if best is not None and best >= .85 else ("未達" if best is not None else "未評価")),
@@ -166,11 +173,12 @@ audio{{width:100%;max-width:420px}}a{{color:var(--cyan)}}
 <div class="flow">
   <div><b>F1 較正動作</b><br>原点合わせの後、バルブを開けて決まったPWM列を約8秒流し、聴こえた音程を記録する（実機で実行できる）。</div>
   <div><b>F2 デジタルツイン</b><br>記録にシミュレーターの機体の値を当てはめ、その機体専用のシミュレーターを作る（PC）。</div>
-  <div><b>F3 機体に合わせた制御</b><br>決定論はツインの値を使う。NNはツインの周りだけで仕上げる。</div>
+  <div><b>F3 機体に合わせた制御</b><br>決定論（音程で位置を直すオブザーバー＋PD）がツインの値で動く骨格になり、NNが狙う位置とPWMに上限つきの補正を足す。全体を1つの計算グラフとして学習する。</div>
   <div><b>F4 繰り返しで上達</b><br>曲の記憶で、同じ曲を繰り返すほど上手くなる（デモの見せ場）。</div>
   <div><b>F5 評価</b><br>固定ベンチマークで命中率と95 %区間を比べる。</div>
 </div>
 <div class="card"><b>デジタルツイン（ツイン）とは</b>：実際の1台の機体をまねた、その機体専用のシミュレーター。実機に約7秒の決まった動き（小さく動かす、全力で往復する、端から端までゆっくり動かす）をさせ、送った指令と聴こえた音程だけを記録し、シミュレーターのモーターの速さ・力・摩擦・不感帯、笛の管の長さ、音が聴こえるまでの遅れを「同じ指令なら同じ音程が聴こえる」ように合わせて作る。決定論の制御は標準値の代わりにツインの値を使い、NNは実機の代わりにツインの中で練習してその機体向けに仕上げる。</div>
+<div class="card"><b>決定論＋ツイン＋NN補正とは</b>：決定論の制御は音を伸ばしている間の位置の保持が正確（1 cent以内）だが曲を覚えられない。NNは同じ曲を繰り返して先回りを覚えるが保持が甘い。そこで決定論を骨格にし、NNは「狙う位置」と「PWM」に上限つきの補正だけを足す。補正は0から学習を始めるので、学習前は決定論＋ツインと完全に同じ動きになり、そこから上だけを学ぶ。曲の記憶（時刻つき）を持つので、同じ曲を繰り返すと上達する。</div>
 <h3>合格基準と現状</h3>
 <div class="table"><table><thead><tr><th>段階</th><th>基準（暫定・実機計測後に見直す）</th><th>判定</th><th>現状</th></tr></thead><tbody>{gate_rows}</tbody></table></div>
 <p class="note">命中率＝各音が鳴り始めから0.3秒以内に±25 centへ入った割合。平均誤差ではなくこれで判断し、95 %区間が重ならない差だけを改善と呼ぶ。</p>

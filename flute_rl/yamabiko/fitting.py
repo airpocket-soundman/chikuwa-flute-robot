@@ -129,3 +129,23 @@ class TwinFitter:
                                torch.minimum(candidate.heard_mae, best.heard_mae))
         best.parameters.hearing_delay_steps = best.delay
         return best
+
+
+def cached_twin(plant, true_parameters, seed, fit_steps, device, cache_dir="runs/twins"):
+    """Calibrate the benchmark rigs and fit their twins once; reuse the result.
+
+    The cache key is the rig seed, count and fit steps.  Only the twin (and
+    the chosen delays) is stored, never the rigs' true values.
+    """
+    import pathlib
+    from .device import BlackBoxDevice
+    rigs = true_parameters.torque_gain.shape[0]
+    path = pathlib.Path(cache_dir) / f"twin_seed{seed}_rigs{rigs}_steps{fit_steps}.pt"
+    if path.exists():
+        saved = torch.load(path, map_location=device, weights_only=False)
+        return type(true_parameters)(**saved["twin"])
+    rig = BlackBoxDevice(plant, true_parameters, torch.Generator(device).manual_seed(seed + 1))
+    fit = TwinFitter(plant).fit(run_calibration(rig), steps=fit_steps)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"twin": {k: v for k, v in vars(fit.parameters).items()}, "heard_mae": fit.heard_mae}, path)
+    return fit.parameters
