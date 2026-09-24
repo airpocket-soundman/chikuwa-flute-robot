@@ -4,6 +4,13 @@
 
 プロジェクト全体の進め方(6 段階)と現状は [docs/roadmap.md](docs/roadmap.md) にまとめています。
 
+> **現在の計画と結果（2026-09-24）:** 最新の構成は「**未知の機体を約9秒の較正で知り（デジタルツイン）、決定論の制御を骨格にして NN が補正と先回りを足し、同じ曲を繰り返して上手くなる**」です。
+> シミュレーターの固定ベンチマーク（未知の機体32台・参照10曲）で、命中率（±25 cent・0.3 s以内）は 1回目 92 %、3回目 93 %（決定論＋ツイン 80 %、位置センサー付きの参考値 82 %）。お手本の音声を NN が聴いて覚えた目標でも 2回目 90 %。実機は未検証。
+> - 計画と結果のページ: [yamabiko-plan.html](https://airpocket-soundman.github.io/chikuwa-flute-robot/yamabiko-plan.html)（決定論との比較と、曲・機体・方式を選べるシミュレーションつき）
+> - 計画書: [docs/fitting-twin-plan.md](docs/fitting-twin-plan.md) ／ 実機の手順書: [docs/real_rig_runbook.md](docs/real_rig_runbook.md)
+> - 主なコード: `flute_rl/yamabiko/fitting.py`（較正とツイン）、`residual_performer.py`（骨格＋NN補正）、`residual_numpy.py`（UNO Q 用の numpy 版）、`device.py`（ブラックボックス／実機の窓口）
+> - これまでの試行の記録: [e2e-training-report.html](https://airpocket-soundman.github.io/chikuwa-flute-robot/e2e-training-report.html)。以下の各節はその経緯で、数値は当時のものです。
+
 > **E2E方針（2026-09-21）:** 新しい本命経路では、YINによる音程列、物理式、固定バルブルールを推論から外し、
 > 1個のモデルが生のお手本音声と生の自己音声からPWM・バルブ・終了を直接出します。
 > 実装と学習手順は [docs/e2e.md](docs/e2e.md)、モデルは `flute_rl/yamabiko/e2e.py`、
