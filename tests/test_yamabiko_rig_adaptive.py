@@ -165,3 +165,20 @@ def test_world_model_pitch_is_monotone_and_trains_from_logs():
     loss, mae = world.loss(rig.logs, world.encoder(rig.logs))
     loss.backward()
     assert torch.isfinite(loss) and world.speed.increments.weight.grad.abs().sum() > 0
+
+
+def test_residual_performer_starts_as_deterministic_twin_and_learns():
+    from flute_rl.yamabiko.residual_performer import ResidualConfig, ResidualTwinPerformer
+    torch.manual_seed(0)
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
+    params = plant.parameters(3, "cpu", spread=1.0, generator=torch.Generator().manual_seed(1))
+    cents, voice = random_melodies(np.random.default_rng(0), 3, 120)
+    model = ResidualTwinPerformer(plant, ResidualConfig(hidden=16))
+    played, memory = model.perform(plant, cents, voice, params, None, torch.Generator().manual_seed(0), twin=params)
+    with torch.no_grad():
+        reference, _ = EncoderlessDeterministicPerformer(plant).perform(
+            cents, voice, params, None, torch.Generator().manual_seed(0), twin=params)
+    torch.testing.assert_close(played["pitch_cents"], reference["pitch_cents"])
+    assert memory["song"].shape == (3, 120, 4)
+    (played["pitch_cents"] - cents).abs()[voice].mean().backward()
+    assert model.planner[-1].weight.grad.abs().sum() > 0 and model.head[-1].weight.grad.abs().sum() > 0
