@@ -9,3 +9,6 @@ hardware/**/*.dsn
 hardware/**/*.ses
 *.lck
 hardware/fab/*/
+# Local publication verification screenshots and temporary upload copy
+docs/protopedia/published-*.png
+docs/protopedia/yamabiko-overview-copy-updated.png
