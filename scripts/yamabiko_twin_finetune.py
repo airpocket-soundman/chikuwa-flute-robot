@@ -1,0 +1,154 @@
+"""PC: retrain the residual network around one fitted twin and export the runtime.
+
+    python scripts/yamabiko_twin_finetune.py runs/real/twin_01.json --out runs/real/twin_01_tuned
+
+The pre-trained residual (scripts/train_yamabiko_residual.py) learned on rigs
+over the whole guessed range.  Here it learns again, starting from those
+weights, on rigs drawn around the twin that scripts/yamabiko_twin_fit.py
+fitted to the real rig: the skeleton always runs on that twin, and the rig it
+plays is the twin with its motor, friction and deadband off by up to
+``--spread`` (the real rig is unknown within the fit error), the tube a couple
+of millimetres off and the hearing delay off by one step now and then.
+Gradients flow through the simulator only; the real rig is never differentiated.
+
+The weights are kept only if they beat the pre-trained ones on a fixed set of
+rigs around the twin, so the result is never worse there than the input
+checkpoint.  Writes ``<out>.pt``, ``<out>.json`` (before / after) and
+``<out>_runtime.npz`` (the NumPy performer for the UNO Q, as yamabiko_twin_fit.py).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import sys
+import time
+
+import numpy as np
+import torch
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "scripts"))
+from flute_rl.yamabiko.physical_plant import (DifferentiableMotorFlute, PhysicalPlantConfig,  # noqa: E402
+                                              PhysicalPlantParameters)
+from flute_rl.yamabiko.residual_numpy import export  # noqa: E402
+from flute_rl.yamabiko.residual_performer import ResidualTwinPerformer  # noqa: E402
+from train_yamabiko_residual import episode, songs  # noqa: E402
+
+SCALED = ("torque_gain", "torque_tau_s", "inertia", "coulomb_friction", "viscous_friction",
+          "max_velocity_strokes_s", "deadband")
+SHIFTED = {"flute_offset_cents": 5.0, "tube_offset_m": .002, "temp_offset_c": 1.0}
+
+
+def load_twin(path, device):
+    """The twin of yamabiko_twin_fit.py's ``<out>.json`` as one batch row, and the room temperature."""
+    report = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    fields = {name: torch.tensor([value], device=device, dtype=torch.float32)
+              for name, value in report["twin"].items()}
+    if "hearing_delay_steps" in fields:
+        fields["hearing_delay_steps"] = fields["hearing_delay_steps"].round().long()
+    return PhysicalPlantParameters(**fields), report.get("temp_c")
+
+
+def repeat(twin, batch):
+    return type(twin)(**{name: None if value is None else value.expand(batch).clone()
+                         for name, value in vars(twin).items()})
+
+
+def rigs_around(twin, batch, spread, generator, delay_flip=.3):
+    """Rigs the real one could be, given the fitted twin (one row)."""
+    device = twin.torque_gain.device
+    uniform = lambda: torch.rand(batch, device=device, generator=generator) * 2 - 1
+    fields = dict(vars(repeat(twin, batch)))
+    for name in SCALED:
+        if fields[name] is not None:
+            fields[name] = fields[name] * (1 + spread * uniform())
+    for name, amount in SHIFTED.items():
+        if fields[name] is not None:
+            fields[name] = fields[name] + amount * uniform()
+    fields["torque_tau_s"] = fields["torque_tau_s"].clamp_min(.011)
+    if fields["deadband"] is not None:
+        fields["deadband"] = fields["deadband"].clamp(0, .6)
+    if fields["hearing_delay_steps"] is not None:
+        flip = torch.rand(batch, device=device, generator=generator) < delay_flip
+        step = torch.where(torch.rand(batch, device=device, generator=generator) < .5, -1, 1)
+        fields["hearing_delay_steps"] = torch.where(flip, (fields["hearing_delay_steps"] + step).clamp_min(0),
+                                                    fields["hearing_delay_steps"])
+    return type(twin)(**fields)
+
+
+def evaluate(model, plant, rigs, twin, eval_songs, device):
+    with torch.no_grad():
+        model.eval()
+        _, maes = episode(model, plant, rigs, twin, *eval_songs, torch.Generator(device).manual_seed(0))
+        model.train()
+    return maes
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("twin", help="<out>.json of scripts/yamabiko_twin_fit.py")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--checkpoint", default="runs/yamabiko_residual_v1.pt")
+    ap.add_argument("--spread", type=float, default=.12, help="motor, friction and deadband off by up to this fraction")
+    ap.add_argument("--steps", type=int, default=200)
+    ap.add_argument("--batch", type=int, default=32)
+    ap.add_argument("--song-steps", type=int, default=400)
+    ap.add_argument("--lr", type=float, default=3e-4)
+    ap.add_argument("--eval-every", type=int, default=25)
+    ap.add_argument("--eval-rigs", type=int, default=48)
+    ap.add_argument("--seed", type=int, default=20261119)
+    ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    args = ap.parse_args(); device = args.device
+    torch.manual_seed(args.seed); rng = np.random.default_rng(args.seed)
+    twin, temp_c = load_twin(args.twin, device)
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic(**({"temp_c": temp_c} if temp_c is not None else {})))
+    start = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    model = ResidualTwinPerformer.from_checkpoint(start, plant, device)
+
+    eval_rigs = rigs_around(twin, args.eval_rigs, args.spread, torch.Generator(device).manual_seed(7777))
+    eval_twin = repeat(twin, args.eval_rigs)
+    eval_songs = songs(np.random.default_rng(900), args.eval_rigs, 500, device)
+    before = evaluate(model, plant, eval_rigs, eval_twin, eval_songs, device)
+    print(f"pre-trained: play1 {before[0]:.1f} play2 {before[1]:.1f} cents (MAE on rigs around the twin)", flush=True)
+    best = {"step": 0, "play1": before[0], "play2": before[1]}
+    best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
+    schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.steps, eta_min=args.lr * .1)
+    generator = torch.Generator(device).manual_seed(args.seed)
+    batch_twin = repeat(twin, args.batch)
+    history, started = [], time.time()
+    for step in range(1, args.steps + 1):
+        rigs = rigs_around(twin, args.batch, args.spread, generator)
+        cents, voice = songs(rng, args.batch, args.song_steps, device)
+        loss, maes = episode(model, plant, rigs, batch_twin, cents, voice, generator)
+        optimizer.zero_grad(set_to_none=True); loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step(); schedule.step()
+        if step == 1 or step % 10 == 0:
+            print(f"step {step:4d} loss {float(loss.detach()):.4f} MAE {maes[0]:6.1f} {maes[1]:6.1f}"
+                  f"  {time.time() - started:6.0f}s", flush=True)
+        if step % args.eval_every == 0 or step == args.steps:
+            maes = evaluate(model, plant, eval_rigs, eval_twin, eval_songs, device)
+            history.append({"step": step, "maes": maes})
+            print(f"eval {step}: play1 {maes[0]:.1f} play2 {maes[1]:.1f}", flush=True)
+            if maes[1] < best["play2"]:
+                best = {"step": step, "play1": maes[0], "play2": maes[1]}
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+    model.load_state_dict(best_state); model.eval()
+    kept = "pre-trained (no step did better)" if best["step"] == 0 else f"step {best['step']}"
+    out = pathlib.Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(model.checkpoint(best=best, seed=args.seed, twin=args.twin, spread=args.spread,
+                                start=args.checkpoint), str(out) + ".pt")
+    report = {"twin": args.twin, "start": args.checkpoint, "kept": kept,
+              "before": {"play1": before[0], "play2": before[1]}, "after": best, "history": history,
+              **{k: v for k, v in vars(args).items() if k not in ("twin", "checkpoint")}}
+    out.with_suffix(".json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    np.savez(str(out) + "_runtime.npz", **export(model, twin, 0))
+    print(f"kept {kept}: play1 {before[0]:.1f} -> {best['play1']:.1f}, play2 {before[1]:.1f} -> {best['play2']:.1f}")
+    print(f"saved {out}.pt, {out}.json and {out}_runtime.npz")
+
+
+if __name__ == "__main__":
+    main()
