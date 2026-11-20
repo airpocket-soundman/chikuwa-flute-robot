@@ -1,6 +1,6 @@
 """UNO Q: one process owns the MCU link and takes commands from the PC (JSON lines over TCP).
 
-    python3 scripts/yamabiko_server.py [--port 8765] [--max-pwm 0.6]
+    python3 scripts/yamabiko_server.py [--port 8765] [--max-pwm 1.0]
 
 The PC reaches it through USB with ``adb forward tcp:8765 tcp:8765`` (flute_rl/yamabiko/remote.py does that).
 Every request is one JSON object on one line, ``{"id": 1, "cmd": "actuator", "pwm": 0.3}``; every reply is
@@ -85,7 +85,7 @@ class Client:
 class Server:
     """The command loop.  ``link`` is a hw.Link (or anything with its interface, for tests)."""
 
-    def __init__(self, link, host="127.0.0.1", port=8765, max_pwm=.6, lease=2.0, log=print):
+    def __init__(self, link, host="127.0.0.1", port=8765, max_pwm=1.0, lease=2.0, log=print):
         self.link, self.max_pwm, self.lease, self.log = link, max_pwm, lease, log
         self.sel = selectors.DefaultSelector()
         self.listener = socket.create_server((host, port))
@@ -372,7 +372,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--dev", default="/dev/ttyHS1")
-    ap.add_argument("--max-pwm", type=float, default=.6)
+    ap.add_argument("--max-pwm", type=float, default=1.0)
     ap.add_argument("--lease", type=float, default=2.0)
     ap.add_argument("--no-flash", action="store_true", help="do not flash build_fw when the firmware is silent")
     ap.add_argument("--wait", type=float, default=0.0, help="keep trying to open the link this long (at boot)")

@@ -53,7 +53,7 @@ def main():
     p = sub.add_parser("valve"); p.add_argument("state", choices=["open", "closed"]); p.add_argument("--hold", type=float, default=3.0)
     p = sub.add_parser("mic"); p.add_argument("--watch", type=float, default=0.0)
     p = sub.add_parser("record"); p.add_argument("seconds", type=float); p.add_argument("--out", default="record.wav")
-    p = sub.add_parser("calibrate"); p.add_argument("--max-pwm", type=float, default=.6); p.add_argument("--sweep", type=float, default=1.0)
+    p = sub.add_parser("calibrate"); p.add_argument("--max-pwm", type=float, default=1.0); p.add_argument("--sweep", type=float, default=1.0)
     p.add_argument("--fan", type=float, default=.7); p.add_argument("--flip", action="store_true")
     p.add_argument("--out", default=f"{REMOTE_DIR}/runs/real/calibration.npz"); p.add_argument("--pull", default=None, help="local folder")
     p = sub.add_parser("play"); p.add_argument("runtime"); p.add_argument("target", help="local .npz files, pushed first")
