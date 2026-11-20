@@ -11,9 +11,10 @@ sys.path.insert(0, str(ROOT))
 
 def test_uno_q_modules_load_without_torch():
     code = ("import sys; sys.modules['torch'] = None\n"      # any 'import torch' now fails
-            "import flute_rl.yamabiko.hw, flute_rl.yamabiko.residual_numpy, flute_rl.yamabiko.calibration\n")
+            "import flute_rl.yamabiko.hw, flute_rl.yamabiko.residual_numpy, flute_rl.yamabiko.calibration, "
+            "flute_rl.yamabiko.server\n")
     subprocess.run([sys.executable, "-c", code], check=True, cwd=ROOT)
-    for script in ("yamabiko_twin_calibrate.py", "yamabiko_twin_play.py", "yamabiko_bench_watch.py"):
+    for script in ("yamabiko_twin_calibrate.py", "yamabiko_twin_play.py", "yamabiko_bench_watch.py", "yamabiko_server.py"):
         source = (ROOT / "scripts" / script).read_text(encoding="utf-8")
         assert "import torch" not in source and "fitting import" not in source and "device import" not in source
 

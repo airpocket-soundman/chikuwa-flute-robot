@@ -171,3 +171,32 @@ A 基板を UNO Q に、B 基板を Breakout Carrier に載せ、MIC1 だけを�
   通しっぱなしにし、D1（PB6）から 50 Hz を出す（TIM4 はアクチュエーターの 20 kHz に使っているので別のタイマー）
 - `remoteocd` で書き込むたびに arduino-router が起動し直し、/dev/ttyHS1 を取る。書き込みの後に止め直す
 - /dev/ttyHS1 は同時に 1 つのプログラムしか開けない（2 つで開くと音声が片方に流れて止まる）
+
+## PC から命令で動かす（2026-11-20）
+
+UNO Q で常駐プログラムを 1 つ動かし、MCU とのシリアル（/dev/ttyHS1）はそれだけが持つ。PC は USB の adb 経由で命令を送る。
+
+```
+python3 scripts/yamabiko_server.py            # UNO Q（--max-pwm 0.6、--lease 2 が既定）
+python scripts/yamabiko_remote.py status      # PC。初回に adb forward tcp:8765 tcp:8765 を自動で張る
+```
+
+| PC のコマンド | 中身 |
+|---|---|
+| `status` / `watch --seconds 10` | 電流、ファンの回転数、ボタン、バルブ、サーボ、マイクの音量と音程 |
+| `info` | ファームウェアの情報 |
+| `actuator 0.3 --hold 2` | アクチュエーターの PWM（上限 `--max-pwm` を超える値は断る。`limit 0.8` で上限を変える） |
+| `fan on --duty 0.5 --hold 5` / `valve open --hold 3` | ファン、バルブ |
+| `mic --watch 10` / `record 3 --out a.wav` | マイクの音量・音程、録音（16 kHz、PC に WAV） |
+| `calibrate --max-pwm 0.6 --sweep 0.5 --pull runs/real/` | 較正（手順書の 1）を UNO Q で実行して取ってくる |
+| `play runtime.npz target.npz --repeats 3 --pull runs/real/` | 演奏（手順書の 3）。ファイルは先に UNO Q へ送る |
+| `stop` | 全部を安全側へ |
+
+Python からは `flute_rl.yamabiko.remote.Remote`（`with Remote() as rig: rig.actuator(.3)`）。
+
+- 出力（アクチュエーター、バルブ、ファン）は、それを出した接続のもの。接続が切れるか、`--lease` 秒の間なにも来なければ、
+  アクチュエーター 0、バルブ閉、ファン停止に戻す（`Remote` は 0.5 秒ごとに ping を送る）。別の接続は、その間は出力を変えられない
+- 常駐中はアクチュエーターとバルブの指令を 10 ms ごとに送り続けるので、ファームウェアの 100 ms の見張りが働くのは常駐プログラムが止まったときだけ
+- 起動時にファームウェアが応答しなければ、`build_fw` を書き込み直す（再起動で消えた場合）
+- 常駐中は、ほかのスクリプト（`yamabiko_link.py` など）はシリアルを開けない。使うときは常駐プログラムを止める
+- UNO Ping（App Lab の既定のアプリと、crontab の音声処理）は 2026-11-20 に外した。起動のたびに MCU が書き換わり、arduino-router が /dev/ttyHS1 を取っていた原因

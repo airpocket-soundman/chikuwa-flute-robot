@@ -55,11 +55,17 @@ class Audio:
 
     def __init__(self, seconds: float = 900.0):
         self.buf = np.zeros(int(seconds * SR), np.int16)
+        self.reset()
+
+    def reset(self) -> None:
+        """Forget the stream (the firmware numbers the samples from 0 again after every 'S')."""
         self.base = None      # sample index of buf[0]
         self.end = 0          # one past the newest sample (sample index)
         self.gaps = 0
 
     def add(self, first: int, samples: np.ndarray) -> None:
+        if self.base is not None and first < self.end - len(samples):
+            self.reset()      # the index went back: the stream was restarted
         if self.base is None:
             self.base = first
             self.end = first
@@ -123,6 +129,7 @@ class Link:
 
     def start(self) -> None:
         self.send(b"S")
+        self.audio.reset()            # a packet of the old stream still on its way resets it again (Audio.add)
 
     def stop(self) -> None:
         self.send(b"X")

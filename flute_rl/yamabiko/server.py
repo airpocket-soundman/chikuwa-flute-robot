@@ -1,0 +1,387 @@
+"""UNO Q: one process owns the MCU link and takes commands from the PC (JSON lines over TCP).
+
+    python3 scripts/yamabiko_server.py [--port 8765] [--max-pwm 0.6]
+
+The PC reaches it through USB with ``adb forward tcp:8765 tcp:8765`` (flute_rl/yamabiko/remote.py does that).
+Every request is one JSON object on one line, ``{"id": 1, "cmd": "actuator", "pwm": 0.3}``; every reply is
+one line, ``{"id": 1, "ok": true, ...}`` or ``{"id": 1, "ok": false, "error": "..."}``.  ``help`` lists the
+commands.
+
+Safety: the outputs (actuator, valve, fan) belong to the connection that set them.  They go back to safe
+(actuator 0, valve shut, fan off) when that connection closes or sends nothing for ``lease`` seconds
+(default 2; remote.py sends a heartbeat).  While the server runs it sends the actuator / valve command every
+10 ms, so the firmware's own 100 ms watchdog only fires if the server dies.  ``--max-pwm`` caps the actuator
+(``limit`` changes the cap, up to 1.0).
+
+On start the server checks that mcu/yamabiko_fw answers and flashes ``build_fw`` (compiled on the UNO Q, see
+docs/yamabiko_real.md) if it does not, since the sketch can be lost on a reboot.
+"""
+from __future__ import annotations
+
+import base64
+import json
+import pathlib
+import selectors
+import socket
+import subprocess
+import time
+import traceback
+
+import numpy as np
+
+from .hw import (FLAG_BUTTON, FLAG_FAN, FLAG_SERVO_SILENT, FLAG_TIMEOUT, FLAG_VALVE, PITCH_FRAME, SR, Link,
+                 RealRig, heard_pitch)
+
+STEP_S = 0.01
+HOME = pathlib.Path("/home/arduino")
+FLASH = [str(HOME / ".arduino15/packages/arduino/tools/remoteocd/0.0.4-rc.4/remoteocd"), "upload", "-f",
+         str(HOME / ".arduino15/packages/arduino/hardware/zephyr/0.53.1/variants/arduino_uno_q_stm32u585xx/"
+                    "flash_sketch.cfg"),
+         str(HOME / "yamabiko/build_fw/yamabiko_fw.ino.elf-zsk.bin")]
+
+
+def ask_info(link, timeout=1.0):
+    """The firmware's two text lines (INFO ..., IO ...), or [] when it does not answer."""
+    link.texts.clear()
+    link.send(b"i")
+    until = time.monotonic() + timeout
+    while time.monotonic() < until and len(link.texts) < 2:
+        link.poll(.05)
+    return list(link.texts)
+
+
+def ensure_firmware(link, log=print):
+    if any(t.startswith("INFO fw yamabiko_fw") for t in ask_info(link)):
+        return "running"
+    log("yamabiko_fw does not answer: flashing build_fw")
+    subprocess.run(FLASH, check=True, capture_output=True, env={"TMPDIR": "/tmp", "HOME": str(HOME), "PATH": "/usr/bin:/bin"})
+    time.sleep(1.0)
+    link.drain(.2)
+    if any(t.startswith("INFO fw yamabiko_fw") for t in ask_info(link, 2.0)):
+        return "flashed"
+    raise RuntimeError("yamabiko_fw does not answer even after flashing (is arduino-router holding /dev/ttyHS1?)")
+
+
+class Client:
+    def __init__(self, sock, addr):
+        self.sock, self.addr = sock, addr
+        self.buf = b""
+        self.last_seen = time.monotonic()
+
+
+class Server:
+    """The command loop.  ``link`` is a hw.Link (or anything with its interface, for tests)."""
+
+    def __init__(self, link, host="127.0.0.1", port=8765, max_pwm=.6, lease=2.0, log=print):
+        self.link, self.max_pwm, self.lease, self.log = link, max_pwm, lease, log
+        self.sel = selectors.DefaultSelector()
+        self.listener = socket.create_server((host, port))
+        self.listener.setblocking(False)
+        self.port = self.listener.getsockname()[1]
+        self.sel.register(self.listener, selectors.EVENT_READ, None)
+        self.pwm, self.brake, self.valve = 0.0, False, False
+        self.fan_on, self.fan_duty = False, 0.0
+        self.owner: Client | None = None
+        self.jobs = []                     # (client, id, kind, data) finished in the loop
+        self.running = True
+        self.next_step = time.monotonic()
+
+    # ----- outputs ---------------------------------------------------------------------------------
+    def safe(self, why=""):
+        if self.pwm or self.valve or self.fan_on or self.brake:
+            self.log(f"outputs to safe{': ' + why if why else ''}")
+        self.pwm, self.brake, self.valve = 0.0, False, False
+        if self.fan_on:
+            self.link.fan(False, 0.0)
+        self.fan_on, self.fan_duty = False, 0.0
+        self.link.command(0.0, False)
+        self.owner = None
+
+    def take(self, client):
+        if self.owner is not None and self.owner is not client:
+            raise RuntimeError("another connection is driving the outputs")
+        self.owner = client
+
+    # ----- commands -------------------------------------------------------------------------------
+    def status(self):
+        st = self.link.status
+        cents, conf, db = heard_pitch(self.link.audio.latest(PITCH_FRAME))
+        out = {"pwm": self.pwm, "brake": self.brake, "valve": self.valve, "fan": self.fan_on, "fan_duty": self.fan_duty,
+               "max_pwm": self.max_pwm, "mic_db": round(db, 1),
+               "pitch_hz": round(440 * 2 ** (cents / 1200), 1) if np.isfinite(cents) else None,
+               "pitch_conf": round(conf, 3), "audio_gaps": self.link.audio.gaps, "link_bad": self.link.bad}
+        if st is not None:
+            out.update({"mcu_ms": st.ms, "applied_pwm": st.pwm / 1000, "isense_mv": st.isense_mv,
+                        "isense_peak_mv": st.isense_peak_mv, "fan_rpm": st.fan_rpm, "button_count": st.buttons,
+                        "button_held": bool(st.flags & FLAG_BUTTON), "valve_open": bool(st.flags & FLAG_VALVE),
+                        "fan_switch": bool(st.flags & FLAG_FAN), "fw_timeout": bool(st.flags & FLAG_TIMEOUT),
+                        "servo_answering": not st.flags & FLAG_SERVO_SILENT, "servo_pos": st.servo_pos,
+                        "status_age_s": round(time.monotonic() - st.t_rx, 3)})
+        return out
+
+    def handle(self, client, req):
+        cmd = req.get("cmd")
+        if cmd == "help":
+            return {"commands": sorted(name[4:] for name in dir(self) if name.startswith("cmd_"))}
+        fn = getattr(self, f"cmd_{cmd}", None)
+        if fn is None:
+            raise ValueError(f"unknown cmd {cmd!r} (try help)")
+        return fn(client, req)
+
+    def cmd_ping(self, client, req):
+        return {"t": time.time()}
+
+    def cmd_info(self, client, req):
+        return {"lines": ask_info(self.link)}
+
+    def cmd_status(self, client, req):
+        return self.status()
+
+    def cmd_actuator(self, client, req):
+        pwm = float(req.get("pwm", 0.0))
+        if abs(pwm) > self.max_pwm + 1e-9:
+            raise ValueError(f"|pwm| {abs(pwm)} is over the cap {self.max_pwm} (raise it with limit)")
+        self.take(client)
+        self.pwm, self.brake = pwm, bool(req.get("brake", False))
+        return {"pwm": self.pwm, "brake": self.brake}
+
+    def cmd_limit(self, client, req):
+        self.max_pwm = min(max(float(req["max_pwm"]), 0.0), 1.0)
+        self.link.limit(self.max_pwm)
+        if abs(self.pwm) > self.max_pwm:
+            self.pwm = float(np.clip(self.pwm, -self.max_pwm, self.max_pwm))
+        return {"max_pwm": self.max_pwm}
+
+    def cmd_valve(self, client, req):
+        self.take(client)
+        self.valve = bool(req.get("open", False))
+        return {"valve": self.valve}
+
+    def cmd_valve_positions(self, client, req):
+        self.link.valve_positions(int(req["open"]), int(req["closed"]), int(req.get("move_ms", 300)))
+        return {}
+
+    def cmd_fan(self, client, req):
+        self.take(client)
+        self.fan_on, self.fan_duty = bool(req.get("on", False)), float(np.clip(req.get("duty", .7), 0, 1))
+        self.link.fan(self.fan_on, self.fan_duty)
+        return {"fan": self.fan_on, "duty": self.fan_duty}
+
+    def cmd_stop(self, client, req):
+        if self.owner is not None and self.owner is not client and not req.get("force", False):
+            raise RuntimeError("another connection is driving the outputs (force: true to stop anyway)")
+        self.safe("stop")
+        return {}
+
+    def cmd_mic(self, client, req):
+        audio = self.link.audio
+        have = 0 if audio.base is None else audio.end - audio.base
+        n = min(int(round(float(req.get("window_s", PITCH_FRAME / SR)) * SR)), have)
+        if n < 64:
+            raise RuntimeError("no audio from the MCU yet")
+        x = audio.latest(n)
+        cents, conf, db = heard_pitch(self.link.audio.latest(PITCH_FRAME))
+        spec = np.abs(np.fft.rfft((x - x.mean()) * np.hanning(len(x))))
+        lo = max(1, int(100 * len(x) / SR))
+        return {"rms_db": round(20 * np.log10(max(float(np.sqrt(np.mean(x * x))), 1e-9)), 1),
+                "peak_db": round(20 * np.log10(max(float(np.abs(x).max()), 1e-9)), 1),
+                "fft_peak_hz": round((int(np.argmax(spec[lo:])) + lo) * SR / len(x), 1),
+                "pitch_hz": round(440 * 2 ** (cents / 1200), 1) if np.isfinite(cents) else None,
+                "pitch_conf": round(conf, 3)}
+
+    def cmd_record(self, client, req):
+        seconds = float(req.get("seconds", 1.0))
+        if not 0 < seconds <= 30:
+            raise ValueError("seconds must be in (0, 30]")
+        start = self.link.audio.end
+        self.jobs.append((client, req.get("id"), "record", (start, start + int(round(seconds * SR)))))
+        return None                                       # answered by the loop when the audio is in
+
+    def cmd_calibrate(self, client, req):
+        from .calibration import calibrate_real
+        self.take(client)
+        rig = self._rig(req)
+        self.link.fan(True, float(req.get("fan", .7)))
+        try:
+            record = calibrate_real(rig, max_pwm=float(req.get("max_pwm", self.max_pwm)),
+                                    sweep=float(req.get("sweep", 1.0)), homing_seconds=float(req.get("homing_seconds", 1.3)))
+        finally:
+            self.safe("calibration done")
+        out = req.get("out")
+        if out:
+            pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(out, **record)
+        valid = record["0/valid"][0]
+        heard = record["0/heard"][0][valid]
+        return {"steps": int(valid.size), "voiced": int(valid.sum()), "late_steps": rig.late_steps, "out": out,
+                "pitch_cents": [float(heard.min()), float(heard.max())] if valid.any() else None}
+
+    def cmd_play(self, client, req):
+        from .residual_numpy import Runtime
+        self.take(client)
+        runtime = Runtime(dict(np.load(req["runtime"])))
+        target = np.load(req["target"])
+        cents, voice = target["cents"].astype(np.float64), target["voice"].astype(bool)
+        rig = self._rig(req)
+        self.link.fan(True, float(req.get("fan", .7)))
+        errors, records = [], {}
+        try:
+            for play in range(int(req.get("repeats", 1))):
+                rig.resync()
+                for _ in range(int(round(float(req.get("homing_seconds", 1.3)) / STEP_S))):
+                    rig.step(-1.0, False)
+                runtime.prepare(cents, voice, keep_song_memory=play > 0)
+                pwm_log, heard_log, valid_log = [], [], []
+                for t in range(len(cents)):
+                    pwm, valve = runtime.command(t)
+                    h = float(rig.step(pwm, valve)["heard"][0]); ok = bool(np.isfinite(h))
+                    runtime.observe(h if ok else 0.0, ok)
+                    pwm_log.append(pwm); heard_log.append(h if ok else 0.0); valid_log.append(ok)
+                heard, valid = np.array(heard_log), np.array(valid_log)
+                mask = valid & voice
+                errors.append(float(np.abs(heard[mask] - cents[mask]).mean()) if mask.any() else None)
+                records.update({f"{play}/pwm": np.array(pwm_log, np.float32)[None],
+                                f"{play}/heard": heard.astype(np.float32)[None], f"{play}/valid": valid[None],
+                                f"{play}/valve": voice.astype(np.float32)[None],
+                                f"{play}/target_cents": cents.astype(np.float32)[None], f"{play}/target_voice": voice[None]})
+        finally:
+            self.safe("play done")
+        out = req.get("out")
+        if out:
+            pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(out, count=len(errors), **records)
+        return {"heard_error_cents": errors, "late_steps": rig.late_steps, "out": out}
+
+    def _rig(self, req):
+        rig = RealRig(self.link, flip=bool(req.get("flip", False)), max_pwm=min(float(req.get("max_pwm", self.max_pwm)),
+                                                                                self.max_pwm))
+        rig.start()
+        return rig
+
+    # ----- loop -----------------------------------------------------------------------------------
+    def reply(self, client, rid, ok, payload=None, error=None):
+        msg = {"id": rid, "ok": ok}
+        if ok:
+            msg.update(payload or {})
+        else:
+            msg["error"] = error
+        try:
+            client.sock.sendall((json.dumps(msg) + "\n").encode())
+        except OSError:
+            self.drop(client)
+
+    def drop(self, client):
+        try:
+            self.sel.unregister(client.sock)
+        except (KeyError, ValueError):
+            pass
+        client.sock.close()
+        if self.owner is client:
+            self.safe("connection closed")
+
+    def accept(self):
+        sock, addr = self.listener.accept()
+        sock.setblocking(False)
+        client = Client(sock, addr)
+        self.sel.register(sock, selectors.EVENT_READ, client)
+
+    def read(self, client):
+        try:
+            data = client.sock.recv(65536)
+        except (BlockingIOError, InterruptedError):
+            return
+        except OSError:
+            data = b""
+        if not data:
+            self.drop(client)
+            return
+        client.last_seen = time.monotonic()
+        client.buf += data
+        while b"\n" in client.buf:
+            line, client.buf = client.buf.split(b"\n", 1)
+            if not line.strip():
+                continue
+            rid = None
+            try:
+                req = json.loads(line)
+                rid = req.get("id")
+                result = self.handle(client, req)
+                if result is not None:
+                    self.reply(client, rid, True, result)
+            except Exception as exc:      # noqa: BLE001  (every error goes back to the caller)
+                self.reply(client, rid, False, error=f"{type(exc).__name__}: {exc}")
+                if not isinstance(exc, (ValueError, RuntimeError, KeyError)):
+                    self.log(traceback.format_exc())
+
+    def finish_jobs(self):
+        for job in list(self.jobs):
+            client, rid, kind, (start, stop) = job
+            if self.link.audio.end >= stop:
+                self.jobs.remove(job)
+                pcm = self.link.audio.span(start, stop)
+                self.reply(client, rid, True, {"sr": SR, "samples": int(pcm.size),
+                                               "pcm16_b64": base64.b64encode(pcm.astype("<i2").tobytes()).decode()})
+
+    def tick(self):
+        for key, _ in self.sel.select(timeout=0):
+            if key.data is None:
+                self.accept()
+            else:
+                self.read(key.data)
+        if self.owner is not None and time.monotonic() - self.owner.last_seen > self.lease:
+            self.safe(f"no message for {self.lease} s")
+        now = time.monotonic()
+        if now >= self.next_step:
+            self.link.command(self.pwm, self.valve, self.brake)
+            self.next_step = max(self.next_step + STEP_S, now - STEP_S)
+        self.link.poll(max(0.0, min(.002, self.next_step - time.monotonic())))
+        self.finish_jobs()
+
+    def serve(self):
+        self.link.limit(self.max_pwm)
+        self.link.start()
+        self.log(f"yamabiko server on port {self.port}, max pwm {self.max_pwm}, lease {self.lease} s")
+        try:
+            while self.running:
+                self.tick()
+        finally:
+            self.safe("server stopping")
+            self.link.stop()
+
+    def close(self):
+        for key in list(self.sel.get_map().values()):
+            key.fileobj.close()
+        self.sel.close()
+
+
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--dev", default="/dev/ttyHS1")
+    ap.add_argument("--max-pwm", type=float, default=.6)
+    ap.add_argument("--lease", type=float, default=2.0)
+    ap.add_argument("--no-flash", action="store_true", help="do not flash build_fw when the firmware is silent")
+    ap.add_argument("--wait", type=float, default=0.0, help="keep trying to open the link this long (at boot)")
+    args = ap.parse_args(argv)
+    until = time.monotonic() + args.wait
+    while True:
+        try:
+            link = Link(args.dev)
+            break
+        except OSError as exc:              # e.g. arduino-router still holds /dev/ttyHS1
+            if time.monotonic() >= until:
+                raise SystemExit(f"cannot open {args.dev}: {exc} (stop arduino-router)")
+            print(f"cannot open {args.dev} yet: {exc}", flush=True)
+            time.sleep(5)
+    if not args.no_flash:
+        print(f"firmware: {ensure_firmware(link)}", flush=True)
+    server = Server(link, port=args.port, max_pwm=args.max_pwm, lease=args.lease,
+                    log=lambda s: print(time.strftime("%H:%M:%S"), s, flush=True))
+    try:
+        server.serve()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.close()
+        link.close()

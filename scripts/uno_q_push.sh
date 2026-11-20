@@ -17,7 +17,8 @@ for f in flute_rl/*.py flute_rl/yamabiko/*.py; do
 done
 for f in scripts/yamabiko_collect.py scripts/yamabiko_play.py scripts/yamabiko_e2e_play.py \
          scripts/bench_yamabiko_e2e.py scripts/yamabiko_link.py scripts/yamabiko_bench_watch.py \
-         scripts/yamabiko_mic_check.py scripts/yamabiko_twin_calibrate.py scripts/yamabiko_twin_play.py; do
+         scripts/yamabiko_mic_check.py scripts/yamabiko_twin_calibrate.py scripts/yamabiko_twin_play.py \
+         scripts/yamabiko_server.py; do
   "$ADB" push "$f" "$D/$f" >/dev/null
 done
 "$ADB" push mcu/yamabiko_fw/yamabiko_fw.ino "$D/yamabiko_fw/" >/dev/null
