@@ -23,11 +23,11 @@ from dataclasses import asdict, dataclass
 import torch
 from torch import nn
 
+from .features import SONG_LOOKAHEAD  # noqa: F401  (re-exported)
 from .physical_plant import DifferentiableMotorFlute
 from .rig_adaptive import WINDOW, future_window, normalize
 
 PARTS = ("motor", "flute", "song")
-SONG_LOOKAHEAD = (0, 5, 10, 20)
 
 
 @dataclass(frozen=True)

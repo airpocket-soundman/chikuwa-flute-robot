@@ -72,4 +72,5 @@ python scripts/yamabiko_twin_fit.py runs/real/calibration_01.npz --songs runs/re
 
 - 骨格の観測器は「音程 = 位置」の関係が単調であることを前提にする。倍音で音が裏返る位置は使わない（掃引を短くする）。
 - 聞こえる遅れは 0〜3 ステップの整数として当てはめる。
-- UNO Q での 1 ステップの時間は未計測（PC で 0.34 ms。旧 GRU 版の UNO Q 実測 9.6 ms から、10 ms 以内の見込み）。
+- UNO Q での 1 ステップの計算時間（`runtime.command` ＋ `observe`、隠れ層 64、乱数の重み）は中央値 1.1 ms、p99 1.9 ms、最大 2.3 ms（2026-11-20 実測。PC では 0.13 ms）。10 ms の周期に収まる。
+- 1 と 3 は UNO Q で NumPy だけで動く（torch を読まない。`tests/test_yamabiko_uno_q_imports.py`）。2026-11-20 までは torch を読み込んで止まっていた。

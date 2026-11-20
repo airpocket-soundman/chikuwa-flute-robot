@@ -6,6 +6,7 @@ Homes the plunger, then plays the fixed PWM sequence with the valve open and
 records commands and heard pitch (nothing else).  Use ``--max-pwm`` and
 ``--sweep`` on a new mechanism until end-stop hits and overblowing are
 understood.  Copy the file to the PC and run scripts/yamabiko_twin_fit.py.
+Only NumPy is needed on the UNO Q.
 """
 from __future__ import annotations
 
@@ -13,9 +14,10 @@ import argparse
 import pathlib
 import sys
 
+import numpy as np
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from flute_rl.yamabiko.device import RealDevice, save_logs  # noqa: E402
-from flute_rl.yamabiko.fitting import run_calibration  # noqa: E402
+from flute_rl.yamabiko.calibration import calibrate_real  # noqa: E402
 from flute_rl.yamabiko.hw import Link, RealRig  # noqa: E402
 
 
@@ -31,14 +33,14 @@ def main():
     args = ap.parse_args()
     link = Link(args.dev); rig = RealRig(link, flip=args.flip, max_pwm=args.max_pwm)
     rig.start(); link.fan(True, args.fan)
-    device = RealDevice(rig, homing_seconds=args.homing_seconds)
     try:
-        log = run_calibration(device, max_pwm=args.max_pwm, sweep=args.sweep)
+        record = calibrate_real(rig, max_pwm=args.max_pwm, sweep=args.sweep, homing_seconds=args.homing_seconds)
         pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        save_logs(args.out, device.logs)
-        heard = log.heard[log.valid]
-        print(f"saved {args.out}: {log.pwm.shape[1]} steps, {int(log.valid.sum())} voiced, "
-              f"pitch {float(heard.min()):.0f}..{float(heard.max()):.0f} cent, late steps {rig.late_steps}")
+        np.savez_compressed(args.out, **record)
+        valid = record["0/valid"][0]
+        heard = record["0/heard"][0][valid]
+        pitch = f"pitch {heard.min():.0f}..{heard.max():.0f} cent" if valid.any() else "no pitch heard"
+        print(f"saved {args.out}: {valid.size} steps, {int(valid.sum())} voiced, {pitch}, late steps {rig.late_steps}")
     finally:
         rig.safe(); link.fan(False, 0.0); link.close()
 

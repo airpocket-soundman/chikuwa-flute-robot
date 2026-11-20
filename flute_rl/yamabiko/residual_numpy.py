@@ -19,8 +19,7 @@ import math
 
 import numpy as np
 
-from .adaptive_memory import SONG_LOOKAHEAD
-from .rig_adaptive import PITCH_CENTER, PITCH_SCALE, WINDOW
+from .features import PITCH_CENTER, PITCH_SCALE, SONG_LOOKAHEAD, WINDOW
 
 A4 = 440.0
 SPAN = 6

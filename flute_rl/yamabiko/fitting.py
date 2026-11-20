@@ -18,35 +18,13 @@ from dataclasses import dataclass
 import torch
 from torch.nn import functional as F
 
+from .calibration import CALIBRATION, calibration_segments  # noqa: F401  (re-exported)
 from .device import PlayLog
 from .physical_plant import DifferentiableMotorFlute, PhysicalPlantParameters
-
-# (pwm, steps) segments of the calibration run, about 9 s at 100 Hz.  The
-# full-speed runs are long enough (1 s) for the slowest motors to reach their
-# top speed; a fast motor simply rests against the far stop meanwhile.
-CALIBRATION = ([(level, 25) for level in (.10, .15, .20, .25, .30, .35, .40)] + [(0.0, 10)] +
-               [(-1.0, 60), (1.0, 100), (-1.0, 100), (.6, 50), (-.6, 50), (.35, 150), (-.35, 150)])
 
 FITTED = ("torque_gain", "torque_tau_s", "coulomb_friction", "viscous_friction",
           "max_velocity_strokes_s", "deadband", "tube_offset_m", "temp_offset_c", "flute_offset_cents")
 LOG_SCALED = ("torque_gain", "torque_tau_s", "coulomb_friction", "viscous_friction", "max_velocity_strokes_s")
-
-
-def calibration_segments(max_pwm: float = 1.0, sweep: float = 1.0):
-    """The calibration run, optionally made gentler for a real rig.
-
-    ``max_pwm`` caps every level (the deadband staircase is kept as is) and
-    ``sweep`` scales the duration of the slow sweeps, so the plunger stays
-    inside the range where the flute sounds cleanly (no overblowing) and
-    end-stop hits are softer.  The defaults are the benchmark run.
-    """
-    segments = []
-    for level, steps in CALIBRATION:
-        gentle = level if abs(level) <= .4 else max(-max_pwm, min(max_pwm, level))
-        if abs(level) == .35 and steps == 150:
-            steps = int(round(steps * sweep))
-        segments.append((gentle, steps))
-    return segments
 
 
 def calibration_pwm(batch, device, dtype=torch.float32, max_pwm: float = 1.0, sweep: float = 1.0):

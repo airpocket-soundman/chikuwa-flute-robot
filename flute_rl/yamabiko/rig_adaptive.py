@@ -23,10 +23,8 @@ from dataclasses import asdict, dataclass
 import torch
 from torch import nn
 
+from .features import PITCH_CENTER, PITCH_SCALE, WINDOW  # noqa: F401  (re-exported)
 from .physical_plant import AudibleListener, DifferentiableMotorFlute
-
-PITCH_CENTER, PITCH_SCALE = 1300.0, 600.0
-WINDOW = (0, 3, 6, 10, 15, 20, 30, 40, 55, 70)
 
 
 @dataclass(frozen=True)
