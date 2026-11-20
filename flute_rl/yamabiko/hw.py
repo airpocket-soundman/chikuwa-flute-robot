@@ -104,8 +104,10 @@ class Link:
     """The firmware's packet link (see the protocol at the top of mcu/yamabiko_fw/yamabiko_fw.ino)."""
 
     def __init__(self, dev: str = "/dev/ttyHS1", baud: int = 921600):
-        import termios  # Linux only; the rest of this module also loads on the PC
+        import fcntl  # Linux only; the rest of this module also loads on the PC
+        import termios
         self.fd = os.open(dev, os.O_RDWR | os.O_NOCTTY)
+        fcntl.ioctl(self.fd, termios.TIOCEXCL)  # nobody else (arduino-router) may open it while we have it
         attr = termios.tcgetattr(self.fd)
         attr[0] = attr[1] = attr[3] = 0
         attr[2] = termios.CS8 | termios.CREAD | termios.CLOCAL

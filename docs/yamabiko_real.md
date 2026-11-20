@@ -200,3 +200,8 @@ Python からは `flute_rl.yamabiko.remote.Remote`（`with Remote() as rig: rig.
 - 起動時にファームウェアが応答しなければ、`build_fw` を書き込み直す（再起動で消えた場合）
 - 常駐中は、ほかのスクリプト（`yamabiko_link.py` など）はシリアルを開けない。使うときは常駐プログラムを止める
 - UNO Ping（App Lab の既定のアプリと、crontab の音声処理）は 2026-11-20 に外した。起動のたびに MCU が書き換わり、arduino-router が /dev/ttyHS1 を取っていた原因
+- arduino-router は自動起動を切っても arduino-app-cli（App Lab の本体）が起動のたびに立ち上げ、/dev/ttyHS1 を開いて MCU の
+  返事を横取りする。2026-11-20 に `sudo systemctl disable --now arduino-app-cli` で止めた（App Lab は使えなくなる。
+  戻すときは `enable --now`）。常駐プログラムは /dev/ttyHS1 を TIOCEXCL で開くので、開いた後はほかのプログラムは開けない
+- 自動起動は arduino ユーザーの crontab（`@reboot sleep 15 && cd /home/arduino/yamabiko && python3 scripts/yamabiko_server.py
+  --wait 120 >> /home/arduino/yamabiko_server.log 2>&1`）。UNO Ping を外した後は、再起動してもファームウェアは消えなかった
