@@ -205,3 +205,6 @@ Python からは `flute_rl.yamabiko.remote.Remote`（`with Remote() as rig: rig.
   戻すときは `enable --now`）。常駐プログラムは /dev/ttyHS1 を TIOCEXCL で開くので、開いた後はほかのプログラムは開けない
 - 自動起動は arduino ユーザーの crontab（`@reboot sleep 15 && cd /home/arduino/yamabiko && python3 scripts/yamabiko_server.py
   --wait 120 >> /home/arduino/yamabiko_server.log 2>&1`）。UNO Ping を外した後は、再起動してもファームウェアは消えなかった
+- arduino-router のユニットは起動時に `gpioset -c /dev/gpiochip1 -t0 37=0`（MCU を動ける状態に）と `70=1`（起動アニメーションの
+  終わり）を出している。これがないと、起動後に MCU のスケッチが動かず、シリアルに 1 バイトも出てこない。arduino-router を
+  止めたので、常駐プログラムが起動時に同じ 2 本を出す（arduino ユーザーは gpiod グループなので sudo は要らない）

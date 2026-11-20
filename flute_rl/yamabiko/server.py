@@ -13,8 +13,9 @@ Safety: the outputs (actuator, valve, fan) belong to the connection that set the
 10 ms, so the firmware's own 100 ms watchdog only fires if the server dies.  ``--max-pwm`` caps the actuator
 (``limit`` changes the cap, up to 1.0).
 
-On start the server checks that mcu/yamabiko_fw answers and flashes ``build_fw`` (compiled on the UNO Q, see
-docs/yamabiko_real.md) if it does not, since the sketch can be lost on a reboot.
+On start the server sets the two GPIO lines arduino-router's unit sets (the MCU does not start its sketch
+after a boot without them, and arduino-router is off), checks that mcu/yamabiko_fw answers and flashes
+``build_fw`` (compiled on the UNO Q, see docs/yamabiko_real.md) if it does not.
 """
 from __future__ import annotations
 
@@ -38,6 +39,18 @@ FLASH = [str(HOME / ".arduino15/packages/arduino/tools/remoteocd/0.0.4-rc.4/remo
          str(HOME / ".arduino15/packages/arduino/hardware/zephyr/0.53.1/variants/arduino_uno_q_stm32u585xx/"
                     "flash_sketch.cfg"),
          str(HOME / "yamabiko/build_fw/yamabiko_fw.ino.elf-zsk.bin")]
+
+
+# What arduino-router's unit does around its start: line 37 low puts the micro in a ready state, line 70 high
+# ends the boot animation.  Without them (arduino-router is off) the sketch in flash does not run after a boot.
+READY_LINES = ["gpioset", "-c", "/dev/gpiochip1", "-t0", "37=0", "70=1"]
+
+
+def mcu_ready_lines(log=print):
+    try:
+        subprocess.run(READY_LINES, check=True, capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log(f"could not set the MCU ready lines: {exc}")
 
 
 def ask_info(link, timeout=1.0):
@@ -374,6 +387,8 @@ def main(argv=None):
                 raise SystemExit(f"cannot open {args.dev}: {exc} (stop arduino-router)")
             print(f"cannot open {args.dev} yet: {exc}", flush=True)
             time.sleep(5)
+    mcu_ready_lines()
+    time.sleep(.5)
     if not args.no_flash:
         print(f"firmware: {ensure_firmware(link)}", flush=True)
     server = Server(link, port=args.port, max_pwm=args.max_pwm, lease=args.lease,
