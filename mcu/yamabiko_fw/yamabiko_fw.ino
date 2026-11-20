@@ -4,8 +4,9 @@
 // Audio: unchanged from yamabiko_link (SAI1 -> GPDMA ring -> FIR, decimate to 16 kHz -> 5 ms packets).
 //
 // IO (pins as in the IO spec; the A board is an UNO shield):
-//   D9 / D10  PB8 / PB9  TIM4 CH3 / CH4  TB6643KQ IN1 / IN2, 20 kHz. pwm > 0 drives IN1, pwm < 0 IN2,
-//                                        the other input low (drive / coast); brake = both high
+//   D9 / D10  PB8 / PB9  TIM4 CH3 / CH4  TB6643KQ IN1 / IN2, 20 kHz. pwm > 0: IN1 high, IN2 high for
+//                                        1 - duty (drive / brake); pwm < 0 the other way round;
+//                                        0 = both low (coast); brake = both high
 //   A0        PA4        ADC            current sense: 0.1 ohm, RC filtered, reported in mV
 //   D5        PA11       TIM1 CH4       fan PWM, 25 kHz. An N-MOSFET pulls the fan's PWM line low, so the
 //                                        output is inverted (CC4P): the duty set is the fan's duty
@@ -270,15 +271,22 @@ static void act_set(int32_t pwm, bool brake) {
   if (pwm < -(int32_t)max_pwm) pwm = -(int32_t)max_pwm;
   act_pwm = (int16_t)pwm;
   act_brake = brake;
+  // Drive / brake (slow decay): one input stays high, the other is high for the off part of the period,
+  // so the motor is shorted between the pulses and its mean voltage is duty x 12 V. Drive / coast (the
+  // other input low) let the current flow back through the body diodes against the supply: with the
+  // motor's inductance that gave (2 duty - 1) x 12 V, 2.4 V at 0.6, and too little force to move it.
   if (brake) {                                // both inputs high: the outputs are shorted
     TIM4->CCR3 = act_top;
     TIM4->CCR4 = act_top;
-  } else if (pwm >= 0) {
-    TIM4->CCR4 = 0;
-    TIM4->CCR3 = (uint32_t)pwm * act_top / 1000u;
-  } else {
+  } else if (pwm == 0) {                      // both low: outputs off (coast)
     TIM4->CCR3 = 0;
-    TIM4->CCR4 = (uint32_t)(-pwm) * act_top / 1000u;
+    TIM4->CCR4 = 0;
+  } else if (pwm > 0) {
+    TIM4->CCR3 = act_top;
+    TIM4->CCR4 = (uint32_t)(1000 - pwm) * act_top / 1000u;
+  } else {
+    TIM4->CCR4 = act_top;
+    TIM4->CCR3 = (uint32_t)(1000 + pwm) * act_top / 1000u;
   }
 }
 
