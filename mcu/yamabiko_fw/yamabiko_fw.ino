@@ -11,14 +11,16 @@
 //                                        output is inverted (CC4P): the duty set is the fan's duty
 //   D6        PB1        GPIO           fan 12 V high-side switch
 //   D2        PB3        EXTI           fan tach, 2 pulses per turn
-//   D0 / D1   usart1     Serial         SCS0009 (1 Mbaud, half duplex through a 74HC125);
-//   D7        PB2        GPIO           the buffer's transmit enable, active low (pulled up while booting)
+//   D1        PB6        TIM16 CH1N     SG90 valve servo, 50 Hz, pulse width in us, through the 74HC125
+//   D7        PB2        GPIO           the buffer's enable, active low: held low, the buffer always passes
+//                                        D1 to J4 (pulled up while booting, so the servo line idles then)
 //   D3        PB0        GPIO           backup solenoid valve (not fitted): follows the valve command
 //   D8        PB4        GPIO           EXEC button, active low
 //
-// The valve is the rotary disc on the SCS0009: the Linux side sends open / closed, the positions are
-// set once with 'K'. A command that does not come again within CMD_TIMEOUT_MS stops the actuator
-// (coast): a crashed controller must not leave the plunger driving.
+// The valve is the rotary disc on an SG90 (hobby PWM servo, no read-back): the Linux side sends open /
+// closed, the pulse widths are set with 'K' and the pulse moves from one to the other over move_ms.
+// A command that does not come again within CMD_TIMEOUT_MS stops the actuator (coast), shuts the valve
+// and stops the fan: a crashed controller must not leave the plunger driving or the air blowing.
 //
 // Link protocol, little endian. MCU -> Linux, every packet:
 //   A5 5A type len(u16) payload[len] sum(u8)       sum = 8-bit sum of type, len and payload
@@ -27,23 +29,21 @@
 //   type 'Y' status, every 10 ms:
 //                    ms(u32) frame48(u32) isense_mv(u16, mean of the last 10 ms) isense_peak_mv(u16)
 //                    fan_rpm(u16) buttons(u8, presses so far, wraps) flags(u8) pwm(i16, applied, -1000..1000)
-//                    servo_pos(i16, -1 = no answer yet) cmd_age_ms(u16)
-//                    flags: 1 button held, 2 valve open, 4 fan on, 8 command timed out, 16 servo not answering
+//                    servo_pos(i16, the servo pulse now [us]) cmd_age_ms(u16)
+//                    flags: 1 button held, 2 valve open, 4 fan on, 8 command timed out (16 unused: was the
+//                    SCS0009 not answering)
 //   type 'T' text:   one line (info)
 // Linux -> MCU:
 //   'S' start streaming, 'X' stop, 'i' info, 'P' + token(u32): ping, answered at once
 //   'C' + pwm(i16, -1000..1000) + flags(u8: 1 valve open, 2 brake)   actuator and valve, every control step
 //   'F' + on(u8) + duty(u16, 0..1000)                                 fan
-//   'K' + open(u16) + closed(u16) + move_ms(u16)                      servo positions of the valve (0..1023)
+//   'K' + open(u16) + closed(u16) + move_ms(u16)                      servo pulses of the valve [us, 500..2500]
 //   'L' + max_pwm(u16, 0..1000)                                       limit of |pwm|
 #include <Arduino.h>
 #include <stm32u5xx.h>
 
 #define LINK Serial1
 #define LINK_BAUD 921600
-#define SERVO Serial
-#define SERVO_BAUD 1000000
-#define SERVO_ID 1
 
 #define RING_FRAMES 2048          // 42.7 ms of stereo 32-bit words at 48 kHz = 16 KB
 #define DECIM 3                   // 48 kHz -> 16 kHz
@@ -60,6 +60,8 @@
 #define ACT_HZ 20000u
 #define FAN_HZ 25000u
 #define CMD_TIMEOUT_MS 100u
+#define SERVO_US_MIN 500u
+#define SERVO_US_MAX 2500u
 #define STATUS_MS 10u
 #define SENSE_MV_FULL 3300u       // ADC full scale
 
@@ -215,7 +217,7 @@ static int16_t act_pwm;                      // applied, -1000..1000
 static bool act_brake, valve_open, fan_on, cmd_timed_out = true;
 static uint16_t max_pwm = 1000, fan_duty;
 static uint32_t last_cmd_ms;
-static uint16_t valve_pos_open = 590, valve_pos_closed = 512, valve_move_ms = 50;
+static uint16_t valve_pos_open = 1800, valve_pos_closed = 1200, valve_move_ms = 150;   // [us], [ms]
 
 static volatile uint32_t tach_pulses;
 static uint32_t tach_last, rpm_ms;
@@ -225,14 +227,9 @@ static uint32_t sense_sum, sense_n, sense_peak;
 static uint16_t sense_mv, sense_peak_mv;
 
 static uint8_t btn_presses, btn_stable = 1, btn_run;
-static uint32_t io_ms, status_ms, servo_ms;
+static uint32_t io_ms, status_ms;
 
-static uint16_t servo_echo;                  // bytes of our own transmission still to come back
-static uint8_t srx[16];
-static uint8_t srx_n;
-static int16_t servo_pos = -1;
-static uint32_t servo_ok_ms;
-static bool servo_ok;
+static float servo_us, servo_goal_us, servo_step_us;   // pulse now, where it goes, change per ms
 
 static void pin_af(GPIO_TypeDef *g, uint32_t pin, uint32_t af) {
   g->MODER = (g->MODER & ~(3u << (2 * pin))) | (2u << (2 * pin));
@@ -313,61 +310,48 @@ static void fan_set(bool on, uint16_t duty) {
 
 static void tach_isr() { tach_pulses++; }
 
-// ---- SCS0009 (Feetech SCS protocol, big endian registers) ----
+// ---- SG90 on TIM16 CH1N (PB6, AF14): 1 MHz count, 20 ms period, the compare is the pulse in us ----
 
-static void servo_send(const uint8_t *body, uint8_t n) {   // body: ID LEN INST params, no header / checksum
-  uint8_t b[24] = {0xFF, 0xFF};
-  uint8_t sum = 0;
-  for (uint8_t i = 0; i < n; i++) { b[2 + i] = body[i]; sum += body[i]; }
-  b[2 + n] = (uint8_t)~sum;
-  uint8_t len = n + 3;
-  while (SERVO.available()) SERVO.read();     // stale bytes
-  srx_n = 0;
-  digitalWrite(PIN_SERVO_TXEN_N, LOW);
-  SERVO.write(b, len);
-  // The receive side hears the bus, our own bytes included: once they are all back, the last one has
-  // left the shift register and the transmitter can be let go.
-  uint32_t t0 = micros();
-  uint8_t got = 0;
-  while (got < len && micros() - t0 < 1000u) {
-    if (SERVO.available()) { SERVO.read(); got++; }
+static void servo_setup() {
+  RCC->AHB2ENR1 |= RCC_AHB2ENR1_GPIOBEN;
+  RCC->APB2ENR |= RCC_APB2ENR_TIM16EN;
+  (void)RCC->APB2ENR;
+  TIM_TypeDef *t = TIM16;
+  t->CR1 = 0;
+  t->DIER = 0;                                // the core's counter driver must not get interrupts
+  t->PSC = timer_clk(true) / 1000000u - 1u;
+  t->ARR = 20000u - 1u;
+  t->CCR1 = 0;                                // no pulse until the first goal
+  t->CCMR1 = (6u << TIM_CCMR1_OC1M_Pos) | TIM_CCMR1_OC1PE;
+  t->CCER = TIM_CCER_CC1NE;                   // only the N output: with CC1E off it follows OC1REF
+  t->BDTR = TIM_BDTR_MOE;
+  t->EGR = TIM_EGR_UG;
+  t->CR1 = TIM_CR1_ARPE | TIM_CR1_CEN;
+  pin_af(GPIOB, 6, 14);                       // TIM16_CH1N
+}
+
+static uint16_t servo_clamp(uint16_t us) {
+  return us < SERVO_US_MIN ? SERVO_US_MIN : (us > SERVO_US_MAX ? SERVO_US_MAX : us);
+}
+
+static void servo_goal(uint16_t us, uint16_t ms) {   // move linearly to `us` over `ms`
+  servo_goal_us = servo_clamp(us);
+  if (servo_us == 0.0f || ms == 0) {
+    servo_us = servo_goal_us;
+    servo_step_us = 0.0f;
+  } else {
+    float d = servo_goal_us - servo_us;
+    servo_step_us = (d < 0 ? -d : d) / ms;
   }
-  if (got < len) delayMicroseconds(20);       // no echo (nothing connected): wait out the last byte
-  digitalWrite(PIN_SERVO_TXEN_N, HIGH);
+  TIM16->CCR1 = (uint32_t)(servo_us + 0.5f);
 }
 
-static void servo_torque(bool on) {
-  const uint8_t body[] = {SERVO_ID, 4, 0x03, 0x28, (uint8_t)(on ? 1 : 0)};
-  servo_send(body, sizeof(body));
-}
-
-static void servo_goal(uint16_t pos, uint16_t ms) {
-  const uint8_t body[] = {SERVO_ID, 9, 0x03, 0x2A, (uint8_t)(pos >> 8), (uint8_t)pos,
-                          (uint8_t)(ms >> 8), (uint8_t)ms, 0, 0};
-  servo_send(body, sizeof(body));
-}
-
-static void servo_ask_position() {
-  const uint8_t body[] = {SERVO_ID, 4, 0x02, 0x38, 2};
-  servo_send(body, sizeof(body));
-}
-
-static void servo_poll() {                    // collect the answer to servo_ask_position
-  while (SERVO.available() && srx_n < sizeof(srx)) {
-    uint8_t c = SERVO.read();
-    if (srx_n < 2 && c != 0xFF) { srx_n = 0; continue; }
-    srx[srx_n++] = c;
-    if (srx_n == 8) {                         // FF FF ID 04 ERR H L SUM
-      uint8_t sum = srx[2] + srx[3] + srx[4] + srx[5] + srx[6];
-      if (srx[2] == SERVO_ID && srx[3] == 4 && (uint8_t)~sum == srx[7]) {
-        servo_pos = (int16_t)((srx[5] << 8) | srx[6]);
-        servo_ok_ms = millis();
-        servo_ok = true;
-      }
-      srx_n = 0;
-    }
-  }
-  if (srx_n >= sizeof(srx)) srx_n = 0;
+static void servo_tick() {                    // every millisecond
+  if (servo_us == servo_goal_us) return;
+  float d = servo_goal_us - servo_us;
+  if (servo_step_us <= 0.0f || (d < 0 ? -d : d) <= servo_step_us) servo_us = servo_goal_us;
+  else servo_us += d < 0 ? -servo_step_us : servo_step_us;
+  TIM16->CCR1 = (uint32_t)(servo_us + 0.5f);
 }
 
 static void valve_set(bool open) {
@@ -379,7 +363,7 @@ static void valve_set(bool open) {
 
 static void io_setup() {
   pinMode(PIN_SERVO_TXEN_N, OUTPUT);
-  digitalWrite(PIN_SERVO_TXEN_N, HIGH);
+  digitalWrite(PIN_SERVO_TXEN_N, LOW);          // the buffer passes D1 to the servo all the time
   pinMode(PIN_FAN_EN, OUTPUT);
   digitalWrite(PIN_FAN_EN, LOW);
   pinMode(PIN_VALVE, OUTPUT);
@@ -392,9 +376,8 @@ static void io_setup() {
   fan_setup();
   act_set(0, false);
   fan_set(false, 0);
-  SERVO.begin(SERVO_BAUD);
-  servo_torque(true);
-  servo_goal(valve_pos_closed, 200);
+  servo_setup();
+  servo_goal(valve_pos_closed, 0);
 }
 
 // ---- link -------------------------------------------------------------------------
@@ -448,10 +431,9 @@ static void send_status(uint32_t now) {
   s.isense_peak_mv = sense_peak_mv;
   s.fan_rpm = fan_rpm;
   s.buttons = btn_presses;
-  s.flags = (btn_stable ? 0 : 1) | (valve_open ? 2 : 0) | (fan_on ? 4 : 0) | (cmd_timed_out ? 8 : 0)
-          | (servo_ok ? 0 : 16);
+  s.flags = (btn_stable ? 0 : 1) | (valve_open ? 2 : 0) | (fan_on ? 4 : 0) | (cmd_timed_out ? 8 : 0);
   s.pwm = act_brake ? 0 : act_pwm;
-  s.servo_pos = servo_pos;
+  s.servo_pos = (int16_t)(servo_us + 0.5f);
   uint32_t age = now - last_cmd_ms;
   s.cmd_age_ms = age > 65535u ? 65535u : (uint16_t)age;
   send_packet('Y', (const uint8_t *)&s, sizeof(s), nullptr, 0);
@@ -463,10 +445,10 @@ static void info() {
            clk_name, (unsigned long)cyc_per_us, streaming, (unsigned long)frames_now(),
            (unsigned long)overruns, (unsigned long)max_loop_us);
   send_text(s);
-  snprintf(s, sizeof(s), "IO act_top %lu (%lu Hz) fan_top %lu (%lu Hz) max_pwm %u valve open %u closed %u move %u ms servo %s pos %d",
+  snprintf(s, sizeof(s), "IO act_top %lu (%lu Hz) fan_top %lu (%lu Hz) max_pwm %u valve open %u closed %u us move %u ms servo SG90 %d us",
            (unsigned long)act_top, (unsigned long)(timer_clk(false) / act_top), (unsigned long)fan_top,
            (unsigned long)(timer_clk(true) / fan_top), max_pwm, valve_pos_open, valve_pos_closed, valve_move_ms,
-           servo_ok ? "ok" : "silent", servo_pos);
+           (int)(servo_us + 0.5f));
   send_text(s);
 }
 
@@ -507,8 +489,9 @@ static void commands() {
       memcpy(&valve_pos_open, b + 1, 2);
       memcpy(&valve_pos_closed, b + 3, 2);
       memcpy(&valve_move_ms, b + 5, 2);
-      servo_torque(true);
-      servo_goal(valve_open ? valve_pos_open : valve_pos_closed, 200);
+      valve_pos_open = servo_clamp(valve_pos_open);
+      valve_pos_closed = servo_clamp(valve_pos_closed);
+      servo_goal(valve_open ? valve_pos_open : valve_pos_closed, 300);
     } else if (c == 'L') {
       uint16_t m;
       memcpy(&m, b + 1, 2);
@@ -520,17 +503,18 @@ static void commands() {
   }
 }
 
-// Every millisecond: current sense, button. Every 10 ms: status. Command watchdog, servo, fan speed.
+// Every millisecond: current sense, button, servo ramp. Every 10 ms: status. Command watchdog, fan speed.
 static void io_tick() {
   uint32_t now = millis();
-  servo_poll();
   if (!cmd_timed_out && now - last_cmd_ms > CMD_TIMEOUT_MS) {
     act_set(0, false);                         // the controller went quiet: stop and shut the air
     valve_set(false);
+    fan_set(false, 0);
     cmd_timed_out = true;
   }
   if (now == io_ms) return;
   io_ms = now;
+  servo_tick();
   uint32_t mv = (uint32_t)analogRead(A0) * SENSE_MV_FULL / 4095u;
   sense_sum += mv;
   sense_n++;
@@ -550,11 +534,6 @@ static void io_tick() {
     fan_rpm = (uint16_t)((p - tach_last) * 60u);
     tach_last = p;
     rpm_ms = now;
-  }
-  if (now - servo_ms >= 100u) {
-    servo_ms = now;
-    if (now - servo_ok_ms > 500u) servo_ok = false;
-    servo_ask_position();
   }
   if (now - status_ms >= STATUS_MS) {
     status_ms = now;
