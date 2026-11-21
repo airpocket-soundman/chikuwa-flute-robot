@@ -581,7 +581,10 @@ static void pump() {
     frames_seen = total / 2 - RING_FRAMES / 2;
     done = frames_seen * 2;
   }
-  while (done + 2 <= total) {
+  // Word counts wrap at 2^32 (12.4 h at 96 k words/s): compare the difference, never the counts.
+  // `done + 2 <= total` turned true for about 2^31 frames when `done` wrapped first, and the loop
+  // then ran for hours without serving commands or sending status.
+  while (total - done >= 2) {
     uint32_t i = done % (RING_FRAMES * 2);
     int32_t l = (int32_t)ring[i + left_parity];
     if (frames_seen == 64) {                              // pick the slot that carries sound
