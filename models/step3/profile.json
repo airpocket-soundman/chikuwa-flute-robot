@@ -1,0 +1,19 @@
+{
+  "name": "step3",
+  "title": "step3: 耳も NN（アクチュエータ・タンギング・耳がすべて NN）",
+  "ear": "nn",
+  "ear_runtime": "ear_01_runtime.npz",
+  "doc": "docs/step3.md",
+  "runtime": "nn_f80_t3_01_runtime.npz",
+  "valve_runtime": "valve_t3_01_runtime.npz",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  }
+}

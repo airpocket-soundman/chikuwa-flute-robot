@@ -1,0 +1,27 @@
+{
+  "test_frames": 32524,
+  "labelled_voiced": 19875,
+  "quiet": 1324,
+  "unsure": 11325,
+  "nn": {
+    "within_25c_of_voiced": 0.965937106918239,
+    "median_error_cents": 1.8881881543692316,
+    "missed_voiced": 0.00025157232704402514,
+    "false_voiced_on_quiet": 0.0037764350453172208,
+    "heard_on_unsure": 0.23699779249448125
+  },
+  "yin": {
+    "within_25c_of_voiced": 0.9671949685534591,
+    "median_error_cents": 3.867973905880035,
+    "missed_voiced": 0.024654088050314465,
+    "false_voiced_on_quiet": 0.0,
+    "heard_on_unsure": 0.05704194260485651
+  },
+  "data": "runs/ear/dataset.npz",
+  "out": "runs/ear/ear_01",
+  "epochs": 12,
+  "batch": 512,
+  "lr": 0.001,
+  "seed": 7,
+  "device": "cuda"
+}

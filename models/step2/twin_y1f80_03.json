@@ -1,0 +1,33 @@
+{
+  "twin": {
+    "torque_gain": 12.413808822631836,
+    "torque_tau_s": 0.007052918896079063,
+    "inertia": 1.0,
+    "coulomb_friction": 1.803084135055542,
+    "viscous_friction": 12.69744873046875,
+    "max_velocity_strokes_s": 0.8695358037948608,
+    "flute_offset_cents": -1.3672561645507812,
+    "flute_scale": 1.0,
+    "tube_offset_m": -0.0017048872541636229,
+    "temp_offset_c": -0.5201807618141174,
+    "deadband": 0.27327051758766174,
+    "hearing_delay_steps": 0.0
+  },
+  "heard_mae_cents_per_record": [
+    21.306522369384766
+  ],
+  "delay_steps": 0,
+  "records": [
+    "runs/real/calibration_y1f80_02.npz",
+    "runs/real/calibration_y1f80_mid_01.npz",
+    "runs/real/eval/20261122_205100_step1_f80_doremi.npz",
+    "runs/real/eval/20261122_205100_step1_f80_scale.npz",
+    "runs/real/eval/20261122_205410_step1_f80_doremi.npz",
+    "runs/real/eval/20261122_205410_step1_f80_scale.npz",
+    "runs/real/eval/20261122_211159_step1_f80_chromatic.npz",
+    "runs/real/eval/20261122_211159_step1_f80_leaps_slow.npz"
+  ],
+  "fit_steps": 300,
+  "temp_c": 25.0,
+  "plant": "yamabiko1_fan80"
+}
