@@ -24,7 +24,15 @@ CALIBRATION_YAMABIKO1_FULL = ([(level, 25) for level in (.30, .40, .45, .50, .55
                                (.8, 80), (0.0, 30), (-.8, 80), (-1.0, 40),
                                (.6, 150), (0.0, 30), (-.6, 150), (-1.0, 60),
                                (.7, 40), (0.0, 20), (.7, 40), (0.0, 20), (.7, 40), (0.0, 20), (-1.0, 100)])
-PLANS = {"default": CALIBRATION, "yamabiko1": CALIBRATION_YAMABIKO1, "yamabiko1_full": CALIBRATION_YAMABIKO1_FULL}
+# The first rig at the moderate PWM the networks use (0.55..0.8): short runs out and back at each level
+# from a few starting points, so the twin learns the speed just above the deadband (about 19 s).
+CALIBRATION_YAMABIKO1_MID = ([(-1.0, 100)] +
+                             [seg for level in (.55, .6, .65, .7, .75, .8)
+                              for seg in ((level, 40), (0.0, 15), (level, 40), (0.0, 15), (-level, 40), (0.0, 15),
+                                          (-1.0, 60))] +
+                             [(.62, 30), (0.0, 10), (.58, 30), (0.0, 10), (.66, 30), (0.0, 10), (-.6, 60), (-1.0, 80)])
+PLANS = {"default": CALIBRATION, "yamabiko1": CALIBRATION_YAMABIKO1, "yamabiko1_full": CALIBRATION_YAMABIKO1_FULL,
+         "yamabiko1_mid": CALIBRATION_YAMABIKO1_MID}
 
 
 def calibration_segments(max_pwm: float = 1.0, sweep: float = 1.0, plan: str = "default"):

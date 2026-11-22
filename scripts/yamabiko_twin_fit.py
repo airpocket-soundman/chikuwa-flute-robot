@@ -41,6 +41,26 @@ def concatenate(logs):
     return PlayLog(*(padded(name) for name in ("target_cents", "target_voice", "pwm", "valve", "heard", "valid")))
 
 
+def joined(logs, homing_steps=150):
+    """All rows of all records as one row, a homing run before each (the twin starts from home every time)."""
+    rows = []
+    for log in logs:
+        for r in range(log.pwm.shape[0]):
+            rows.append({k: getattr(log, k)[r:r + 1] for k in ("target_cents", "target_voice", "pwm", "valve", "heard", "valid")})
+    parts = {k: [] for k in rows[0]}
+    for i, row in enumerate(rows):
+        if i:
+            like = row["pwm"]
+            parts["pwm"].append(-torch.ones(1, homing_steps, dtype=like.dtype, device=like.device))
+            for k in ("target_cents", "valve", "heard"):
+                parts[k].append(torch.zeros(1, homing_steps, dtype=row[k].dtype, device=like.device))
+            for k in ("target_voice", "valid"):
+                parts[k].append(torch.zeros(1, homing_steps, dtype=row[k].dtype, device=like.device))
+        for k in row:
+            parts[k].append(row[k])
+    return PlayLog(*(torch.cat(parts[k], 1) for k in ("target_cents", "target_voice", "pwm", "valve", "heard", "valid")))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("calibration")
@@ -48,6 +68,10 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--checkpoint", default="runs/yamabiko_residual_v1.pt")
     ap.add_argument("--fit-steps", type=int, default=300)
+    ap.add_argument("--joint", action="store_true",
+                    help="fit the calibration and the songs as ONE rig: the records joined into one, each after "
+                         "a homing run (PWM -1 for 1.5 s, nothing heard); otherwise every record is fitted alone "
+                         "and the calibration's fit is the twin")
     ap.add_argument("--temp", type=float, default=None, help="room temperature [C] if measured")
     ap.add_argument("--plant", default="realistic", help="realistic (simulated rigs) or yamabiko1 (the first real rig)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -57,7 +81,8 @@ def main():
     logs = load_logs(args.calibration, device)
     for path in args.songs:
         logs += load_logs(path, device)
-    fit = TwinFitter(plant).fit(concatenate(logs), steps=args.fit_steps)
+    log = joined(logs) if args.joint else concatenate(logs)
+    fit = TwinFitter(plant).fit(log, steps=args.fit_steps)
     twin = fit.parameters
     # Every row is the same rig: keep the calibration row as the twin.
     values = {name: float(value[0]) for name, value in vars(twin).items() if value is not None}
