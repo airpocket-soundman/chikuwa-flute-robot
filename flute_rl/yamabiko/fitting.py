@@ -90,38 +90,50 @@ class TwinFitter:
         return shifted
 
     def fit(self, log: PlayLog, delays=(0, 1, 2, 3), steps: int = 300, lr: float = .05) -> TwinFit:
+        """Fit every rig once per candidate delay, all candidates in one batch (the delay only shifts the
+        predicted track), and keep the candidate with the smallest heard error per rig."""
         batch, length = log.pwm.shape
         device, dtype = log.pwm.device, log.pwm.dtype
-        nominal = self.plant.parameters(batch, device, dtype)
-        best = None
-        for delay in delays:
-            raw = {name: torch.zeros(batch, device=device, dtype=dtype, requires_grad=True) for name in FITTED}
-            with torch.no_grad():
-                raw["deadband"].fill_(float(torch.logit(torch.tensor(max(self.plant.config.deadband, .02) / .6))))
-            optimizer = torch.optim.Adam(raw.values(), lr=lr)
-            for step in range(steps):
-                horizon = min(length, 40 + (length - 40) * step // max(1, int(steps * .6)))
-                params = self._unpack(raw, nominal)
-                predicted = self.predict(params, log.pwm[:, :horizon], delay)
-                mask = log.valid[:, :horizon]
-                error = (predicted - log.heard[:, :horizon]) / 100
-                loss = F.smooth_l1_loss(error[mask], torch.zeros_like(error[mask]), beta=.2)
-                optimizer.zero_grad(set_to_none=True); loss.backward(); optimizer.step()
-            with torch.no_grad():
-                params = self._unpack(raw, nominal)
-                predicted = self.predict(params, log.pwm, delay)
-                error = ((predicted - log.heard).abs() * log.valid).sum(1) / log.valid.sum(1).clamp_min(1)
-            candidate = TwinFit(params, torch.full((batch,), delay, device=device, dtype=torch.long), error)
-            if best is None:
-                best = candidate
-            else:
-                better = candidate.heard_mae < best.heard_mae
-                merged = {k: (torch.where(better, getattr(candidate.parameters, k), getattr(best.parameters, k))
-                              if torch.is_tensor(getattr(best.parameters, k)) and getattr(best.parameters, k).dim() == 1
-                              else getattr(best.parameters, k))
-                          for k in vars(best.parameters)}
-                best = TwinFit(type(best.parameters)(**merged), torch.where(better, candidate.delay, best.delay),
-                               torch.minimum(candidate.heard_mae, best.heard_mae))
+        k = len(delays)
+        rows = lambda x: x.repeat(k, *([1] * (x.dim() - 1)))          # (k*B, ...), delay-major
+        pwm, heard, valid = rows(log.pwm), rows(log.heard), rows(log.valid)
+        delay_of_row = torch.tensor(delays, device=device).repeat_interleave(batch)
+        nominal = self.plant.parameters(k * batch, device, dtype)
+        raw = {name: torch.zeros(k * batch, device=device, dtype=dtype, requires_grad=True) for name in FITTED}
+        with torch.no_grad():
+            raw["deadband"].fill_(float(torch.logit(torch.tensor(max(self.plant.config.deadband, .02) / .6))))
+        optimizer = torch.optim.Adam(raw.values(), lr=lr)
+
+        def shifted(params, upto):
+            emitted = self.predict(params, pwm[:, :upto], 0)
+            parts = []
+            for j, delay in enumerate(delays):
+                part = emitted[j * batch:(j + 1) * batch]
+                if delay:
+                    part = torch.cat([part[:, :1].expand(-1, int(delay)), part[:, :upto - int(delay)]], 1)
+                parts.append(part)
+            return torch.cat(parts, 0)
+
+        for step in range(steps):
+            horizon = min(length, 40 + (length - 40) * step // max(1, int(steps * .6)))
+            params = self._unpack(raw, nominal)
+            predicted = shifted(params, horizon)
+            mask = valid[:, :horizon]
+            error = (predicted - heard[:, :horizon]) / 100
+            # the mean over each row's own valid steps, summed over rows: every candidate learns as if alone
+            per_row = F.smooth_l1_loss(error, torch.zeros_like(error), beta=.2, reduction="none") * mask
+            loss = (per_row.sum(1) / mask.sum(1).clamp_min(1)).sum()
+            optimizer.zero_grad(set_to_none=True); loss.backward(); optimizer.step()
+        with torch.no_grad():
+            params = self._unpack(raw, nominal)
+            predicted = shifted(params, length)
+            error = ((predicted - heard).abs() * valid).sum(1) / valid.sum(1).clamp_min(1)
+        error = error.view(k, batch)
+        pick = error.argmin(0)                                         # (B,) best candidate per rig
+        index = pick * batch + torch.arange(batch, device=device)
+        chosen = {name: (value[index] if torch.is_tensor(value) and value.dim() == 1 and value.shape[0] == k * batch
+                         else value) for name, value in vars(params).items()}
+        best = TwinFit(type(params)(**chosen), delay_of_row[index], error.min(0).values)
         best.parameters.hearing_delay_steps = best.delay
         return best
 

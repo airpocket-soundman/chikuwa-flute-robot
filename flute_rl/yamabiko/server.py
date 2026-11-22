@@ -109,8 +109,8 @@ class Server:
         if self.pwm or self.valve or self.fan_on or self.brake:
             self.log(f"outputs to safe{': ' + why if why else ''}")
         self.pwm, self.brake, self.valve = 0.0, False, False
-        if self.fan_on:
-            self.link.fan(False, 0.0)
+        # always: calibrate and play switch the fan on through the link, not through fan_on
+        self.link.fan(False, 0.0)
         self.fan_on, self.fan_duty = False, 0.0
         self.link.command(0.0, False)
         self.owner = None
@@ -224,7 +224,8 @@ class Server:
         from .calibration import calibrate_real
         self.take(client)
         rig = self._rig(req)
-        self.link.fan(True, float(req.get("fan", .7)))
+        self.fan_on, self.fan_duty = True, float(req.get("fan", .7))
+        self.link.fan(True, self.fan_duty)
         try:
             record = calibrate_real(rig, max_pwm=float(req.get("max_pwm", self.max_pwm)),
                                     sweep=float(req.get("sweep", 1.0)), homing_seconds=float(req.get("homing_seconds", 1.3)),
@@ -247,7 +248,8 @@ class Server:
         target = np.load(req["target"])
         cents, voice = target["cents"].astype(np.float64), target["voice"].astype(bool)
         rig = self._rig(req)
-        self.link.fan(True, float(req.get("fan", .7)))
+        self.fan_on, self.fan_duty = True, float(req.get("fan", .7))
+        self.link.fan(True, self.fan_duty)
         # the fan spins up with the valve shut (no sound) before the first note; the steps keep the
         # firmware's 100 ms command watchdog fed
         for _ in range(int(round(float(req.get("warmup_s", 3.0)) / STEP_S))):

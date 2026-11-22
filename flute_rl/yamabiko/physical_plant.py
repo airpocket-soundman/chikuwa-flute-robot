@@ -19,6 +19,7 @@ import math
 import torch
 
 A4_HZ = 440.0
+STICTION_SPEED = .02   # strokes/s: below about this a plunger counts as at rest (static friction)
 SPEED_OF_SOUND_25C = 331.3 + 0.606 * 25.0
 
 
@@ -72,6 +73,14 @@ class PhysicalPlantConfig:
     # the same numbers (features.py holds the defaults for older code).
     feature_center: float = 1300.0
     feature_scale: float = 600.0
+    # Static friction: the deadband holds a plunger at rest; once it moves, the band drops to this
+    # fraction of it (1.0: one band, as before).  The first rig needs |PWM| > 0.5 to start but then runs
+    # at a speed proportional to |PWM| - 0.2.
+    kinetic_deadband_ratio: float = 1.0
+    # The residual performer's PD output below this is no command (0.01 is about a cent on the simulator);
+    # with static friction every command is at least the deadband, so a small hold zone stops the plunger
+    # from dithering around the note.
+    hold_u: float = .01
 
     @classmethod
     def from_dict(cls, values: dict) -> "PhysicalPlantConfig":
@@ -99,7 +108,7 @@ class PhysicalPlantConfig:
         after runs of 0.1..0.7 s from home within 10 cent."""
         values = dict(home_cents=-80.0, low_cents=-40.0, high_cents=480.0, stroke_m=.12, deadband=.5,
                       max_velocity_strokes_s=1 / 1.39, motor_scale_range=(.6, 1.6),
-                      feature_center=220.0, feature_scale=260.0)
+                      feature_center=220.0, feature_scale=260.0, kinetic_deadband_ratio=.4, hold_u=.06)
         values.update(overrides)
         return cls.realistic(**values)
 
@@ -257,6 +266,9 @@ class DifferentiableMotorFlute:
         pwm = pwm.clamp(-1.0, 1.0)
         if params.deadband is not None and cfg.deadband > 0:
             band = params.deadband
+            if cfg.kinetic_deadband_ratio != 1.0:   # smooth: the full band at rest, the kinetic one moving
+                rest = torch.exp(-(state.velocity / STICTION_SPEED) ** 2)
+                band = band * (cfg.kinetic_deadband_ratio + (1.0 - cfg.kinetic_deadband_ratio) * rest)
             pwm = torch.sign(pwm) * torch.relu(pwm.abs() - band) / (1.0 - band)
         alpha = (cfg.dt / params.torque_tau_s).clamp(max=1.0)
         torque = state.torque + alpha * (params.torque_gain * pwm - state.torque)

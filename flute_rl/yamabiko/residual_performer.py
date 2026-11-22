@@ -109,7 +109,7 @@ class ResidualTwinPerformer(nn.Module):
                                     estimate.position[:, None]], 1)
             x_cmd = (base_aim + cfg.max_aim_offset * torch.tanh(self.planner(planner_in)[:, 0])).clamp(0, 1)
             u = (dcfg.kp * (x_cmd - estimate.position) - dcfg.kd * estimate.velocity).clamp(-1, 1)
-            pwm_det = torch.sign(u) * (band + (1 - band) * u.abs()) * (u.abs() > .01).to(dtype)
+            pwm_det = torch.sign(u) * (band + (1 - band) * u.abs()) * (u.abs() > plant.config.hold_u).to(dtype)
             heard_n = torch.where(valid, normalize(heard), torch.zeros_like(heard))
             features = torch.stack([x_cmd, estimate.position, estimate.velocity, heard_n, valid.to(dtype),
                                     torch.where(valid, normalize(cents[:, t]) - heard_n, torch.zeros_like(heard)),

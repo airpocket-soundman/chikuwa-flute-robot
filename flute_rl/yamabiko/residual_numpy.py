@@ -60,7 +60,8 @@ def export(model, twin, row: int = 0):
         dcfg.anticipation_lag_steps, dcfg.hold_fraction, dcfg.note_threshold_cents, dcfg.homing_steps,
         pcfg.dt, pcfg.stroke_m, pcfg.temp_c, pcfg.effective_length_m, pcfg.min_length_m, pcfg.deadband,
         pcfg.max_velocity_strokes_s, 1.0 if pcfg.flute_model == "closed_tube" else 0.0,
-        pcfg.low_cents, pcfg.pitch_span_cents, pcfg.feature_center, pcfg.feature_scale], np.float64)
+        pcfg.low_cents, pcfg.pitch_span_cents, pcfg.feature_center, pcfg.feature_scale,
+        pcfg.kinetic_deadband_ratio, pcfg.hold_u], np.float64)
     return arrays
 
 
@@ -71,7 +72,7 @@ CONSTANTS = ("hidden", "song_slot", "song_rate", "max_aim_offset", "max_pwm_offs
              "observer_velocity_gain", "anticipation_speed", "anticipation_lag_steps", "hold_fraction",
              "note_threshold_cents", "homing_steps", "dt", "stroke_m", "temp_c", "effective_length_m",
              "min_length_m", "deadband", "max_velocity_strokes_s", "closed_tube", "low_cents", "pitch_span_cents",
-             "feature_center", "feature_scale")
+             "feature_center", "feature_scale", "kinetic_deadband_ratio", "hold_u")
 
 
 def sigmoid(x):
@@ -92,6 +93,8 @@ class Runtime:
         self.c = dict(zip(CONSTANTS, self.a["constants"].tolist()))
         self.c.setdefault("feature_center", PITCH_CENTER)     # runtimes exported before the field existed
         self.c.setdefault("feature_scale", PITCH_SCALE)
+        self.c.setdefault("kinetic_deadband_ratio", 1.0)
+        self.c.setdefault("hold_u", .01)
         self.center, self.scale = self.c["feature_center"], self.c["feature_scale"]
         self.t = dict(zip(TWIN_FIELDS, self.a["twin"].tolist()))
         c, t = self.c, self.t
@@ -119,6 +122,9 @@ class Runtime:
         pwm = min(max(pwm, -1.0), 1.0)
         if c["deadband"] > 0:
             band = t["deadband"]
+            ratio = c["kinetic_deadband_ratio"]
+            if ratio != 1.0:
+                band *= ratio + (1.0 - ratio) * math.exp(-(self.velocity / .02) ** 2)
             pwm = math.copysign(max(abs(pwm) - band, 0.0) / (1.0 - band), pwm)
         alpha = min(c["dt"] / t["torque_tau_s"], 1.0)
         self.torque += alpha * (t["torque_gain"] * pwm - self.torque)
@@ -192,7 +198,7 @@ class Runtime:
         planner_in = np.concatenate([self._window(t), read, [base_aim, self.position]])
         x_cmd = min(max(base_aim + c["max_aim_offset"] * math.tanh(self._mlp("planner", planner_in, (0, 2, 4))[0]), 0.0), 1.0)
         u = min(max(c["kp"] * (x_cmd - self.position) - c["kd"] * self.velocity, -1.0), 1.0)
-        pwm_det = math.copysign(self.band + (1 - self.band) * abs(u), u) if abs(u) > .01 else 0.0
+        pwm_det = math.copysign(self.band + (1 - self.band) * abs(u), u) if abs(u) > c["hold_u"] else 0.0
         heard_n = (self.heard - self.center) / self.scale if self.valid else 0.0
         target_n = (self.cents[t] - self.center) / self.scale
         features = np.array([x_cmd, self.position, self.velocity, heard_n, float(self.valid),
