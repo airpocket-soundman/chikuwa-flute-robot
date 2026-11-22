@@ -234,3 +234,63 @@ class Runtime:
         proposal = np.tanh(self._mlp("writer.candidate", np.concatenate([x, self.song[then]]), (0, 2)))
         rate = c["song_rate"] * sigmoid(self.a["writer.gate.w"] @ x + self.a["writer.gate.b"])[0]
         self.song[then] = self.song[then] + rate * (proposal - self.song[then])
+
+
+# ----- the network-only performer (nn_performer.NNTwinPerformer) -----------------------------------------
+
+def export_nn(model, twin, row=0):
+    """NumPy arrays of an NNTwinPerformer: the residual layout's constants and twin (for the motor model and
+    the feature range) plus the network under ``nn.``.  Runtime classes: :func:`runtime_for`."""
+    from .residual_performer import ResidualTwinPerformer
+    arrays = export(ResidualTwinPerformer(model.plant).to(next(model.parameters()).device), twin, row)
+    arrays = {k: v for k, v in arrays.items() if k in ("twin", "constants")}
+    arrays.update(_linear("nn.inp", model.inp))
+    arrays.update({"nn.cell.w_ih": model.cell.weight_ih.detach().cpu().numpy().astype(np.float32),
+                   "nn.cell.w_hh": model.cell.weight_hh.detach().cpu().numpy().astype(np.float32),
+                   "nn.cell.b_ih": model.cell.bias_ih.detach().cpu().numpy().astype(np.float32),
+                   "nn.cell.b_hh": model.cell.bias_hh.detach().cpu().numpy().astype(np.float32)})
+    for index, layer in enumerate(model.head):
+        if hasattr(layer, "weight"):
+            arrays.update(_linear(f"nn.head.{index}", layer))
+    return arrays
+
+
+class NNRuntime(Runtime):
+    """NNTwinPerformer on NumPy: the same calls as Runtime (prepare, command, observe, cents_at)."""
+
+    def __init__(self, arrays):
+        super().__init__(arrays)
+        self.nn_hidden = self.a["nn.cell.w_hh"].shape[1]
+
+    def prepare(self, cents, voice, keep_song_memory=True):
+        self.cents = np.asarray(cents, np.float64); self.voice = np.asarray(voice, bool)
+        self.position, self.velocity, self.torque = 0.0, 0.0, -self.t["torque_gain"]
+        self.fast = np.zeros(self.nn_hidden, np.float32)
+        self.heard, self.valid, self.pwm = 0.0, False, 0.0
+
+    def command(self, t):
+        steps = len(self.cents)
+        ids = [min(t + k, steps - 1) for k in WINDOW]
+        heard_n = (self.heard - self.center) / self.scale if self.valid else 0.0
+        gap = ((self.cents[t] - self.center) / self.scale - heard_n) if self.valid else 0.0
+        x = np.concatenate([(self.cents[ids] - self.center) / self.scale, self.voice[ids].astype(np.float64),
+                            [heard_n, float(self.valid), gap, self.pwm, self.position, self.velocity,
+                             float(self.voice[t])]]).astype(np.float32)
+        x = np.tanh(self.a["nn.inp.w"] @ x + self.a["nn.inp.b"])
+        gi = self.a["nn.cell.w_ih"] @ x + self.a["nn.cell.b_ih"]; gh = self.a["nn.cell.w_hh"] @ self.fast + self.a["nn.cell.b_hh"]
+        h = self.nn_hidden
+        r = sigmoid(gi[:h] + gh[:h]); z = sigmoid(gi[h:2 * h] + gh[h:2 * h])
+        n = np.tanh(gi[2 * h:] + r * gh[2 * h:])
+        self.fast = ((1 - z) * n + z * self.fast).astype(np.float32)
+        y = silu(self.a["nn.head.0.w"] @ self.fast + self.a["nn.head.0.b"])
+        self.pwm = float(np.tanh(self.a["nn.head.2.w"] @ y + self.a["nn.head.2.b"])[0])
+        self.model_step(self.pwm)
+        return self.pwm, bool(self.voice[t])
+
+    def observe(self, heard, valid):
+        self.heard, self.valid = (float(heard) if valid else 0.0), bool(valid)
+
+
+def runtime_for(arrays):
+    """The runtime class an exported file needs."""
+    return NNRuntime(arrays) if "nn.inp.w" in arrays else Runtime(arrays)

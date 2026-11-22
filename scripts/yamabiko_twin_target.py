@@ -4,8 +4,9 @@
     python scripts/yamabiko_twin_target.py --list
     python scripts/yamabiko_twin_target.py --phrase chromatic --plant yamabiko1    # moved into the rig's range
 
-With ``--plant`` the phrase is moved to start at the rig's lowest target note and, when it spans more than
-the rig's range, its intervals are scaled down to fit (rounded to 10 cent).
+With ``--plant`` the phrase is transposed into the middle of the rig's range with every interval kept (a
+relative melody copy); a phrase wider than the range is refused.  The play can transpose it again to the
+pitch the flute sounds that day (``relative`` in the server's play).
 """
 from __future__ import annotations
 
@@ -27,6 +28,9 @@ def main():
     ap.add_argument("--phrase", default="four-step")
     ap.add_argument("--out", default=None)
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--notes", default=None,
+                    help="a phrase of your own instead: cents re A4, comma separated, 'r' for a rest")
+    ap.add_argument("--note-steps", type=int, default=40, help="--notes: length of each note [10 ms steps]")
     ap.add_argument("--plant", default=None, help="fit the phrase into this rig's range (e.g. yamabiko1)")
     args = ap.parse_args()
     specs = {s[0]: s for s in sample_specs()}
@@ -34,14 +38,24 @@ def main():
         for key, spec in specs.items():
             print(f"{key:18s} {spec[1]}: {spec[2]}")
         return
-    _, title, _, notes, durations = specs[args.phrase]
+    if args.notes:
+        notes = [None if n.strip() == "r" else float(n) for n in args.notes.split(",")]
+        title, durations = f"notes {args.notes}", [args.note_steps] * len(notes)
+        args.phrase = args.phrase if args.out else "custom"
+    else:
+        _, title, _, notes, durations = specs[args.phrase]
     if args.plant:
+        # relative melody copy: keep every interval, only transpose into the rig's range (centred)
         from flute_rl.yamabiko.physical_plant import PhysicalPlantConfig
         cfg = PhysicalPlantConfig.named(args.plant)
         sounding = [n for n in notes if n is not None]
         lo, span = min(sounding), max(sounding) - min(sounding)
-        scale = min(1.0, (cfg.high_cents - cfg.low_cents) / span) if span else 1.0
-        notes = [None if n is None else float(round(cfg.low_cents + (n - lo) * scale, -1)) for n in notes]
+        room = cfg.high_cents - cfg.low_cents
+        if span > room:
+            raise SystemExit(f"the phrase spans {span:.0f} cent, the rig only {room:.0f}: pick a narrower one")
+        shift = cfg.low_cents + (room - span) / 2 - lo
+        notes = [None if n is None else float(round(n + shift)) for n in notes]
+        scale = 1.0
         print(f"{args.plant}: notes {notes} (intervals x{scale:.2f})")
     cents, voice = score_track(note_sequence(notes, durations))
     cents, voice = pad(cents, voice, len(cents) + TAIL)

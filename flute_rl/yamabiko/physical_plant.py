@@ -81,6 +81,10 @@ class PhysicalPlantConfig:
     # with static friction every command is at least the deadband, so a small hold zone stops the plunger
     # from dithering around the note.
     hold_u: float = .01
+    # Probability that a step's pitch is lost while the motor drives (|PWM| above the deadband): the first
+    # rig's plunger motor is loud enough to hide the flute in about half the steps it runs.  Performers
+    # apply it (the plant does not see the command when it listens).
+    motor_masking: float = 0.0
 
     @classmethod
     def from_dict(cls, values: dict) -> "PhysicalPlantConfig":
@@ -108,7 +112,7 @@ class PhysicalPlantConfig:
         after runs of 0.1..0.7 s from home within 10 cent."""
         values = dict(home_cents=-80.0, low_cents=-40.0, high_cents=480.0, stroke_m=.12, deadband=.5,
                       max_velocity_strokes_s=1 / 1.39, motor_scale_range=(.6, 1.6),
-                      feature_center=220.0, feature_scale=260.0, kinetic_deadband_ratio=.4, hold_u=.06)
+                      feature_center=220.0, feature_scale=260.0, kinetic_deadband_ratio=.4, hold_u=.06, motor_masking=.5)
         values.update(overrides)
         return cls.realistic(**values)
 

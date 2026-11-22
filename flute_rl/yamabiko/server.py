@@ -242,9 +242,9 @@ class Server:
                 "pitch_cents": [float(heard.min()), float(heard.max())] if valid.any() else None}
 
     def cmd_play(self, client, req):
-        from .residual_numpy import Runtime
+        from .residual_numpy import runtime_for
         self.take(client)
-        runtime = Runtime(dict(np.load(req["runtime"])))
+        runtime = runtime_for(dict(np.load(req["runtime"])))
         target = np.load(req["target"])
         cents, voice = target["cents"].astype(np.float64), target["voice"].astype(bool)
         rig = self._rig(req)
@@ -258,10 +258,24 @@ class Server:
         max_cents = float(req.get("max_cents", cents[voice].max() + 250 if voice.any() else np.inf))
         errors, records = [], {}
         try:
+            shift = 0.0
             for play in range(int(req.get("repeats", 1))):
                 rig.resync()
                 for _ in range(int(round(float(req.get("homing_seconds", 1.3)) / STEP_S))):
                     rig.step(-1.0, False)
+                if play == 0 and req.get("relative", False):
+                    # a relative melody copy: sound the home note, and move the whole target by how far the
+                    # flute sounds from the twin's home today (the plunger stays pressed home meanwhile)
+                    heard_home = []
+                    for k in range(int(round(float(req.get("listen_seconds", .8)) / STEP_S))):
+                        h = float(rig.step(-.3, True)["heard"][0])
+                        if k * STEP_S > .3 and np.isfinite(h) and h <= max_cents:
+                            heard_home.append(h)
+                    rig.step(0.0, False)
+                    if len(heard_home) >= 10:
+                        shift = float(np.clip(np.median(heard_home) - runtime.cents_at(0.0), -150, 150))
+                        cents = cents + shift
+                        max_cents += shift
                 runtime.prepare(cents, voice, keep_song_memory=play > 0)
                 pwm_log, heard_log, valid_log = [], [], []
                 for t in range(len(cents)):
@@ -281,8 +295,8 @@ class Server:
         out = req.get("out")
         if out:
             pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(out, count=len(errors), **records)
-        return {"heard_error_cents": errors, "late_steps": rig.late_steps, "out": out}
+            np.savez_compressed(out, count=len(errors), shift_cents=shift, **records)
+        return {"heard_error_cents": errors, "late_steps": rig.late_steps, "out": out, "shift_cents": shift}
 
     def _rig(self, req):
         rig = RealRig(self.link, flip=bool(req.get("flip", False)), max_pwm=min(float(req.get("max_pwm", self.max_pwm)),

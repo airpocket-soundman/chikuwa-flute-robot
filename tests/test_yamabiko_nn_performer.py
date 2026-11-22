@@ -1,0 +1,53 @@
+import numpy as np
+import torch
+
+from flute_rl.yamabiko.nn_performer import NNTwinPerformer
+from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig
+from flute_rl.yamabiko.residual_numpy import NNRuntime, export_nn, runtime_for
+
+
+def _setup():
+    torch.manual_seed(0)
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.yamabiko1())
+    model = NNTwinPerformer(plant).double()
+    twin = plant.parameters(1, "cpu", torch.float64)
+    steps = 120
+    cents = torch.full((1, steps), 100.0, dtype=torch.float64); cents[:, 60:] = 300.0
+    voice = torch.ones(1, steps, dtype=torch.bool); voice[:, :10] = False
+    return plant, model, twin, cents, voice
+
+
+def test_numpy_runtime_matches_torch_step_by_step():
+    plant, model, twin, cents, voice = _setup()
+    rng = np.random.default_rng(1)
+    heard = 100.0 + 50 * rng.standard_normal(cents.shape[1])
+    valid = rng.random(cents.shape[1]) > .3
+    runtime = runtime_for(export_nn(model, twin))
+    assert isinstance(runtime, NNRuntime)
+    runtime.prepare(cents[0].numpy(), voice[0].numpy())
+    estimate, fast = model.start(1, "cpu", torch.float64, twin)
+    h = torch.zeros(1, dtype=torch.float64); v = torch.zeros(1, dtype=torch.bool); prev = torch.zeros(1, dtype=torch.float64)
+    with torch.no_grad():
+        for t in range(cents.shape[1]):
+            u, fast = model.act(model.features(cents, voice, t, h, v, prev, estimate), fast)
+            estimate = model.motor.step(estimate, u, twin)
+            pwm, valve = runtime.command(t)
+            assert abs(pwm - float(u)) < 1e-4, t
+            assert valve == bool(voice[0, t])
+            runtime.observe(heard[t], bool(valid[t]))
+            h = torch.tensor([heard[t]], dtype=torch.float64); v = torch.tensor([bool(valid[t])]); prev = u
+
+
+def test_perform_and_imitate_run_and_have_gradients():
+    plant, model, twin, cents, voice = _setup()
+    with torch.no_grad():                # outputs past the deadband, or the plunger never moves (no gradient)
+        model.head[-1].bias.fill_(1.5)
+    params = plant.parameters(2, "cpu", torch.float64)
+    twin2 = plant.parameters(2, "cpu", torch.float64)
+    result = model.perform(plant, cents.expand(2, -1), voice.expand(2, -1), params, twin2,
+                           torch.Generator().manual_seed(0))
+    assert result["pwm"].shape == (2, cents.shape[1])
+    result["pitch_cents"].mean().backward()
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters())
+    pred = model.imitate(cents, voice, cents, voice, torch.zeros_like(cents), twin)
+    assert pred.shape == cents.shape

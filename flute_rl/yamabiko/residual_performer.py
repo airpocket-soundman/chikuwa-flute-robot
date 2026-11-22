@@ -60,7 +60,7 @@ class ResidualTwinPerformer(nn.Module):
         return None if memory is None else {"song": torch.zeros_like(memory["song"])}
 
     def perform(self, plant, cents, voice, parameters, memory=None, generator=None, twin=None,
-                write=True, write_memory=None):
+                write=True, write_memory=None, trace=None):
         """Play on the simulator ``parameters`` using ``twin`` (the fitted rig) as the skeleton's model."""
         if write_memory is not None:
             write = write_memory
@@ -120,6 +120,13 @@ class ResidualTwinPerformer(nn.Module):
             estimate = det.model.step(estimate, pwm, twin)
             emitted, sounding = plant.flute(state, voice[:, t].to(dtype), parameters)
             heard, valid, heard_state = listener.step(emitted, sounding, parameters, heard_state, generator)
+            if plant.config.motor_masking > 0:   # the motor's noise hides the flute while it drives
+                driving = pwm.abs() > band
+                lost = torch.rand(valid.shape, generator=generator, device=device) < plant.config.motor_masking
+                valid = valid & ~(driving & lost)
+                heard = torch.where(valid, heard, heard_state.last_cents)
+            if trace is not None:                # what was heard after this step's command (for imitation)
+                trace.append((heard, valid))
             x_history = torch.cat([x_history[:, 1:], estimate.position[:, None]], 1)
             voice_history = torch.cat([voice_history[:, 1:], voice[:, t, None]], 1)
             usable = valid & voice_history.gather(1, heard_index)[:, 0]

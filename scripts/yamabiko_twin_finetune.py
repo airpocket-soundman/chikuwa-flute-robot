@@ -33,7 +33,7 @@ from flute_rl.yamabiko.physical_plant import (DifferentiableMotorFlute, Physical
                                               PhysicalPlantParameters)
 from flute_rl.yamabiko.residual_numpy import export  # noqa: E402
 from flute_rl.yamabiko.residual_performer import ResidualTwinPerformer  # noqa: E402
-from train_yamabiko_residual import episode  # noqa: E402
+import torch.nn.functional as F  # noqa: E402
 from flute_rl.yamabiko.melodies import random_melodies  # noqa: E402
 
 SCALED = ("torque_gain", "torque_tau_s", "inertia", "coulomb_friction", "viscous_friction",
@@ -87,12 +87,32 @@ def rigs_around(twin, batch, spread, generator, delay_flip=.3):
     return type(twin)(**fields)
 
 
+def episode(model, plant, params, twin, cents, voice, generator, smooth=0.0):
+    """Two plays of the songs (the second with the song memory of the first); the loss is the pitch error
+    plus ``smooth`` x the mean |change of PWM| per step, so the plunger moves in fewer, smoother strokes
+    instead of dithering around a note.  Returns (loss, [MAE play 1, play 2], [mean |dPWM| play 1, 2])."""
+    memory, loss, maes, tvs = None, 0.0, [], []
+    for weight in (.3, 1.0):
+        result, memory = model.perform(plant, cents, voice, params, memory, generator, twin=twin)
+        error = result["pitch_cents"] - cents
+        tv = (result["pwm"][:, 1:] - result["pwm"][:, :-1]).abs().mean()
+        loss = loss + weight * (F.smooth_l1_loss(error[voice] / 100, torch.zeros_like(error[voice]), beta=.2)
+                                + smooth * tv)
+        maes.append(float(error[voice].abs().mean())); tvs.append(float(tv))
+    return loss / 1.3, maes, tvs
+
+
 def evaluate(model, plant, rigs, twin, eval_songs, device):
     with torch.no_grad():
         model.eval()
-        _, maes = episode(model, plant, rigs, twin, *eval_songs, torch.Generator(device).manual_seed(0))
+        _, maes, tvs = episode(model, plant, rigs, twin, *eval_songs, torch.Generator(device).manual_seed(0))
         model.train()
-    return maes
+    return maes, tvs
+
+
+def score(maes, tvs, smooth):
+    """What the kept weights minimise: play-2 error [cent] plus the smoothness term in the same units."""
+    return maes[1] + 100 * smooth * tvs[1]
 
 
 def main():
@@ -108,6 +128,8 @@ def main():
     ap.add_argument("--eval-every", type=int, default=25)
     ap.add_argument("--eval-rigs", type=int, default=48)
     ap.add_argument("--seed", type=int, default=20261119)
+    ap.add_argument("--smooth", type=float, default=0.0,
+                    help="weight of the mean |change of PWM| per step (0.3: about as much as the pitch error)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); device = args.device
     torch.manual_seed(args.seed); rng = np.random.default_rng(args.seed)
@@ -119,9 +141,11 @@ def main():
     eval_rigs = rigs_around(twin, args.eval_rigs, args.spread, torch.Generator(device).manual_seed(7777))
     eval_twin = repeat(twin, args.eval_rigs)
     eval_songs = songs(np.random.default_rng(900), args.eval_rigs, 500, device, plant.config)
-    before = evaluate(model, plant, eval_rigs, eval_twin, eval_songs, device)
-    print(f"pre-trained: play1 {before[0]:.1f} play2 {before[1]:.1f} cents (MAE on rigs around the twin)", flush=True)
-    best = {"step": 0, "play1": before[0], "play2": before[1]}
+    before, before_tv = evaluate(model, plant, eval_rigs, eval_twin, eval_songs, device)
+    print(f"pre-trained: play1 {before[0]:.1f} play2 {before[1]:.1f} cents (MAE on rigs around the twin),"
+          f" mean |dPWM| {before_tv[1]:.3f}", flush=True)
+    best = {"step": 0, "play1": before[0], "play2": before[1], "dpwm": before_tv[1],
+            "score": score(before, before_tv, args.smooth)}
     best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
@@ -132,18 +156,19 @@ def main():
     for step in range(1, args.steps + 1):
         rigs = rigs_around(twin, args.batch, args.spread, generator)
         cents, voice = songs(rng, args.batch, args.song_steps, device, plant.config)
-        loss, maes = episode(model, plant, rigs, batch_twin, cents, voice, generator)
+        loss, maes, tvs = episode(model, plant, rigs, batch_twin, cents, voice, generator, args.smooth)
         optimizer.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step(); schedule.step()
         if step == 1 or step % 10 == 0:
-            print(f"step {step:4d} loss {float(loss.detach()):.4f} MAE {maes[0]:6.1f} {maes[1]:6.1f}"
+            print(f"step {step:4d} loss {float(loss.detach()):.4f} MAE {maes[0]:6.1f} {maes[1]:6.1f} |dPWM| {tvs[1]:.3f}"
                   f"  {time.time() - started:6.0f}s", flush=True)
         if step % args.eval_every == 0 or step == args.steps:
-            maes = evaluate(model, plant, eval_rigs, eval_twin, eval_songs, device)
-            history.append({"step": step, "maes": maes})
-            print(f"eval {step}: play1 {maes[0]:.1f} play2 {maes[1]:.1f}", flush=True)
-            if maes[1] < best["play2"]:
-                best = {"step": step, "play1": maes[0], "play2": maes[1]}
+            maes, tvs = evaluate(model, plant, eval_rigs, eval_twin, eval_songs, device)
+            history.append({"step": step, "maes": maes, "dpwm": tvs})
+            print(f"eval {step}: play1 {maes[0]:.1f} play2 {maes[1]:.1f} |dPWM| {tvs[1]:.3f}", flush=True)
+            if score(maes, tvs, args.smooth) < best["score"]:
+                best = {"step": step, "play1": maes[0], "play2": maes[1], "dpwm": tvs[1],
+                        "score": score(maes, tvs, args.smooth)}
                 best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
     model.load_state_dict(best_state); model.eval()
@@ -152,11 +177,13 @@ def main():
     torch.save(model.checkpoint(best=best, seed=args.seed, twin=args.twin, spread=args.spread,
                                 start=args.checkpoint), str(out) + ".pt")
     report = {"twin": args.twin, "start": args.checkpoint, "kept": kept,
-              "before": {"play1": before[0], "play2": before[1]}, "after": best, "history": history,
+              "before": {"play1": before[0], "play2": before[1], "dpwm": before_tv[1]}, "after": best,
+              "history": history,
               **{k: v for k, v in vars(args).items() if k not in ("twin", "checkpoint")}}
     out.with_suffix(".json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     np.savez(str(out) + "_runtime.npz", **export(model, twin, 0))
-    print(f"kept {kept}: play1 {before[0]:.1f} -> {best['play1']:.1f}, play2 {before[1]:.1f} -> {best['play2']:.1f}")
+    print(f"kept {kept}: play1 {before[0]:.1f} -> {best['play1']:.1f}, play2 {before[1]:.1f} -> {best['play2']:.1f},"
+          f" |dPWM| {before_tv[1]:.3f} -> {best['dpwm']:.3f}")
     print(f"saved {out}.pt, {out}.json and {out}_runtime.npz")
 
 
