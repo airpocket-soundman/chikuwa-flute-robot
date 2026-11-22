@@ -39,10 +39,21 @@ class NNConfig:
     # and read SONG_LOOKAHEAD steps ahead on the next play of the same song (0: none)
     song_slot: int = 0
     song_rate: float = .5
+    # every actuator command from the network: it also opens and shuts the valve (a second output), it
+    # hears the motor current (0 when an end switch has cut it), and it homes the plunger itself during the
+    # rest before the first note instead of a fixed homing run
+    valve: bool = False
+    current: bool = False
+    self_home: bool = False
 
     @property
     def features(self) -> int:
-        return FEATURES + (2 if self.positions else 0) + len(SONG_LOOKAHEAD) * self.song_slot
+        return (FEATURES + (2 if self.positions else 0) + len(SONG_LOOKAHEAD) * self.song_slot
+                + (1 if self.current else 0))
+
+    @property
+    def outputs(self) -> int:
+        return 2 if self.valve else 1
 
 
 class NNTwinPerformer(nn.Module):
@@ -52,12 +63,12 @@ class NNTwinPerformer(nn.Module):
         self.motor = EncoderlessDeterministicPerformer(plant).model     # the twin's motor model, open loop
         self.inp = nn.Linear(config.features, config.hidden)
         self.cell = nn.GRUCell(config.hidden, config.hidden)
-        self.head = nn.Sequential(nn.Linear(config.hidden, config.hidden), nn.SiLU(), nn.Linear(config.hidden, 1))
+        self.head = nn.Sequential(nn.Linear(config.hidden, config.hidden), nn.SiLU(), nn.Linear(config.hidden, config.outputs))
         if config.song_slot:
             self.writer = Writer(AdaptiveMemoryConfig(fast_hidden=config.hidden), config.song_slot, config.song_rate)
 
     # ----- one step --------------------------------------------------------------------------------
-    def features(self, cents, voice, t, heard, valid, prev_pwm, estimate, twin=None, song=None):
+    def features(self, cents, voice, t, heard, valid, prev_pwm, estimate, twin=None, song=None, current=None):
         normalize = self.plant.config.normalize
         steps = cents.shape[1]
         ids = [min(t + k, steps - 1) for k in WINDOW]
@@ -73,6 +84,8 @@ class NNTwinPerformer(nn.Module):
             parts.append(torch.stack([aim, at], 1))
         if self.config.song_slot:
             parts.append(torch.cat([song[min(t + k, steps - 1)] for k in SONG_LOOKAHEAD], 1))
+        if self.config.current:
+            parts.append((prev_pwm.abs() if current is None else current)[:, None])
         return torch.cat(parts, 1)
 
     def empty_song(self, batch, steps, device, dtype):
@@ -87,12 +100,19 @@ class NNTwinPerformer(nn.Module):
         song[then] = self.writer(feats, fast, song[then], torch.ones_like(heard))
 
     def act(self, x, fast):
+        pwm, _, fast = self.act_all(x, fast)
+        return pwm, fast
+
+    def act_all(self, x, fast):
+        """(pwm, valve logit or None, new hidden state)."""
         fast = self.cell(torch.tanh(self.inp(x)), fast)
-        return torch.tanh(self.head(fast)[:, 0]), fast
+        out = self.head(fast)
+        return torch.tanh(out[:, 0]), (out[:, 1] if self.config.valve else None), fast
 
     def start(self, batch, device, dtype, twin):
         estimate = self.motor.initial_state(batch, device, dtype)
-        estimate.torque = -twin.torque_gain.to(dtype)                     # homing leaves it pressed home
+        if not self.config.self_home:
+            estimate.torque = -twin.torque_gain.to(dtype)                 # homing leaves it pressed home
         return estimate, torch.zeros(batch, self.config.hidden, device=device, dtype=dtype)
 
     # ----- closed loop on the simulator ------------------------------------------------------------
@@ -102,11 +122,19 @@ class NNTwinPerformer(nn.Module):
         song memory after the play (pass it back as ``song`` to play the same song again)."""
         batch, steps = cents.shape; device, dtype = cents.device, cents.dtype
         listener = AudibleListener(plant.config)
+        cfg = self.config
         state = plant.initial_state(batch, device, dtype)
         if start_position is not None:
             state.position = start_position
-        for _ in range(130):                                              # homing, as on the rig
-            state = plant.step(state, -torch.ones(batch, device=device, dtype=dtype), parameters)
+        elif cfg.self_home:                                               # wherever the last play left it
+            state.position = torch.rand(batch, generator=generator, device=device, dtype=dtype)
+        if not cfg.self_home:
+            for _ in range(130):                                          # homing, as on the rig
+                state = plant.step(state, -torch.ones(batch, device=device, dtype=dtype), parameters)
+        current = torch.zeros(batch, device=device, dtype=dtype)
+        delay = plant.config.valve_delay_steps
+        valve_queue = [torch.zeros(batch, device=device, dtype=dtype) for _ in range(delay)]
+        valve_soft = []
         heard_state = listener.initial_state(batch, device, dtype)
         estimate, fast = self.start(batch, device, dtype, twin)
         heard = torch.zeros(batch, device=device, dtype=dtype)
@@ -117,11 +145,21 @@ class NNTwinPerformer(nn.Module):
             song = list(song) if song is not None else self.empty_song(batch, steps, device, dtype)
         played, pwms = [], []
         for t in range(steps):
-            x = self.features(cents, voice, t, heard, valid, pwm, estimate, twin, song)
-            pwm, fast = self.act(x, fast)
+            x = self.features(cents, voice, t, heard, valid, pwm, estimate, twin, song, current)
+            pwm, logit, fast = self.act_all(x, fast)
             state = plant.step(state, pwm, parameters)
             estimate = self.motor.step(estimate, pwm, twin)
-            emitted, sounding = plant.flute(state, voice[:, t].to(dtype), parameters)
+            # the motor current: what the command drives, nothing once an end switch has cut it
+            at_end = ((state.position <= 0) & (pwm < 0)) | ((state.position >= 1) & (pwm > 0))
+            current = torch.where(at_end, torch.zeros_like(pwm), pwm.abs())
+            if cfg.valve:
+                valve_queue.append(torch.sigmoid(logit))
+                opened = valve_queue.pop(0)                               # the air follows a few steps late
+                valve_soft.append(opened)
+                valve_now = (opened >= .5).to(dtype)
+            else:
+                valve_now = voice[:, t].to(dtype)
+            emitted, sounding = plant.flute(state, valve_now, parameters)
             heard, valid, heard_state = listener.step(emitted, sounding, parameters, heard_state, generator)
             if plant.config.motor_masking > 0:
                 lost = torch.rand(valid.shape, generator=generator, device=device) < plant.config.motor_masking
@@ -129,7 +167,10 @@ class NNTwinPerformer(nn.Module):
             if self.config.song_slot:
                 self.write(song, cents, voice, t, heard, valid, estimate, pwm, fast)
             played.append(emitted); pwms.append(pwm)
-        return {"pitch_cents": torch.stack(played, 1), "pwm": torch.stack(pwms, 1), "song": song}
+        result = {"pitch_cents": torch.stack(played, 1), "pwm": torch.stack(pwms, 1), "song": song}
+        if cfg.valve:
+            result["valve"] = torch.stack(valve_soft, 1)                  # open probability the air follows
+        return result
 
     # ----- imitation of a recorded play ------------------------------------------------------------
     def imitate(self, cents, voice, heard, valid, pwm, twin):
@@ -163,6 +204,13 @@ class NNTwinPerformer(nn.Module):
         config = NNConfig(**{**checkpoint["config"], **upgrade})
         model = cls(plant, config).to(device)
         state = dict(checkpoint["state_dict"])
+        last = f"head.{len(model.head) - 1}"
+        if state[f"{last}.weight"].shape[0] < config.outputs:             # a new output (the valve) at zero
+            w, b = state[f"{last}.weight"], state[f"{last}.bias"]
+            state[f"{last}.weight"] = torch.cat([w, torch.zeros(config.outputs - w.shape[0], w.shape[1],
+                                                                 dtype=w.dtype, device=w.device)])
+            state[f"{last}.bias"] = torch.cat([b, torch.zeros(config.outputs - b.shape[0], dtype=b.dtype,
+                                                              device=b.device)])
         w = state["inp.weight"]
         if w.shape[1] < config.features:
             grown = torch.zeros(w.shape[0], config.features, dtype=w.dtype, device=w.device)

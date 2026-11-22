@@ -258,6 +258,7 @@ def export_nn(model, twin, row=0):
                 arrays.update(_linear(f"nn.writer.candidate.{index}", layer))
         arrays.update(_linear("nn.writer.gate", model.writer.gate))
         arrays["nn.song"] = np.array([model.config.song_slot, model.config.song_rate], np.float64)
+    arrays["nn.flags"] = np.array([model.config.valve, model.config.current, model.config.self_home], np.float64)
     return arrays
 
 
@@ -269,12 +270,18 @@ class NNRuntime(Runtime):
         self.nn_hidden = self.a["nn.cell.w_hh"].shape[1]
         self.nn_slot, self.nn_rate = ((int(self.a["nn.song"][0]), float(self.a["nn.song"][1])) if "nn.song" in self.a
                                       else (0, 0.0))
-        self.nn_positions = self.a["nn.inp.w"].shape[1] - len(SONG_LOOKAHEAD) * self.nn_slot == 2 * len(WINDOW) + 9
+        flags = self.a["nn.flags"] if "nn.flags" in self.a else np.zeros(3)
+        self.nn_valve, self.nn_current, self.self_home = (bool(f) for f in flags)
+        self.nn_positions = (self.a["nn.inp.w"].shape[1] - len(SONG_LOOKAHEAD) * self.nn_slot
+                             - (1 if self.nn_current else 0)) == 2 * len(WINDOW) + 9
+        self.current = 0.0
         self.song = None
 
     def prepare(self, cents, voice, keep_song_memory=True):
         self.cents = np.asarray(cents, np.float64); self.voice = np.asarray(voice, bool)
-        self.position, self.velocity, self.torque = 0.0, 0.0, -self.t["torque_gain"]
+        self.position, self.velocity = 0.0, 0.0
+        self.torque = 0.0 if self.self_home else -self.t["torque_gain"]
+        self.current = 0.0
         self.fast = np.zeros(self.nn_hidden, np.float32)
         self.heard, self.valid, self.pwm = 0.0, False, 0.0
         if self.nn_slot and not (keep_song_memory and self.song is not None and self.song.shape[0] == len(self.cents)):
@@ -291,6 +298,7 @@ class NNRuntime(Runtime):
                            + ([[self.position_for(self.cents[t]),
                                 self.position_for(self.heard) if self.valid else 0.0]] if self.nn_positions else [])
                            + ([self.song[[min(t + k, steps - 1) for k in SONG_LOOKAHEAD]].reshape(-1)] if self.nn_slot else [])
+                           + ([[self.current]] if self.nn_current else [])
                            ).astype(np.float32)
         x = np.tanh(self.a["nn.inp.w"] @ x + self.a["nn.inp.b"])
         gi = self.a["nn.cell.w_ih"] @ x + self.a["nn.cell.b_ih"]; gh = self.a["nn.cell.w_hh"] @ self.fast + self.a["nn.cell.b_hh"]
@@ -299,13 +307,20 @@ class NNRuntime(Runtime):
         n = np.tanh(gi[2 * h:] + r * gh[2 * h:])
         self.fast = ((1 - z) * n + z * self.fast).astype(np.float32)
         y = silu(self.a["nn.head.0.w"] @ self.fast + self.a["nn.head.0.b"])
-        self.pwm = float(np.tanh(self.a["nn.head.2.w"] @ y + self.a["nn.head.2.b"])[0])
+        out = self.a["nn.head.2.w"] @ y + self.a["nn.head.2.b"]
+        self.pwm = float(np.tanh(out[0]))
         self.model_step(self.pwm)
         self._t = t
-        return self.pwm, bool(self.voice[t])
+        valve = bool(out[1] >= 0.0) if self.nn_valve else bool(self.voice[t])     # sigmoid >= .5
+        self.current = abs(self.pwm)              # until observe() hears the real one
+        return self.pwm, valve
 
-    def observe(self, heard, valid):
+    def observe(self, heard, valid, current=None):
+        """``current``: the motor current as a fraction of the full-PWM running current (the rig: isense_mv
+        / CURRENT_FULL_MV), 0 when an end switch has cut it."""
         self.heard, self.valid = (float(heard) if valid else 0.0), bool(valid)
+        if current is not None:
+            self.current = float(current)
         if self.nn_slot:
             t = self._t; then = max(0, t - 2)
             heard_n = (self.heard - self.center) / self.scale if self.valid else 0.0

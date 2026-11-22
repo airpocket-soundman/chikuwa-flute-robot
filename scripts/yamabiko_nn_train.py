@@ -48,6 +48,25 @@ def measure(result, cents, voice):
     return error, tv
 
 
+def valve_miss(result, voice):
+    """Mean fraction of steps the air does not follow the score (open in a rest, shut in a note)."""
+    if "valve" not in result:
+        return torch.zeros((), device=voice.device)
+    v = voice.to(result["valve"].dtype)
+    return (v * (1 - result["valve"]) + (1 - v) * result["valve"]).mean()
+
+
+def with_lead(cents, voice, rng, lead):
+    """A rest of ``lead`` (lo, hi) steps before every song, the target held at its first note: the network
+    homes the plunger and gets to that note in it."""
+    if not lead:
+        return cents, voice
+    n = int(rng.integers(*lead))
+    first = cents[:, :1].expand(-1, n)
+    rest = torch.zeros(voice.shape[0], n, dtype=voice.dtype, device=voice.device)
+    return torch.cat([first, cents], 1), torch.cat([rest, voice], 1)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("twin")
@@ -57,6 +76,9 @@ def main():
     ap.add_argument("--soft-deadband", type=float, default=0.0,
                     help="train through a softplus deadband edge of this width (evaluation keeps the exact one)")
     ap.add_argument("--positions", action="store_true", help="also feed the twin's position of target and heard")
+    ap.add_argument("--all-nn", action="store_true",
+                    help="every actuator command from the network: valve output, motor current input, self homing")
+    ap.add_argument("--valve-weight", type=float, default=1.0, help="weight of the valve-follows-the-score cost")
     ap.add_argument("--init", default=None, help="start from this NN checkpoint (then imitation is skipped)")
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--smooth", type=float, default=.3)
@@ -76,15 +98,18 @@ def main():
     teacher = ResidualTwinPerformer.from_checkpoint(torch.load(args.teacher, map_location=device, weights_only=False),
                                                     plant, device).eval()
     if args.init:
+        upgrade = dict(valve=True, current=True, self_home=True) if args.all_nn else {}
         model = NNTwinPerformer.from_checkpoint(torch.load(args.init, map_location=device, weights_only=False),
-                                                plant, device)
+                                                plant, device, **upgrade)
         args.imitate_steps = 0
     else:
         model = NNTwinPerformer(plant, NNConfig(positions=args.positions)).to(device)
     generator = torch.Generator(device).manual_seed(args.seed)
     eval_rigs = rigs_around(twin, 48, args.spread, torch.Generator(device).manual_seed(7777))
     eval_twin = repeat(twin, 48)
-    eval_cents, eval_voice = songs(np.random.default_rng(900), 48, 500, device, plant.config)
+    lead = (120, 200) if model.config.self_home else None
+    eval_cents, eval_voice = with_lead(*songs(np.random.default_rng(900), 48, 500, device, plant.config),
+                                       np.random.default_rng(901), lead)
     batch_twin = repeat(twin, args.batch)
 
     def evaluate():
@@ -94,8 +119,11 @@ def main():
             model.train()
         error, tv = measure(result, eval_cents, eval_voice)
         mae = float(error[eval_voice].abs().mean())
-        return mae, float(tv), mae + 100 * args.smooth * float(tv)
+        miss = float(valve_miss(result, eval_voice))
+        evaluate.miss = miss
+        return mae, float(tv), mae + 100 * args.smooth * float(tv) + 100 * args.valve_weight * miss
 
+    evaluate.miss = 0.0
     t_result, _, _ = teacher_play(teacher, plant, eval_rigs, eval_twin, eval_cents, eval_voice,
                                   torch.Generator(device).manual_seed(0))
     t_error, t_tv = measure(t_result, eval_cents, eval_voice)
@@ -124,19 +152,23 @@ def main():
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.steps, eta_min=args.lr * .03)
     for step in range(1, args.steps + 1):
         rigs = rigs_around(twin, args.batch, args.spread, generator)
-        cents, voice = songs(rng, args.batch, args.song_steps, device, plant.config)
+        cents, voice = with_lead(*songs(rng, args.batch, args.song_steps, device, plant.config), rng, lead)
         result = model.perform(train_plant, cents, voice, rigs, batch_twin, generator)
         error, tv = measure(result, cents, voice)
-        loss = F.smooth_l1_loss(error[voice] / 100, torch.zeros_like(error[voice]), beta=.2) + args.smooth * tv
+        miss = valve_miss(result, voice)
+        loss = (F.smooth_l1_loss(error[voice] / 100, torch.zeros_like(error[voice]), beta=.2) + args.smooth * tv
+                + args.valve_weight * miss)
         optimizer.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step(); schedule.step()
         if step == 1 or step % 10 == 0:
             print(f"step {step:4d} loss {float(loss):.4f} MAE {float(error[voice].abs().mean()):6.1f} |dPWM| {float(tv):.3f}"
+                  f" valve miss {float(miss):.3f}"
                   f"  {time.time() - started:6.0f}s", flush=True)
         if step % args.eval_every == 0 or step == args.steps:
             mae, tv_e, score = evaluate()
             history.append({"step": step, "mae": mae, "dpwm": tv_e})
-            print(f"eval {step}: MAE {mae:.1f} |dPWM| {tv_e:.3f} score {score:.1f}", flush=True)
+            print(f"eval {step}: MAE {mae:.1f} |dPWM| {tv_e:.3f} valve miss {evaluate.miss:.3f} score {score:.1f}",
+                  flush=True)
             if score < best["score"]:
                 best = {"step": step, "mae": mae, "dpwm": tv_e, "score": score}
                 best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}

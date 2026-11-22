@@ -75,6 +75,7 @@ def ensure_firmware(link, log=print):
     raise RuntimeError("yamabiko_fw does not answer even after flashing (is arduino-router holding /dev/ttyHS1?)")
 
 
+CURRENT_FULL_MV = 20.0   # isense_mv of the plunger running at full PWM (0.1 ohm shunt): the networks' scale
 AUDIO_STALL_S = 0.5   # no audio this long while serving: restart the stream (see Server.audio_watch)
 
 class Client:
@@ -263,10 +264,18 @@ class Server:
             shift = float(req.get("shift_cents", 0.0))   # today's offset, measured by cmd_tune
             cents = cents + shift
             max_cents += shift
+            self_home = getattr(runtime, "self_home", False)
+            if self_home:
+                # every actuator command from the network: it gets a rest before the song (the target held
+                # at its first note, voice off) to home the plunger and open the valve itself
+                lead = int(round(float(req.get("lead_seconds", 1.6)) / STEP_S))
+                cents = np.r_[np.full(lead, cents[0]), cents]
+                voice = np.r_[np.zeros(lead, bool), voice]
             for play in range(int(req.get("repeats", 1))):
                 rig.resync()
-                for _ in range(int(round(float(req.get("homing_seconds", 1.3)) / STEP_S))):
-                    rig.step(-1.0, False)
+                if not self_home:
+                    for _ in range(int(round(float(req.get("homing_seconds", 1.3)) / STEP_S))):
+                        rig.step(-1.0, False)
                 if play == 0 and req.get("relative", False) and "shift_cents" not in req:
                     # a relative melody copy: sound the home note, and move the whole target by how far the
                     # flute sounds from the twin's home today (the plunger stays pressed home meanwhile)
@@ -281,19 +290,23 @@ class Server:
                         cents = cents + shift
                         max_cents += shift
                 runtime.prepare(cents, voice, keep_song_memory=play > 0)
-                pwm_log, heard_log, valid_log = [], [], []
+                pwm_log, heard_log, valid_log, valve_log = [], [], [], []
                 audio_start = self.link.audio.end
                 for t in range(len(cents)):
                     pwm, valve = runtime.command(t)
                     h = float(rig.step(pwm, valve)["heard"][0]); ok = bool(np.isfinite(h)) and h <= max_cents
-                    runtime.observe(h if ok else 0.0, ok)
+                    if self_home:
+                        runtime.observe(h if ok else 0.0, ok, max(rig.log["isense_mv"][-1], 0) / CURRENT_FULL_MV)
+                    else:
+                        runtime.observe(h if ok else 0.0, ok)
+                    valve_log.append(bool(valve))
                     pwm_log.append(pwm); heard_log.append(h if ok else 0.0); valid_log.append(ok)
                 heard, valid = np.array(heard_log), np.array(valid_log)
                 mask = valid & voice
                 errors.append(float(np.abs(heard[mask] - cents[mask]).mean()) if mask.any() else None)
                 records.update({f"{play}/pwm": np.array(pwm_log, np.float32)[None],
                                 f"{play}/heard": heard.astype(np.float32)[None], f"{play}/valid": valid[None],
-                                f"{play}/valve": voice.astype(np.float32)[None],
+                                f"{play}/valve": np.array(valve_log, np.float32)[None],
                                 f"{play}/target_cents": cents.astype(np.float32)[None], f"{play}/target_voice": voice[None],
                                 f"{play}/pcm": self.link.audio.span(audio_start, self.link.audio.end)})
         finally:

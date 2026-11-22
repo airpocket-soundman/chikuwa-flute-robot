@@ -8,10 +8,11 @@ from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalP
 from flute_rl.yamabiko.residual_numpy import NNRuntime, export_nn, runtime_for
 
 
-def _setup(positions=False, song_slot=0):
+def _setup(positions=False, song_slot=0, all_nn=False):
     torch.manual_seed(0)
     plant = DifferentiableMotorFlute(PhysicalPlantConfig.yamabiko1())
-    model = NNTwinPerformer(plant, NNConfig(positions=positions, song_slot=song_slot)).double()
+    model = NNTwinPerformer(plant, NNConfig(positions=positions, song_slot=song_slot, valve=all_nn,
+                                            current=all_nn, self_home=all_nn)).double()
     twin = plant.parameters(1, "cpu", torch.float64)
     steps = 120
     cents = torch.full((1, steps), 100.0, dtype=torch.float64); cents[:, 60:] = 300.0
@@ -19,9 +20,10 @@ def _setup(positions=False, song_slot=0):
     return plant, model, twin, cents, voice
 
 
-@pytest.mark.parametrize("positions,song_slot", [(False, 0), (True, 0), (True, 4)])
-def test_numpy_runtime_matches_torch_step_by_step(positions, song_slot):
-    plant, model, twin, cents, voice = _setup(positions, song_slot)
+@pytest.mark.parametrize("positions,song_slot,all_nn", [(False, 0, False), (True, 0, False), (True, 4, False),
+                                                        (True, 0, True)])
+def test_numpy_runtime_matches_torch_step_by_step(positions, song_slot, all_nn):
+    plant, model, twin, cents, voice = _setup(positions, song_slot, all_nn)
     rng = np.random.default_rng(1)
     heard = 100.0 + 50 * rng.standard_normal(cents.shape[1])
     valid = rng.random(cents.shape[1]) > .3
@@ -35,11 +37,11 @@ def test_numpy_runtime_matches_torch_step_by_step(positions, song_slot):
             h = torch.zeros(1, dtype=torch.float64); v = torch.zeros(1, dtype=torch.bool)
             prev = torch.zeros(1, dtype=torch.float64)
             for t in range(cents.shape[1]):
-                u, fast = model.act(model.features(cents, voice, t, h, v, prev, estimate, twin, song), fast)
+                u, logit, fast = model.act_all(model.features(cents, voice, t, h, v, prev, estimate, twin, song), fast)
                 estimate = model.motor.step(estimate, u, twin)
                 pwm, valve = runtime.command(t)
                 assert abs(pwm - float(u)) < 1e-4, (play, t)
-                assert valve == bool(voice[0, t])
+                assert valve == (bool(logit[0] >= 0) if all_nn else bool(voice[0, t]))
                 runtime.observe(heard[t], bool(valid[t]))
                 h = torch.tensor([heard[t]], dtype=torch.float64); v = torch.tensor([bool(valid[t])]); prev = u
                 if song_slot:

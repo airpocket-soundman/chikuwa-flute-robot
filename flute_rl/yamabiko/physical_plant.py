@@ -91,6 +91,9 @@ class PhysicalPlantConfig:
     # Training only: the deadband's edge as softplus(x / t) * t instead of relu(x), so a command a little
     # short of it still gets a gradient toward moving (0: the exact edge, as on the rig and at evaluation).
     soft_deadband: float = 0.0
+    # Steps between a valve command and the air following it (servo travel and the air in the duct).  Used by
+    # performers that drive the valve themselves (NNConfig.valve).
+    valve_delay_steps: int = 0
 
     @classmethod
     def from_dict(cls, values: dict) -> "PhysicalPlantConfig":
@@ -129,7 +132,7 @@ class PhysicalPlantConfig:
         enough to be heard over the motor most of the time.  At rest near the far end it does not sound
         cleanly, so the targets end an octave above home (-10..1200 cent) and the simulated flute is silent
         above 1250 cent (``overblow_cents``: here not an octave jump, the same loss of the sound)."""
-        values = dict(home_cents=-40.0, low_cents=-10.0, high_cents=1200.0, overblow_cents=1250.0,
+        values = dict(home_cents=-40.0, low_cents=-10.0, high_cents=1200.0, overblow_cents=1250.0, valve_delay_steps=3,
                       motor_masking=.2, feature_center=595.0, feature_scale=605.0)
         values.update(overrides)
         return cls.yamabiko1(**values)
