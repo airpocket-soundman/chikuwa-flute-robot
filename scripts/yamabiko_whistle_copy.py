@@ -55,6 +55,8 @@ def main():
     profiles = load_profiles()
     profile = profiles[args.step or latest(profiles)]
     remote_runtime = f"/home/arduino/yamabiko/models/{profile['name']}/{profile['runtime']}"
+    remote_valve = (f"/home/arduino/yamabiko/models/{profile['name']}/{profile['valve_runtime']}"
+                    if profile.get("valve_runtime") else None)
     print(f"{profile['name']}: {profile.get('title', '')}")
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -73,7 +75,7 @@ def main():
     write_wav(out / f"{stamp}_whistle.wav", pcm, sr)
 
     raw = whistle_track(pcm, sr)
-    cents = clean_track(raw)
+    cents = clean_track(raw, **profile.get("whistle", {}))
     try:
         target, voice, report = to_target(cents, profile["low_cents"], profile["high_cents"], quantize=args.quantize)
     except ValueError as exc:
@@ -92,7 +94,8 @@ def main():
         tuning = rig.tune(runtime=remote_runtime, fan=profile["fan"])
         print(f"today's flute: home {440 * 2 ** (tuning['home_cents'] / 1200):.1f} Hz, shift {tuning['shift_cents']:+.1f} cent")
         result = rig.play(remote_runtime, remote_target, out=REMOTE_DIR + f"{stamp}_play.npz", repeats=args.repeats,
-                          fan=profile["fan"], shift_cents=tuning["shift_cents"], ear=profile.get("ear", "yin"))
+                          fan=profile["fan"], shift_cents=tuning["shift_cents"], ear=profile.get("ear", "yin"),
+                          valve_runtime=remote_valve)
         print(json.dumps({k: v for k, v in result.items() if k != "out"}))
         subprocess.run(["scp", "-q", "unoq:" + REMOTE_DIR + f"{stamp}_play.npz", str(out)], check=True)
         played = np.load(out / f"{stamp}_play.npz")

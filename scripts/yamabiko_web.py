@@ -347,7 +347,7 @@ class WhistleJob:
             self.wavs = {"whistle": wav_bytes(pcm, sr)}
             self._set(phase="analyse", message="聞き取り中")
             raw = whistle_track(pcm, sr)
-            cents = clean_track(raw)
+            cents = clean_track(raw, **profile.get("whistle", {}))
             try:
                 target, voice, report = to_target(cents, profile["low_cents"], profile["high_cents"],
                                                   quantize=quantize)
@@ -365,7 +365,8 @@ class WhistleJob:
                       target=[round(float(v), 1) for v in target], voice=[bool(v) for v in voice], report=report)
             result = rig.play(profile["runtime_path"], str(path), out=str(WHISTLE_DIR / f"{stamp}_play.npz"),
                               repeats=1, fan=profile["fan"], shift_cents=self.tunings[profile["name"]]["shift_cents"],
-                              warmup_s=2.0, ear=profile.get("ear", "yin"))
+                              warmup_s=2.0, ear=profile.get("ear", "yin"),
+                              valve_runtime=profile.get("valve_runtime_path"))
             played = np.load(WHISTLE_DIR / f"{stamp}_play.npz")
             if "0/pcm" in played:
                 self.wavs["flute"] = wav_bytes(played["0/pcm"], int(played["sr"]))

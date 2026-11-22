@@ -5,6 +5,10 @@ Each step folder holds its trained runtime and a profile:
     {"name": "step1", "title": "...", "runtime": "nn_f80_02_runtime.npz", "ear": "yin", "fan": 0.8,
      "low_cents": -10, "high_cents": 1200, "valve_us": [1560, 1820], "doc": "docs/step1.md"}
 
+Optional: "valve_runtime" (a separate valve network run beside the actuator runtime; without it the valve
+follows the score) and "whistle" (options of whistle.clean_track, e.g. {"max_gap_steps": 2} to keep short
+tongued gaps).
+
 The code is shared: the runtime file says which performer it is (residual_numpy.runtime_for), the profile
 says how to run it.  No NumPy or torch here, so the UNO Q's web page can read the profiles.
 """
@@ -23,6 +27,9 @@ def load_profiles(root: pathlib.Path | str = MODELS) -> dict:
         profile = json.loads(path.read_text(encoding="utf-8"))
         profile.setdefault("name", path.parent.name)
         profile["runtime_path"] = str(path.parent / profile["runtime"])
+        if profile.get("valve_runtime"):
+            profile["valve_runtime_path"] = str(path.parent / profile["valve_runtime"])
+        profile.setdefault("whistle", {})
         profile.setdefault("ear", "yin")
         out[profile["name"]] = profile
     return out
