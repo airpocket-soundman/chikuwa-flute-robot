@@ -34,7 +34,9 @@
 //                    flags: 1 button held, 2 valve open, 4 fan on, 8 command timed out (16 unused: was the
 //                    SCS0009 not answering)
 //   type 'T' text:   one line (info)
-// Linux -> MCU:
+// Linux -> MCU, every command framed as  A5 cmd payload sum(u8)   sum = 8-bit sum of cmd and payload.
+//   Bytes outside a frame and frames with a bad sum are dropped (counted as cmd_bad in INFO): unframed, one
+//   lost byte made a data byte a command (pwm 600 is 58 02, and 0x58 is 'X', which stopped the audio).
 //   'S' start streaming, 'X' stop, 'i' info, 'P' + token(u32): ping, answered at once
 //   'C' + pwm(i16, -1000..1000) + flags(u8: 1 valve open, 2 brake)   actuator and valve, every control step
 //   'F' + on(u8) + duty(u16, 0..1000)                                 fan
@@ -45,6 +47,7 @@
 
 #define LINK Serial1
 #define LINK_BAUD 921600
+#define CMD_SYNC 0xA5
 
 #define RING_FRAMES 2048          // 42.7 ms of stereo 32-bit words at 48 kHz = 16 KB
 #define DECIM 3                   // 48 kHz -> 16 kHz
@@ -82,6 +85,7 @@ static uint32_t wraps;            // completed passes of the DMA over the ring
 static uint32_t frames_seen;      // SAI frames consumed since streaming started
 static uint32_t left_parity;      // 0 or 1: which word of a frame is the left slot
 static bool streaming;
+static uint32_t cmd_bad;          // command bytes dropped: outside a frame, or in a frame with a bad sum
 static uint32_t overruns, max_loop_us;
 
 static int16_t pkt[PKT_SAMPLES];
@@ -449,9 +453,9 @@ static void send_status(uint32_t now) {
 
 static void info() {
   char s[200];
-  snprintf(s, sizeof(s), "INFO fw yamabiko_fw clock %s cyc_per_us %lu streaming %d frames %lu overruns %lu max_loop_us %lu",
+  snprintf(s, sizeof(s), "INFO fw yamabiko_fw clock %s cyc_per_us %lu streaming %d frames %lu overruns %lu max_loop_us %lu cmd_bad %lu",
            clk_name, (unsigned long)cyc_per_us, streaming, (unsigned long)frames_now(),
-           (unsigned long)overruns, (unsigned long)max_loop_us);
+           (unsigned long)overruns, (unsigned long)max_loop_us, (unsigned long)cmd_bad);
   send_text(s);
   snprintf(s, sizeof(s), "IO act_top %lu (%lu Hz) fan_top %lu (%lu Hz) max_pwm %u valve open %u closed %u us move %u ms servo SG90 %d us",
            (unsigned long)act_top, (unsigned long)(timer_clk(false) / act_top), (unsigned long)fan_top,
@@ -460,54 +464,77 @@ static void info() {
   send_text(s);
 }
 
-static uint8_t cmd_len(int c) {
+// Bytes of a command after the sync byte, without the sum (0: not a command).
+static uint8_t cmd_len(uint8_t c) {
   switch (c) {
     case 'P': return 5;
     case 'C': return 4;
     case 'F': return 4;
     case 'K': return 7;
     case 'L': return 3;
-    default: return 1;
+    case 'S': case 'X': case 'i': return 1;
+    default: return 0;
   }
 }
 
+static void run_cmd(const uint8_t *b) {
+  uint8_t c = b[0];
+  if (c == 'P') {
+    pong_frame = frames_now();
+    memcpy(&pong_token, b + 1, 4);
+    send_pong();                                 // between packets, never inside one
+  } else if (c == 'C') {
+    int16_t pwm;
+    memcpy(&pwm, b + 1, 2);
+    act_set(pwm, (b[3] & 2) != 0);
+    valve_set((b[3] & 1) != 0);
+    last_cmd_ms = millis();
+    cmd_timed_out = false;
+  } else if (c == 'F') {
+    uint16_t d;
+    memcpy(&d, b + 2, 2);
+    fan_set(b[1] != 0, d);
+  } else if (c == 'K') {
+    memcpy(&valve_pos_open, b + 1, 2);
+    memcpy(&valve_pos_closed, b + 3, 2);
+    memcpy(&valve_move_ms, b + 5, 2);
+    valve_pos_open = servo_clamp(valve_pos_open);
+    valve_pos_closed = servo_clamp(valve_pos_closed);
+    servo_goal(valve_open ? valve_pos_open : valve_pos_closed, 300);
+  } else if (c == 'L') {
+    uint16_t m;
+    memcpy(&m, b + 1, 2);
+    max_pwm = m > 1000 ? 1000 : m;
+    act_set(act_pwm, act_brake);
+  } else if (c == 'S') { stream_restart(); streaming = true; }
+  else if (c == 'X') streaming = false;
+  else if (c == 'i') info();
+}
+
+static uint8_t rx[12];                           // sync, command, payload, sum
+static uint8_t rx_n;
+
 static void commands() {
   while (LINK.available()) {
-    int c = LINK.peek();
-    uint8_t need = cmd_len(c);
-    if (LINK.available() < need) return;       // wait for the whole command
-    uint8_t b[8];
-    for (uint8_t i = 0; i < need; i++) b[i] = LINK.read();
-    if (c == 'P') {
-      pong_frame = frames_now();
-      memcpy(&pong_token, b + 1, 4);
-      send_pong();                               // between packets, never inside one
-    } else if (c == 'C') {
-      int16_t pwm;
-      memcpy(&pwm, b + 1, 2);
-      act_set(pwm, (b[3] & 2) != 0);
-      valve_set((b[3] & 1) != 0);
-      last_cmd_ms = millis();
-      cmd_timed_out = false;
-    } else if (c == 'F') {
-      uint16_t d;
-      memcpy(&d, b + 2, 2);
-      fan_set(b[1] != 0, d);
-    } else if (c == 'K') {
-      memcpy(&valve_pos_open, b + 1, 2);
-      memcpy(&valve_pos_closed, b + 3, 2);
-      memcpy(&valve_move_ms, b + 5, 2);
-      valve_pos_open = servo_clamp(valve_pos_open);
-      valve_pos_closed = servo_clamp(valve_pos_closed);
-      servo_goal(valve_open ? valve_pos_open : valve_pos_closed, 300);
-    } else if (c == 'L') {
-      uint16_t m;
-      memcpy(&m, b + 1, 2);
-      max_pwm = m > 1000 ? 1000 : m;
-      act_set(act_pwm, act_brake);
-    } else if (c == 'S') { stream_restart(); streaming = true; }
-    else if (c == 'X') streaming = false;
-    else if (c == 'i') info();
+    uint8_t c = (uint8_t)LINK.read();
+    if (rx_n == 0) {
+      if (c == CMD_SYNC) rx[rx_n++] = c;
+      else cmd_bad++;
+      continue;
+    }
+    rx[rx_n++] = c;
+    uint8_t need = cmd_len(rx[1]);
+    if (need == 0) {                             // no command after the sync byte: hunt again
+      cmd_bad++;
+      rx_n = (c == CMD_SYNC) ? 1 : 0;
+      continue;
+    }
+    if (rx_n < need + 2) continue;
+    uint8_t sum = 0;
+    for (uint8_t i = 1; i <= need; i++) sum += rx[i];
+    rx_n = 0;
+    if (sum == rx[need + 1]) run_cmd(rx + 1);
+    else cmd_bad++;
   }
 }
 

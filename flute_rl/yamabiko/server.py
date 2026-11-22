@@ -75,10 +75,13 @@ def ensure_firmware(link, log=print):
     raise RuntimeError("yamabiko_fw does not answer even after flashing (is arduino-router holding /dev/ttyHS1?)")
 
 
+AUDIO_STALL_S = 0.5   # no audio this long while serving: restart the stream (see Server.audio_watch)
+
 class Client:
     def __init__(self, sock, addr):
         self.sock, self.addr = sock, addr
         self.buf = b""
+        self.out = bytearray()          # reply bytes the socket has not taken yet (a recording over Wi-Fi)
         self.last_seen = time.monotonic()
 
 
@@ -95,6 +98,8 @@ class Server:
         self.pwm, self.brake, self.valve = 0.0, False, False
         self.fan_on, self.fan_duty = False, 0.0
         self.owner: Client | None = None
+        self.peak_hold, self.peak_seen = 0, None
+        self.audio_seen_end, self.audio_seen_t, self.audio_restarts = None, time.monotonic(), 0
         self.jobs = []                     # (client, id, kind, data) finished in the loop
         self.running = True
         self.next_step = time.monotonic()
@@ -129,7 +134,12 @@ class Server:
                         "button_held": bool(st.flags & FLAG_BUTTON), "valve_open": bool(st.flags & FLAG_VALVE),
                         "fan_switch": bool(st.flags & FLAG_FAN), "fw_timeout": bool(st.flags & FLAG_TIMEOUT),
                         "servo_answering": not st.flags & FLAG_SERVO_SILENT, "servo_pos": st.servo_pos,
-                        "status_age_s": round(time.monotonic() - st.t_rx, 3)})
+                        "status_age_s": round(time.monotonic() - st.t_rx, 3),
+                        # the highest motor current since the previous status request (any client), so a
+                        # 20 ms pulse is not missed between polls
+                        "isense_peak_hold_mv": max(self.peak_hold, st.isense_peak_mv),
+                        "audio_restarts": self.audio_restarts})
+            self.peak_hold = 0
         return out
 
     def handle(self, client, req):
@@ -278,10 +288,24 @@ class Server:
             msg.update(payload or {})
         else:
             msg["error"] = error
+        client.out += (json.dumps(msg) + "\n").encode()
+        self.flush(client)
+
+    def flush(self, client):
+        """Send what the socket takes now; the rest waits for EVENT_WRITE, so the 10 ms loop never blocks."""
         try:
-            client.sock.sendall((json.dumps(msg) + "\n").encode())
+            while client.out:
+                n = client.sock.send(client.out[:262144])
+                del client.out[:n]
+        except (BlockingIOError, InterruptedError):
+            pass
         except OSError:
             self.drop(client)
+            return
+        try:
+            self.sel.modify(client.sock, selectors.EVENT_READ | (selectors.EVENT_WRITE if client.out else 0), client)
+        except (KeyError, ValueError):
+            pass
 
     def drop(self, client):
         try:
@@ -336,10 +360,13 @@ class Server:
                                                "pcm16_b64": base64.b64encode(pcm.astype("<i2").tobytes()).decode()})
 
     def tick(self):
-        for key, _ in self.sel.select(timeout=0):
+        for key, events in self.sel.select(timeout=0):
             if key.data is None:
                 self.accept()
-            else:
+                continue
+            if events & selectors.EVENT_WRITE:
+                self.flush(key.data)
+            if events & selectors.EVENT_READ and key.data.sock.fileno() >= 0:
                 self.read(key.data)
         if self.owner is not None and time.monotonic() - self.owner.last_seen > self.lease:
             self.safe(f"no message for {self.lease} s")
@@ -348,7 +375,30 @@ class Server:
             self.link.command(self.pwm, self.valve, self.brake)
             self.next_step = max(self.next_step + STEP_S, now - STEP_S)
         self.link.poll(max(0.0, min(.002, self.next_step - time.monotonic())))
+        st = self.link.status
+        if st is not None and st.t_rx != self.peak_seen:
+            self.peak_seen = st.t_rx
+            self.peak_hold = max(self.peak_hold, st.isense_peak_mv)
+        self.audio_watch(now)
         self.finish_jobs()
+
+    def audio_watch(self, now):
+        """Restart the stream when no audio came for AUDIO_STALL_S.  The command bytes have no framing, so
+        one lost byte can make the firmware read a data byte as 'X' (stop streaming): pwm 0.6 is 0x0258,
+        and 0x58 is 'X'.  Recordings waiting on the old stream are answered with an error."""
+        a = self.link.audio
+        if a.end != self.audio_seen_end:
+            self.audio_seen_end, self.audio_seen_t = a.end, now
+            return
+        if now - self.audio_seen_t < AUDIO_STALL_S:
+            return
+        self.audio_restarts += 1
+        self.log(f"no audio for {AUDIO_STALL_S} s: restarting the stream ({self.audio_restarts})")
+        self.link.start()
+        self.audio_seen_end, self.audio_seen_t = None, now
+        for client, rid, kind, _ in self.jobs:
+            self.reply(client, rid, False, error="RuntimeError: the audio stream restarted")
+        self.jobs.clear()
 
     def serve(self):
         self.link.limit(self.max_pwm)
@@ -371,6 +421,8 @@ def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="0.0.0.0 lets the PC connect over Wi-Fi without adb (no authentication: trusted LAN only)")
     ap.add_argument("--dev", default="/dev/ttyHS1")
     ap.add_argument("--max-pwm", type=float, default=1.0)
     ap.add_argument("--lease", type=float, default=2.0)
@@ -391,7 +443,7 @@ def main(argv=None):
     time.sleep(.5)
     if not args.no_flash:
         print(f"firmware: {ensure_firmware(link)}", flush=True)
-    server = Server(link, port=args.port, max_pwm=args.max_pwm, lease=args.lease,
+    server = Server(link, host=args.host, port=args.port, max_pwm=args.max_pwm, lease=args.lease,
                     log=lambda s: print(time.strftime("%H:%M:%S"), s, flush=True))
     try:
         server.serve()

@@ -27,6 +27,7 @@ from ..pitch import yin_frame
 from ..sim import DT, hz_to_cents
 
 SR = 16000             # stream rate of the firmware [Hz]
+CMD_SYNC = 0xA5        # first byte of every command frame to the firmware
 MAGIC = b"\xa5\x5a"
 PITCH_FRAME = 320      # 20 ms window for the pitch heard at each step
 PITCH_FMIN, PITCH_FMAX = 400.0, 4000.0
@@ -127,7 +128,10 @@ class Link:
 
     # ---- commands
     def send(self, data: bytes) -> None:
-        os.write(self.fd, data)
+        """One command, framed for yamabiko_fw: A5, the command and its payload, their 8-bit sum."""
+        frame = bytes([CMD_SYNC]) + data + bytes([sum(data) & 0xFF])
+        while frame:
+            frame = frame[os.write(self.fd, frame):]
 
     def start(self) -> None:
         self.send(b"S")
