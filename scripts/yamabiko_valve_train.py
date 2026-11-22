@@ -47,6 +47,30 @@ class RuleValve(torch.nn.Module):
         return x[:, len(WINDOW)], h                    # voice[t] (the voice block starts after the cents)
 
 
+def travel_target(plant, twin, cents, voice, speed_share=.8, cap=40, min_leap=150.0):
+    """Open on the score's notes, except the start of a note reached by a leap of more than ``min_leap``
+    cent: shut for the time the plunger needs to get there (twin's top speed x ``speed_share``, at most
+    ``cap`` steps).  Rests and the score's re-articulation gaps stay shut.  It depends only on the score and
+    the twin, never on what is heard: the flute must sound for the actuator to hear where it is."""
+    want = voice.clone()
+    flat = cents.reshape(-1)
+    one = type(twin)(**{k: (v[:1].expand(flat.numel()).clone() if torch.is_tensor(v) and v.dim() == 1 else v)
+                        for k, v in vars(twin).items()})
+    pos = plant.position_for_cents(flat, one).reshape(cents.shape)          # (B, T) stroke positions
+    speed = (twin.max_velocity_strokes_s[:1] * speed_share).item() * plant.config.dt   # strokes per step
+    v = voice.cpu().numpy(); c = cents.cpu().numpy(); x = pos.detach().cpu().numpy()
+    w = want.cpu().numpy()
+    for b in range(v.shape[0]):
+        starts = np.flatnonzero(np.diff(np.r_[0, v[b].astype(int)]) == 1)
+        last = None
+        for a in starts:
+            if last is not None and abs(c[b, a] - c[b, last]) > min_leap:
+                steps = int(min(cap, np.ceil(abs(x[b, a] - x[b, last]) / max(speed, 1e-6))))
+                w[b, a:a + steps] = False
+            last = a
+    return torch.as_tensor(w, device=voice.device)
+
+
 def scores(emitted, sounding, cents, voice):
     error = (emitted - cents).abs()
     s, v = sounding & voice, voice
@@ -61,7 +85,10 @@ def main():
     ap.add_argument("twin")
     ap.add_argument("--actuator", required=True, help="the frozen actuator network (NNTwinPerformer .pt)")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--tol", type=float, default=40.0, help="open only within this many cent of the note")
+    ap.add_argument("--tol", type=float, default=40.0, help="--target heard: open only within this many cent")
+    ap.add_argument("--target", choices=["travel", "heard"], default="travel",
+                    help="travel: shut for rests, re-articulation and the travel of a leap (score and twin only); "
+                         "heard: open only where the flute sounds within --tol (it learns to stay shut)")
     ap.add_argument("--steps", type=int, default=300)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--song-steps", type=int, default=400)
@@ -101,7 +128,10 @@ def main():
         rigs = rigs_around(twin, args.batch, args.spread, generator)
         cents, voice = songs(rng, args.batch, args.song_steps, device, plant.config)
         emitted, air, sounding, cmd = play_with_valve(actuator, valve, plant, cents, voice, rigs, batch_twin, generator)
-        want = (voice & ((emitted - cents).abs() < args.tol)).to(air.dtype)
+        if args.target == "travel":
+            want = travel_target(plant, batch_twin, cents, voice).to(air.dtype)
+        else:
+            want = (voice & ((emitted - cents).abs() < args.tol)).to(air.dtype)
         d = plant.config.valve_delay_steps
         loss = (F.binary_cross_entropy(air[:, d:].clamp(1e-5, 1 - 1e-5), want[:, d:])
                 + args.chatter * (cmd[:, 1:] - cmd[:, :-1]).abs().mean())
