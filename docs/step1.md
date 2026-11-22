@@ -1,6 +1,10 @@
 # step1 — NN が PWM を出し、口笛をまねる（2026-11-22）
 
-git のタグ `step1` と、[models/step1/](../models/step1/) のファイルで再現できる。
+step1・step2・step3 は同じコードの中に並べて置き、どれでも動かせる。各 step は `models/<step>/` に
+学習済みの演奏器と `profile.json`（演奏器のファイル、耳の種類、ファンの強さ、音域、弁の位置）を持つ。
+口笛コピーの画面の「使う版」と、`scripts/yamabiko_whistle_copy.py --step step1` で選ぶ。
+`UNOQ=ssh bash scripts/uno_q_push.sh` が `models/` の演奏器と profile も UNO Q に送る。
+コードを step1 の時点に戻したいときは git のタグ `step1`。
 
 ## 中身
 
@@ -38,9 +42,7 @@ git のタグ `step1` と、[models/step1/](../models/step1/) のファイルで
 ### 1. UNO Q に入れる（PC の Git Bash、Wi-Fi 経由）
 
 ```bash
-git checkout step1
-UNOQ=ssh bash scripts/uno_q_push.sh
-scp models/step1/nn_f80_02_runtime.npz models/step1/target_f80_*.npz unoq:/home/arduino/yamabiko/runs/real/
+UNOQ=ssh bash scripts/uno_q_push.sh       # models/step1 も送る
 ssh unoq crontab -l      # 常駐サーバー（--host 0.0.0.0）とテストページが @reboot にあること
 ```
 

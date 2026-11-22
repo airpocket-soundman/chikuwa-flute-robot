@@ -1,0 +1,11 @@
+{
+  "name": "step1",
+  "title": "step1: NN が PWM を出す（耳は YIN、弁は楽譜どおり）",
+  "runtime": "nn_f80_02_runtime.npz",
+  "ear": "yin",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [1560, 1820],
+  "doc": "docs/step1.md"
+}

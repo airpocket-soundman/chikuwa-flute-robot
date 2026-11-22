@@ -248,6 +248,8 @@ class Server:
         from .residual_numpy import runtime_for
         self.take(client)
         runtime = runtime_for(dict(np.load(req["runtime"])))
+        if req.get("ear", "yin") != "yin":
+            raise ValueError(f"ear {req.get('ear')!r} is not available yet (yin only)")
         target = np.load(req["target"])
         cents, voice = target["cents"].astype(np.float64), target["voice"].astype(bool)
         rig = self._rig(req)

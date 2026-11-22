@@ -30,6 +30,14 @@ for f in scripts/yamabiko_collect.py scripts/yamabiko_play.py scripts/yamabiko_e
   put "$f" "$D/$f"
 done
 put mcu/yamabiko_fw/yamabiko_fw.ino "$D/yamabiko_fw/yamabiko_fw.ino"
+# the steps that live side by side (models/<step>/profile.json and its runtime; the PyTorch files stay)
+for dir in models/*/; do
+  [ -f "$dir/profile.json" ] || continue
+  sh_ "mkdir -p $D/$dir"
+  for f in "$dir"profile.json "$dir"*_runtime.npz "$dir"target_*.npz; do
+    [ -f "$f" ] && put "$f" "$D/$f"
+  done
+done
 for p in "$@"; do
   put "$p" "$D/$p"
 done

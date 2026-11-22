@@ -23,6 +23,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from flute_rl.yamabiko.profiles import latest, load_profiles  # noqa: E402
 from flute_rl.yamabiko.remote import Remote, RemoteError  # noqa: E402
 
 ACT_HOLD_S = .4
@@ -241,13 +242,14 @@ VALVE_US = (1560, 1820)       # the SG90 pulses set on the bench page for the cu
 class WhistleJob:
     """One whistle copy at a time, in a thread: count-in, record, analyse (YIN), play, report."""
 
-    def __init__(self, bench, server_port, runtime, low, high, fan):
+    def __init__(self, bench, server_port, profiles):
         self.bench, self.server_port = bench, server_port
-        self.runtime, self.low, self.high, self.fan = runtime, low, high, fan
+        self.profiles = profiles                  # models/<step>/profile.json, any of them runnable
+        self.step = latest(profiles)
         self.lock = threading.Lock()
         self.state = {"phase": "idle", "message": "スタートを押してください"}
         self.thread = None
-        self.tuning = None        # the last calibration: shift_cents, home / top pitch, the sweep
+        self.tunings = {}         # per step, the last calibration: shift_cents, home / top pitch, the sweep
         self.wavs = {}            # "whistle" / "flute": WAV bytes of the last copy
 
     def _launch(self, target, *args, first="準備中"):
@@ -259,11 +261,20 @@ class WhistleJob:
             self.thread.start()
         return {"started": True}
 
-    def start(self, seconds, quantize):
-        return self._launch(self._run, float(seconds), bool(quantize))
+    def _pick(self, step):
+        if step:
+            if step not in self.profiles:
+                raise ValueError(f"{step} がありません")
+            self.step = step
+        return self.profiles[self.step]
 
-    def calibrate(self):
-        return self._launch(self._calibrate, first="キャリブレーション中")
+    def start(self, seconds, quantize, step=None):
+        profile = self._pick(step)
+        return self._launch(self._run, float(seconds), bool(quantize), profile)
+
+    def calibrate(self, step=None):
+        profile = self._pick(step)
+        return self._launch(self._calibrate, profile, first="キャリブレーション中")
 
     def calibrate_at_start(self, wait_s=180.0):
         """Once after the page starts (the board just booted): wait for the command server, then calibrate."""
@@ -277,29 +288,31 @@ class WhistleJob:
                     time.sleep(5)
             time.sleep(5)
             try:
-                self.calibrate()
+                self.calibrate(self.step)
             except ValueError:
                 pass
         threading.Thread(target=go, daemon=True).start()
 
     def status(self):
         with self.lock:
-            return dict(self.state, tuning=self.tuning, has_audio=sorted(self.wavs))
+            return dict(self.state, tuning=self.tunings.get(self.step), has_audio=sorted(self.wavs), step=self.step,
+                        steps=[{"name": n, "title": p.get("title", n)} for n, p in self.profiles.items()])
 
-    def _tune(self, rig):
+    def _tune(self, rig, profile):
         self._set(phase="tune", message="キャリブレーション中（縮み切りの音と、上下に 1 往復）")
-        result = rig.tune(runtime=self.runtime, fan=self.fan)
-        self.tuning = {k: result[k] for k in ("shift_cents", "home_cents", "top_cents", "sweep_max_cents",
-                                              "heard", "phase")}
-        self.tuning["time"] = time.strftime("%H:%M")
+        result = rig.tune(runtime=profile["runtime_path"], fan=profile["fan"])
+        tuning = {k: result[k] for k in ("shift_cents", "home_cents", "top_cents", "sweep_max_cents", "heard", "phase")}
+        tuning["time"] = time.strftime("%H:%M")
+        self.tunings[profile["name"]] = tuning
 
-    def _calibrate(self):
+    def _calibrate(self, profile):
         rig = None
         try:
             with self.bench.lock:
                 self.bench._drop()
             rig = Remote(port=self.server_port, forward=False)
-            self._tune(rig)
+            rig.valve_positions(*profile["valve_us"], move_ms=20)
+            self._tune(rig, profile)
             self._set(phase="idle", message="キャリブレーションできました。スタートを押してください")
         except Exception as exc:                       # noqa: BLE001
             self._set(phase="error", message=f"キャリブレーションできませんでした: {exc}")
@@ -314,7 +327,7 @@ class WhistleJob:
         with self.lock:
             self.state.update(kw)
 
-    def _run(self, seconds, quantize):
+    def _run(self, seconds, quantize, profile):
         import numpy as np
         from flute_rl.yamabiko.whistle import clean_track, to_target, whistle_track
         rig = None
@@ -322,8 +335,9 @@ class WhistleJob:
             with self.bench.lock:                      # the page's own connection lets go: one driver at a time
                 self.bench._drop()
             rig = Remote(port=self.server_port, forward=False)
-            if self.tuning is None:                    # not calibrated since the page started
-                self._tune(rig)
+            rig.valve_positions(*profile["valve_us"], move_ms=20)
+            if profile["name"] not in self.tunings:   # not calibrated since the page started
+                self._tune(rig, profile)
             rig.stop(force=True)                       # fan off, valve shut: only the whistle in the mic
             for k in (3, 2, 1):
                 self._set(phase="count", message=f"{k} …")
@@ -335,7 +349,8 @@ class WhistleJob:
             raw = whistle_track(pcm, sr)
             cents = clean_track(raw)
             try:
-                target, voice, report = to_target(cents, self.low, self.high, quantize=quantize)
+                target, voice, report = to_target(cents, profile["low_cents"], profile["high_cents"],
+                                                  quantize=quantize)
             except ValueError:
                 level = 20 * np.log10(max(float(np.sqrt(np.mean((pcm / 32768.0) ** 2))), 1e-9))
                 raise ValueError(f"口笛が聞こえませんでした（録音の大きさ {level:.0f} dB）。マイクの近くで吹いてください")
@@ -348,9 +363,9 @@ class WhistleJob:
                 return [None if not np.isfinite(v) else round(float(v), 1) for v in a]
             self._set(phase="play", message="演奏中", whistle=listed(raw), cleaned=listed(cents),
                       target=[round(float(v), 1) for v in target], voice=[bool(v) for v in voice], report=report)
-            rig.valve_positions(*VALVE_US, move_ms=20)
-            result = rig.play(self.runtime, str(path), out=str(WHISTLE_DIR / f"{stamp}_play.npz"), repeats=1,
-                              fan=self.fan, shift_cents=self.tuning["shift_cents"], warmup_s=2.0)
+            result = rig.play(profile["runtime_path"], str(path), out=str(WHISTLE_DIR / f"{stamp}_play.npz"),
+                              repeats=1, fan=profile["fan"], shift_cents=self.tunings[profile["name"]]["shift_cents"],
+                              warmup_s=2.0, ear=profile.get("ear", "yin"))
             played = np.load(WHISTLE_DIR / f"{stamp}_play.npz")
             if "0/pcm" in played:
                 self.wavs["flute"] = wav_bytes(played["0/pcm"], int(played["sr"]))
@@ -397,6 +412,7 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
 <div class="row">
 <button id="start">スタート</button>
 <button id="cal" class="sub">キャリブレーション</button>
+<label>使う版 <select id="step"></select></label>
 <label>録音の長さ <select id="sec"><option>3</option><option>4</option><option selected>5</option><option>6</option><option>8</option></select> 秒</label>
 <label><input type="checkbox" id="quant"> 半音にそろえる</label>
 </div>
@@ -441,7 +457,9 @@ async function poll(){
   if(s.target){const tgt=s.target.map((v,i)=>s.voice[i]?v:null);
     plot($("g2"),[{y:tgt,c:css("--c3"),w:3},...(s.heard?[{y:s.heard.map((v,i)=>s.voice[i]?v:null),c:css("--c4"),dots:true}]:[])]);
     $("info2").textContent=s.relative_mae!=null?`調のずれ ${s.key>=0?"+":""}${s.key.toFixed(0)} セント／それを除いた平均の誤差 ${s.relative_mae.toFixed(0)} セント`:""}
-  const tu=s.tuning;
+  if(s.steps&&$("step").options.length!==s.steps.length){$("step").innerHTML=s.steps.map(p=>`<option value="${p.name}">${p.title}</option>`).join("")}
+  if(s.step&&document.activeElement!==$("step"))$("step").value=s.step;
+  const tu=s.tuning;if(!tu){shownTune=null;$("g3").innerHTML="";$("info3").textContent="この版ではまだ測っていません（スタートで先に測ります）"}
   if(tu&&tu.time!==shownTune){shownTune=tu.time;plot($("g3"),[{y:tu.heard,c:css("--c2"),dots:true}]);
     const hz=c=>(440*Math.pow(2,c/1200)).toFixed(0);
     $("info3").textContent=`${tu.time} に測定：縮み切り ${hz(tu.home_cents)} Hz、いちばん高い音 ${tu.sweep_max_cents!=null?hz(tu.sweep_max_cents):"-"} Hz、ツインとのずれ ${tu.shift_cents>=0?"+":""}${tu.shift_cents.toFixed(0)} セント`}
@@ -449,10 +467,10 @@ async function poll(){
   const ha=s.has_audio||[];$("pw").disabled=busy||!ha.includes("whistle");$("pf").disabled=busy||!ha.includes("flute");
   setTimeout(poll,busy?250:1500)}
 $("start").onclick=async()=>{$("start").disabled=true;$("g1").innerHTML="";$("g2").innerHTML="";$("info1").textContent="";$("info2").textContent="";
-  const r=await fetch("/api/whistle/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({seconds:+$("sec").value,quantize:$("quant").checked})});
+  const r=await fetch("/api/whistle/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({seconds:+$("sec").value,quantize:$("quant").checked,step:$("step").value})});
   if(!r.ok){$("msg").textContent=(await r.json()).error}};
 let shownTune=null;
-$("cal").onclick=async()=>{$("cal").disabled=true;const r=await fetch("/api/whistle/calibrate",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+$("cal").onclick=async()=>{$("cal").disabled=true;const r=await fetch("/api/whistle/calibrate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({step:$("step").value})});
   if(!r.ok){$("msg").textContent=(await r.json()).error}};
 function listen(name){const a=$("au");a.src=`/api/whistle/${name}.wav?t=${Date.now()}`;a.play()}
 $("pw").onclick=()=>listen("whistle");$("pf").onclick=()=>listen("flute");
@@ -508,8 +526,9 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
                 "/api/valve": lambda: bench.valve(req.get("open", False)),
                 "/api/servo": lambda: bench.servo_positions(req["open"], req["closed"], req.get("move_ms", 150)),
                 "/api/stop": bench.stop,
-                "/api/whistle/start": lambda: whistle.start(req.get("seconds", 5), req.get("quantize", False)),
-                "/api/whistle/calibrate": whistle.calibrate,
+                "/api/whistle/start": lambda: whistle.start(req.get("seconds", 5), req.get("quantize", False),
+                                                            req.get("step")),
+                "/api/whistle/calibrate": lambda: whistle.calibrate(req.get("step")),
             }
             fn = routes.get(self.path)
             if fn is None:
@@ -529,16 +548,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--server-port", type=int, default=8765)
-    ap.add_argument("--runtime", default=str(WHISTLE_DIR.parent / "nn_f80_02_runtime.npz"),
-                    help="whistle copy: the performer runtime that plays it")
-    ap.add_argument("--low", type=float, default=-10.0, help="whistle copy: the rig's lowest target [cent]")
-    ap.add_argument("--high", type=float, default=1200.0, help="whistle copy: the rig's highest target [cent]")
-    ap.add_argument("--fan", type=float, default=.8, help="whistle copy: fan duty while playing")
     ap.add_argument("--no-calibrate-at-start", action="store_true",
                     help="do not calibrate the flute once the page starts (it sounds the flute for ~10 s)")
     args = ap.parse_args()
     bench = Bench(args.server_port)
-    whistle = WhistleJob(bench, args.server_port, args.runtime, args.low, args.high, args.fan)
+    whistle = WhistleJob(bench, args.server_port, load_profiles())
     httpd = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(bench, whistle))
     if not args.no_calibrate_at_start:
         whistle.calibrate_at_start()
