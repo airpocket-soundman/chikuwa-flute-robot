@@ -85,13 +85,15 @@ def main():
             p = profiles[name]
             runtime = f"{REMOTE}models/{name}/{p['runtime']}"
             valve = f"{REMOTE}models/{name}/{p['valve_runtime']}" if p.get("valve_runtime") else None
+            ear = f"{REMOTE}models/{name}/{p['ear_runtime']}" if p.get("ear_runtime") else None
             rig.valve_positions(*p["valve_us"], move_ms=20)
             tune = rig.tune(runtime=runtime, fan=p["fan"])
             print(f"{name}: home {440 * 2 ** (tune['home_cents'] / 1200):.1f} Hz, shift {tune['shift_cents']:+.1f} cent", flush=True)
             for t in args.targets:
                 rec = f"{REMOTE}runs/real/eval/{stamp}_{name}_{t}.npz"
                 rig.play(runtime, f"{REMOTE}runs/real/target_{t}.npz", out=rec, repeats=args.repeats, fan=p["fan"],
-                         shift_cents=tune["shift_cents"], warmup_s=2.0, ear=p.get("ear", "yin"), valve_runtime=valve)
+                         shift_cents=tune["shift_cents"], warmup_s=2.0, ear=p.get("ear", "yin"), valve_runtime=valve,
+                         ear_runtime=ear)
                 local = out / f"{stamp}_{name}_{t}.npz"
                 subprocess.run(["scp", "-q", "unoq:" + rec, str(local)], check=True)
                 d = np.load(local)

@@ -232,6 +232,7 @@ class RealRig:
 
     def __init__(self, link: Link, flip: bool = False, max_pwm: float = 1.0, pitch_enabled: bool = True):
         self.link, self.flip, self.max_pwm, self.pitch_enabled = link, flip, max_pwm, pitch_enabled
+        self.ear = None   # an ear_nn.Ear to hear with instead of YIN (step3)
         self.t_next = None
         self.late_steps = 0
         self.log = {k: [] for k in self.LOG_KEYS}
@@ -263,7 +264,13 @@ class RealRig:
             self.late_steps += 1
             self.t_next = time.monotonic()
         self.t_next += DT
-        if self.pitch_enabled:
+        if self.pitch_enabled and self.ear is not None:
+            frame = self.link.audio.latest(PITCH_FRAME)
+            cents, conf = self.ear.hear(frame)
+            db = 20.0 * np.log10(max(float(np.sqrt(np.mean(frame * frame))), 1e-9))
+            if db < RMS_GATE_DB:
+                cents = float("nan")
+        elif self.pitch_enabled:
             cents, conf, db = heard_pitch(self.link.audio.latest(PITCH_FRAME))
         else:
             # E2E path: the raw 16 kHz PCM is consumed directly by the model.

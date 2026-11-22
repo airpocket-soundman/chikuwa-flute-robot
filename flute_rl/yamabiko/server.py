@@ -251,11 +251,14 @@ class Server:
         if req.get("valve_runtime"):                   # a separate valve network beside the actuator's
             from .residual_numpy import WithValve
             runtime = WithValve(runtime, dict(np.load(req["valve_runtime"])))
-        if req.get("ear", "yin") != "yin":
-            raise ValueError(f"ear {req.get('ear')!r} is not available yet (yin only)")
         target = np.load(req["target"])
         cents, voice = target["cents"].astype(np.float64), target["voice"].astype(bool)
         rig = self._rig(req)
+        if req.get("ear", "yin") == "nn":                     # step3: the ear network instead of YIN
+            from .ear_nn import Ear
+            rig.ear = Ear(dict(np.load(req["ear_runtime"])))
+        elif req.get("ear", "yin") != "yin":
+            raise ValueError(f"unknown ear {req.get('ear')!r} (yin or nn)")
         self.fan_on, self.fan_duty = True, float(req.get("fan", .7))
         self.link.fan(True, self.fan_duty)
         # the fan spins up with the valve shut (no sound) before the first note; the steps keep the

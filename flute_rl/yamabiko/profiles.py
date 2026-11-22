@@ -5,7 +5,7 @@ Each step folder holds its trained runtime and a profile:
     {"name": "step1", "title": "...", "runtime": "nn_f80_02_runtime.npz", "ear": "yin", "fan": 0.8,
      "low_cents": -10, "high_cents": 1200, "valve_us": [1560, 1820], "doc": "docs/step1.md"}
 
-Optional: "valve_runtime" (a separate valve network run beside the actuator runtime; without it the valve
+Optional: "ear": "nn" with "ear_runtime" (the ear network instead of YIN, step3), "valve_runtime" (a separate valve network run beside the actuator runtime; without it the valve
 follows the score) and "whistle" (options of whistle.clean_track, e.g. {"max_gap_steps": 2} to keep short
 tongued gaps).
 
@@ -29,6 +29,8 @@ def load_profiles(root: pathlib.Path | str = MODELS) -> dict:
         profile["runtime_path"] = str(path.parent / profile["runtime"])
         if profile.get("valve_runtime"):
             profile["valve_runtime_path"] = str(path.parent / profile["valve_runtime"])
+        if profile.get("ear_runtime"):
+            profile["ear_runtime_path"] = str(path.parent / profile["ear_runtime"])
         profile.setdefault("whistle", {})
         profile.setdefault("ear", "yin")
         out[profile["name"]] = profile
