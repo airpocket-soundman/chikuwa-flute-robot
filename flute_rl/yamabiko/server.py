@@ -260,12 +260,14 @@ class Server:
         max_cents = float(req.get("max_cents", cents[voice].max() + 250 if voice.any() else np.inf))
         errors, records = [], {}
         try:
-            shift = 0.0
+            shift = float(req.get("shift_cents", 0.0))   # today's offset, measured by cmd_tune
+            cents = cents + shift
+            max_cents += shift
             for play in range(int(req.get("repeats", 1))):
                 rig.resync()
                 for _ in range(int(round(float(req.get("homing_seconds", 1.3)) / STEP_S))):
                     rig.step(-1.0, False)
-                if play == 0 and req.get("relative", False):
+                if play == 0 and req.get("relative", False) and "shift_cents" not in req:
                     # a relative melody copy: sound the home note, and move the whole target by how far the
                     # flute sounds from the twin's home today (the plunger stays pressed home meanwhile)
                     heard_home = []
@@ -280,6 +282,7 @@ class Server:
                         max_cents += shift
                 runtime.prepare(cents, voice, keep_song_memory=play > 0)
                 pwm_log, heard_log, valid_log = [], [], []
+                audio_start = self.link.audio.end
                 for t in range(len(cents)):
                     pwm, valve = runtime.command(t)
                     h = float(rig.step(pwm, valve)["heard"][0]); ok = bool(np.isfinite(h)) and h <= max_cents
@@ -291,14 +294,60 @@ class Server:
                 records.update({f"{play}/pwm": np.array(pwm_log, np.float32)[None],
                                 f"{play}/heard": heard.astype(np.float32)[None], f"{play}/valid": valid[None],
                                 f"{play}/valve": voice.astype(np.float32)[None],
-                                f"{play}/target_cents": cents.astype(np.float32)[None], f"{play}/target_voice": voice[None]})
+                                f"{play}/target_cents": cents.astype(np.float32)[None], f"{play}/target_voice": voice[None],
+                                f"{play}/pcm": self.link.audio.span(audio_start, self.link.audio.end)})
         finally:
             self.safe("play done")
         out = req.get("out")
         if out:
             pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(out, count=len(errors), shift_cents=shift, **records)
+            np.savez_compressed(out, count=len(errors), shift_cents=shift, sr=SR, **records)
         return {"heard_error_cents": errors, "late_steps": rig.late_steps, "out": out, "shift_cents": shift}
+
+    def cmd_tune(self, client, req):
+        """Today's flute: the home note and one sweep out to the far end and back at ``pwm`` (the end switch
+        cuts the current).  Returns the heard track, the home and top pitch, and ``shift_cents``: how far the
+        home note sounds from the runtime's twin (plays take it as ``shift_cents``)."""
+        from .residual_numpy import runtime_for
+        self.take(client)
+        rig = self._rig(req)
+        self.fan_on, self.fan_duty = True, float(req.get("fan", .8))
+        self.link.fan(True, self.fan_duty)
+        pwm = float(req.get("pwm", .6))
+        heard, phase = [], []
+
+        def step(command, valve, name):
+            h = float(rig.step(command, valve)["heard"][0])
+            heard.append(h if np.isfinite(h) else None); phase.append(name)
+            return rig.log["isense_peak_mv"][-1]
+
+        try:
+            for _ in range(int(round(float(req.get("warmup_s", 3.0)) / STEP_S))):
+                rig.step(0.0, False)
+            for _ in range(int(round(1.3 / STEP_S))):
+                rig.step(-1.0, False)
+            for _ in range(80):
+                step(-.3, True, "home")
+            for direction, name in ((1, "out"), (-1, "in")):
+                for k in range(500):                    # 5 s at most; the end switch cuts the current
+                    peak = step(direction * pwm, True, name)
+                    if k > 30 and 0 <= peak <= 3:
+                        break
+                for _ in range(30):
+                    step(0.0, True, name + "_end")
+        finally:
+            self.safe("tune done")
+        home = [h for h, p in zip(heard, phase) if p == "home" and h is not None][20:]
+        if len(home) < 10:
+            raise RuntimeError("the home note was not heard: is the flute sounding?")
+        home_cents = float(np.median(home))
+        top = [h for h, p in zip(heard, phase) if p == "out_end" and h is not None]
+        sweep = [h for h, p in zip(heard, phase) if p in ("out", "in") and h is not None]
+        twin_home = float(runtime_for(dict(np.load(req["runtime"]))).cents_at(0.0)) if req.get("runtime") else home_cents
+        return {"heard": [None if h is None else round(h, 1) for h in heard], "phase": phase,
+                "home_cents": home_cents, "top_cents": float(np.median(top)) if top else None,
+                "sweep_max_cents": float(np.percentile(sweep, 98)) if sweep else None,
+                "shift_cents": float(np.clip(home_cents - twin_home, -150, 150))}
 
     def _rig(self, req):
         rig = RealRig(self.link, flip=bool(req.get("flip", False)), max_pwm=min(float(req.get("max_pwm", self.max_pwm)),

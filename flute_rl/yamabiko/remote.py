@@ -129,6 +129,10 @@ class Remote:
         """Calibration run on the UNO Q; the record stays there (adb pull it).  kw: max_pwm, sweep, fan, flip."""
         return self.call("calibrate", timeout=60, out=out, **kw)
 
+    def tune(self, runtime=None, **kw):
+        """Today's flute: home note and one sweep (server cmd_tune); its shift_cents goes to play()."""
+        return self.call("tune", timeout=60, runtime=runtime, **kw)
+
     def play(self, runtime, target, out=None, repeats=1, **kw):
         """Play a target with a NumPy runtime; both paths are on the UNO Q (push them first with push())."""
         return self.call("play", timeout=600, runtime=runtime, target=target, out=out, repeats=int(repeats), **kw)

@@ -224,6 +224,17 @@ poll();
 # ----- whistle copy: record a whistle, play it back with a performer runtime ---------------------------
 
 WHISTLE_DIR = pathlib.Path(__file__).resolve().parents[1] / "runs" / "real" / "whistle"
+def wav_bytes(pcm, sr):
+    import io
+    import wave
+    import numpy as np
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(int(sr))
+        w.writeframes(np.asarray(pcm, "<i2").tobytes())
+    return buf.getvalue()
+
+
 VALVE_US = (1560, 1820)       # the SG90 pulses set on the bench page for the current rig (open, closed)
 
 
@@ -236,19 +247,68 @@ class WhistleJob:
         self.lock = threading.Lock()
         self.state = {"phase": "idle", "message": "スタートを押してください"}
         self.thread = None
+        self.tuning = None        # the last calibration: shift_cents, home / top pitch, the sweep
+        self.wavs = {}            # "whistle" / "flute": WAV bytes of the last copy
 
-    def start(self, seconds, quantize):
+    def _launch(self, target, *args, first="準備中"):
         with self.lock:
             if self.thread is not None and self.thread.is_alive():
-                raise ValueError("まだ前の口笛コピーが動いています")
-            self.state = {"phase": "count", "message": "準備中"}
-            self.thread = threading.Thread(target=self._run, args=(float(seconds), bool(quantize)), daemon=True)
+                raise ValueError("まだ前の作業が動いています")
+            self.state = {"phase": "count", "message": first}
+            self.thread = threading.Thread(target=target, args=args, daemon=True)
             self.thread.start()
         return {"started": True}
 
+    def start(self, seconds, quantize):
+        return self._launch(self._run, float(seconds), bool(quantize))
+
+    def calibrate(self):
+        return self._launch(self._calibrate, first="キャリブレーション中")
+
+    def calibrate_at_start(self, wait_s=180.0):
+        """Once after the page starts (the board just booted): wait for the command server, then calibrate."""
+        def go():
+            until = time.time() + wait_s
+            while time.time() < until:
+                try:
+                    Remote(port=self.server_port, forward=False).close()
+                    break
+                except OSError:
+                    time.sleep(5)
+            time.sleep(5)
+            try:
+                self.calibrate()
+            except ValueError:
+                pass
+        threading.Thread(target=go, daemon=True).start()
+
     def status(self):
         with self.lock:
-            return dict(self.state)
+            return dict(self.state, tuning=self.tuning, has_audio=sorted(self.wavs))
+
+    def _tune(self, rig):
+        self._set(phase="tune", message="キャリブレーション中（縮み切りの音と、上下に 1 往復）")
+        result = rig.tune(runtime=self.runtime, fan=self.fan)
+        self.tuning = {k: result[k] for k in ("shift_cents", "home_cents", "top_cents", "sweep_max_cents",
+                                              "heard", "phase")}
+        self.tuning["time"] = time.strftime("%H:%M")
+
+    def _calibrate(self):
+        rig = None
+        try:
+            with self.bench.lock:
+                self.bench._drop()
+            rig = Remote(port=self.server_port, forward=False)
+            self._tune(rig)
+            self._set(phase="idle", message="キャリブレーションできました。スタートを押してください")
+        except Exception as exc:                       # noqa: BLE001
+            self._set(phase="error", message=f"キャリブレーションできませんでした: {exc}")
+        finally:
+            if rig is not None:
+                try:
+                    rig.stop(force=True)
+                finally:
+                    rig.close()
 
     def _set(self, **kw):
         with self.lock:
@@ -262,12 +322,15 @@ class WhistleJob:
             with self.bench.lock:                      # the page's own connection lets go: one driver at a time
                 self.bench._drop()
             rig = Remote(port=self.server_port, forward=False)
+            if self.tuning is None:                    # not calibrated since the page started
+                self._tune(rig)
             rig.stop(force=True)                       # fan off, valve shut: only the whistle in the mic
             for k in (3, 2, 1):
                 self._set(phase="count", message=f"{k} …")
                 time.sleep(1)
             self._set(phase="record", message=f"口笛をどうぞ（{seconds:.0f} 秒）")
             pcm, sr = rig.record(seconds)
+            self.wavs = {"whistle": wav_bytes(pcm, sr)}
             self._set(phase="analyse", message="聞き取り中")
             raw = whistle_track(pcm, sr)
             cents = clean_track(raw)
@@ -287,8 +350,10 @@ class WhistleJob:
                       target=[round(float(v), 1) for v in target], voice=[bool(v) for v in voice], report=report)
             rig.valve_positions(*VALVE_US, move_ms=20)
             result = rig.play(self.runtime, str(path), out=str(WHISTLE_DIR / f"{stamp}_play.npz"), repeats=1,
-                              fan=self.fan, relative=True)
+                              fan=self.fan, shift_cents=self.tuning["shift_cents"], warmup_s=2.0)
             played = np.load(WHISTLE_DIR / f"{stamp}_play.npz")
+            if "0/pcm" in played:
+                self.wavs["flute"] = wav_bytes(played["0/pcm"], int(played["sr"]))
             h, v, tc = played["0/heard"][0], played["0/valid"][0], played["0/target_cents"][0]
             m = v & voice
             key = float(np.median((h - tc)[m])) if m.any() else 0.0
@@ -319,7 +384,8 @@ main{max-width:900px;margin:0 auto;padding:16px}h1{font-size:20px;margin:4px 0 1
 section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
 h2{font-size:16px;margin:0 0 8px}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 button{font:inherit;font-size:20px;padding:18px 28px;border-radius:12px;border:0;background:var(--acc);color:#fff;cursor:pointer}
-button:disabled{opacity:.45;cursor:default}label{color:var(--mute)}select{font:inherit;padding:6px;border-radius:6px}
+button:disabled{opacity:.45;cursor:default}button.sub{background:var(--bg);color:var(--fg);border:1px solid var(--line);font-size:16px;padding:14px 18px}
+button.play{font-size:15px;padding:10px 14px;background:var(--bg);color:var(--fg);border:1px solid var(--line)}label{color:var(--mute)}select{font:inherit;padding:6px;border-radius:6px}
 #msg{font-size:22px;font-weight:600;min-height:1.5em}.mute{color:var(--mute);font-size:14px}
 svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margin-right:14px;font-size:14px}
 .sw{display:inline-block;width:14px;height:4px;vertical-align:middle;margin-right:5px;border-radius:2px}
@@ -330,6 +396,7 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
 <section>
 <div class="row">
 <button id="start">スタート</button>
+<button id="cal" class="sub">キャリブレーション</button>
 <label>録音の長さ <select id="sec"><option>3</option><option>4</option><option selected>5</option><option>6</option><option>8</option></select> 秒</label>
 <label><input type="checkbox" id="quant"> 半音にそろえる</label>
 </div>
@@ -338,10 +405,16 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
 </section>
 <section><h2>聞いた音（口笛）</h2>
 <div class="legend"><span><i class="sw" style="background:var(--c1)"></i>口笛の音程</span><span><i class="sw" style="background:var(--c2)"></i>整えた後</span></div>
-<svg id="g1" viewBox="0 0 860 260"></svg><div class="mute num" id="info1"></div></section>
+<svg id="g1" viewBox="0 0 860 260"></svg><div class="mute num" id="info1"></div>
+<div class="row" style="margin-top:8px"><button class="play" id="pw" disabled>▶ 録音した口笛を聞く</button></div></section>
 <section><h2>再生した音（笛）</h2>
 <div class="legend"><span><i class="sw" style="background:var(--c3)"></i>目標（口笛を笛の音域へ）</span><span><i class="sw" style="background:var(--c4)"></i>笛が鳴らした音</span></div>
-<svg id="g2" viewBox="0 0 860 260"></svg><div class="mute num" id="info2"></div></section>
+<svg id="g2" viewBox="0 0 860 260"></svg><div class="mute num" id="info2"></div>
+<div class="row" style="margin-top:8px"><button class="play" id="pf" disabled>▶ 笛で再現した音を聞く</button></div></section>
+<section><h2>キャリブレーション（その日の笛）</h2>
+<div class="legend"><span><i class="sw" style="background:var(--c2)"></i>縮み切り → 伸び切り → 縮み切り（PWM 0.6）</span></div>
+<svg id="g3" viewBox="0 0 860 200"></svg><div class="mute num" id="info3">まだ測っていません</div></section>
+<audio id="au"></audio>
 </main><script>
 const $=id=>document.getElementById(id);
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
@@ -368,11 +441,21 @@ async function poll(){
   if(s.target){const tgt=s.target.map((v,i)=>s.voice[i]?v:null);
     plot($("g2"),[{y:tgt,c:css("--c3"),w:3},...(s.heard?[{y:s.heard.map((v,i)=>s.voice[i]?v:null),c:css("--c4"),dots:true}]:[])]);
     $("info2").textContent=s.relative_mae!=null?`調のずれ ${s.key>=0?"+":""}${s.key.toFixed(0)} セント／それを除いた平均の誤差 ${s.relative_mae.toFixed(0)} セント`:""}
-  const busy=!["idle","done","error"].includes(s.phase);$("start").disabled=busy;
+  const tu=s.tuning;
+  if(tu&&tu.time!==shownTune){shownTune=tu.time;plot($("g3"),[{y:tu.heard,c:css("--c2"),dots:true}]);
+    const hz=c=>(440*Math.pow(2,c/1200)).toFixed(0);
+    $("info3").textContent=`${tu.time} に測定：縮み切り ${hz(tu.home_cents)} Hz、いちばん高い音 ${tu.sweep_max_cents!=null?hz(tu.sweep_max_cents):"-"} Hz、ツインとのずれ ${tu.shift_cents>=0?"+":""}${tu.shift_cents.toFixed(0)} セント`}
+  const busy=!["idle","done","error"].includes(s.phase);$("start").disabled=busy;$("cal").disabled=busy;
+  const ha=s.has_audio||[];$("pw").disabled=busy||!ha.includes("whistle");$("pf").disabled=busy||!ha.includes("flute");
   setTimeout(poll,busy?250:1500)}
 $("start").onclick=async()=>{$("start").disabled=true;$("g1").innerHTML="";$("g2").innerHTML="";$("info1").textContent="";$("info2").textContent="";
   const r=await fetch("/api/whistle/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({seconds:+$("sec").value,quantize:$("quant").checked})});
   if(!r.ok){$("msg").textContent=(await r.json()).error}};
+let shownTune=null;
+$("cal").onclick=async()=>{$("cal").disabled=true;const r=await fetch("/api/whistle/calibrate",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+  if(!r.ok){$("msg").textContent=(await r.json()).error}};
+function listen(name){const a=$("au");a.src=`/api/whistle/${name}.wav?t=${Date.now()}`;a.play()}
+$("pw").onclick=()=>listen("whistle");$("pf").onclick=()=>listen("flute");
 poll();
 </script></body></html>
 """
@@ -403,6 +486,13 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
                 self._send(200, WHISTLE_PAGE, "text/html; charset=utf-8")
             elif self.path == "/api/whistle/status":
                 self._json(200, whistle.status())
+            elif self.path.split("?")[0] in ("/api/whistle/whistle.wav", "/api/whistle/flute.wav"):
+                name = self.path.split("?")[0].rsplit("/", 1)[1][:-4]
+                data = whistle.wavs.get(name)
+                if data is None:
+                    self._json(404, {"error": "まだ録音がありません"})
+                else:
+                    self._send(200, data, "audio/wav")
             else:
                 self._json(404, {"error": "not found"})
 
@@ -419,6 +509,7 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
                 "/api/servo": lambda: bench.servo_positions(req["open"], req["closed"], req.get("move_ms", 150)),
                 "/api/stop": bench.stop,
                 "/api/whistle/start": lambda: whistle.start(req.get("seconds", 5), req.get("quantize", False)),
+                "/api/whistle/calibrate": whistle.calibrate,
             }
             fn = routes.get(self.path)
             if fn is None:
@@ -443,10 +534,14 @@ def main():
     ap.add_argument("--low", type=float, default=-10.0, help="whistle copy: the rig's lowest target [cent]")
     ap.add_argument("--high", type=float, default=1200.0, help="whistle copy: the rig's highest target [cent]")
     ap.add_argument("--fan", type=float, default=.8, help="whistle copy: fan duty while playing")
+    ap.add_argument("--no-calibrate-at-start", action="store_true",
+                    help="do not calibrate the flute once the page starts (it sounds the flute for ~10 s)")
     args = ap.parse_args()
     bench = Bench(args.server_port)
     whistle = WhistleJob(bench, args.server_port, args.runtime, args.low, args.high, args.fan)
     httpd = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(bench, whistle))
+    if not args.no_calibrate_at_start:
+        whistle.calibrate_at_start()
     print(f"yamabiko web on port {args.port}", flush=True)
     try:
         httpd.serve_forever()
