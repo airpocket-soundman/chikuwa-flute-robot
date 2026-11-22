@@ -60,7 +60,7 @@ def export(model, twin, row: int = 0):
         dcfg.anticipation_lag_steps, dcfg.hold_fraction, dcfg.note_threshold_cents, dcfg.homing_steps,
         pcfg.dt, pcfg.stroke_m, pcfg.temp_c, pcfg.effective_length_m, pcfg.min_length_m, pcfg.deadband,
         pcfg.max_velocity_strokes_s, 1.0 if pcfg.flute_model == "closed_tube" else 0.0,
-        pcfg.low_cents, pcfg.pitch_span_cents], np.float64)
+        pcfg.low_cents, pcfg.pitch_span_cents, pcfg.feature_center, pcfg.feature_scale], np.float64)
     return arrays
 
 
@@ -70,7 +70,8 @@ TWIN_FIELDS = ("torque_gain", "torque_tau_s", "inertia", "coulomb_friction", "vi
 CONSTANTS = ("hidden", "song_slot", "song_rate", "max_aim_offset", "max_pwm_offset", "kp", "kd", "observer_gain",
              "observer_velocity_gain", "anticipation_speed", "anticipation_lag_steps", "hold_fraction",
              "note_threshold_cents", "homing_steps", "dt", "stroke_m", "temp_c", "effective_length_m",
-             "min_length_m", "deadband", "max_velocity_strokes_s", "closed_tube", "low_cents", "pitch_span_cents")
+             "min_length_m", "deadband", "max_velocity_strokes_s", "closed_tube", "low_cents", "pitch_span_cents",
+             "feature_center", "feature_scale")
 
 
 def sigmoid(x):
@@ -89,6 +90,9 @@ class Runtime:
     def __init__(self, arrays):
         self.a = {k: np.asarray(v) for k, v in arrays.items()}
         self.c = dict(zip(CONSTANTS, self.a["constants"].tolist()))
+        self.c.setdefault("feature_center", PITCH_CENTER)     # runtimes exported before the field existed
+        self.c.setdefault("feature_scale", PITCH_SCALE)
+        self.center, self.scale = self.c["feature_center"], self.c["feature_scale"]
         self.t = dict(zip(TWIN_FIELDS, self.a["twin"].tolist()))
         c, t = self.c, self.t
         self.hidden, self.slot = int(c["hidden"]), int(c["song_slot"])
@@ -169,7 +173,7 @@ class Runtime:
     def _window(self, t):
         steps = len(self.cents)
         ids = [min(t + k, steps - 1) for k in WINDOW]
-        return np.concatenate([(self.cents[ids] - PITCH_CENTER) / PITCH_SCALE, self.voice[ids].astype(np.float64)])
+        return np.concatenate([(self.cents[ids] - self.center) / self.scale, self.voice[ids].astype(np.float64)])
 
     def _read(self, t):
         steps = len(self.cents)
@@ -189,8 +193,8 @@ class Runtime:
         x_cmd = min(max(base_aim + c["max_aim_offset"] * math.tanh(self._mlp("planner", planner_in, (0, 2, 4))[0]), 0.0), 1.0)
         u = min(max(c["kp"] * (x_cmd - self.position) - c["kd"] * self.velocity, -1.0), 1.0)
         pwm_det = math.copysign(self.band + (1 - self.band) * abs(u), u) if abs(u) > .01 else 0.0
-        heard_n = (self.heard - PITCH_CENTER) / PITCH_SCALE if self.valid else 0.0
-        target_n = (self.cents[t] - PITCH_CENTER) / PITCH_SCALE
+        heard_n = (self.heard - self.center) / self.scale if self.valid else 0.0
+        target_n = (self.cents[t] - self.center) / self.scale
         features = np.array([x_cmd, self.position, self.velocity, heard_n, float(self.valid),
                              (target_n - heard_n) if self.valid else 0.0, float(self.voice[t]), pwm_det, base_aim])
         x = np.concatenate([features, read]).astype(np.float32)
@@ -217,8 +221,8 @@ class Runtime:
         self.velocity += c["observer_velocity_gain"] * innovation / c["dt"]
         self.x_history = np.clip(self.x_history + shift, 0.0, 1.0)
         then = max(0, t - 2)
-        heard_n = (self.heard - PITCH_CENTER) / PITCH_SCALE if self.valid else 0.0
-        features = np.array([heard_n, float(self.valid), (self.cents[then] - PITCH_CENTER) / PITCH_SCALE,
+        heard_n = (self.heard - self.center) / self.scale if self.valid else 0.0
+        features = np.array([heard_n, float(self.valid), (self.cents[then] - self.center) / self.scale,
                              float(self.voice[then]), self._x_cmd, self.pwm], np.float32)
         x = np.concatenate([features, self.fast])
         proposal = np.tanh(self._mlp("writer.candidate", np.concatenate([x, self.song[then]]), (0, 2)))

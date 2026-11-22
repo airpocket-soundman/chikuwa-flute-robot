@@ -33,7 +33,8 @@ from flute_rl.yamabiko.physical_plant import (DifferentiableMotorFlute, Physical
                                               PhysicalPlantParameters)
 from flute_rl.yamabiko.residual_numpy import export  # noqa: E402
 from flute_rl.yamabiko.residual_performer import ResidualTwinPerformer  # noqa: E402
-from train_yamabiko_residual import episode, songs  # noqa: E402
+from train_yamabiko_residual import episode  # noqa: E402
+from flute_rl.yamabiko.melodies import random_melodies  # noqa: E402
 
 SCALED = ("torque_gain", "torque_tau_s", "inertia", "coulomb_friction", "viscous_friction",
           "max_velocity_strokes_s", "deadband")
@@ -47,7 +48,16 @@ def load_twin(path, device):
               for name, value in report["twin"].items()}
     if "hearing_delay_steps" in fields:
         fields["hearing_delay_steps"] = fields["hearing_delay_steps"].round().long()
-    return PhysicalPlantParameters(**fields), report.get("temp_c")
+    return PhysicalPlantParameters(**fields), report.get("temp_c"), report.get("plant", "realistic")
+
+
+def songs(rng, batch, steps, device, config):
+    """train_yamabiko_residual's mix of melodies, inside the rig's target range."""
+    heavy = int(round(batch * .3))
+    span = dict(low_cents=config.low_cents, high_cents=config.high_cents)
+    a = random_melodies(rng, batch - heavy, steps, device, varied=True, **span)
+    b = random_melodies(rng, heavy, steps, device, varied=True, rest_probability=.45, repeats=10, **span)
+    return torch.cat([a[0], b[0]]), torch.cat([a[1], b[1]])
 
 
 def repeat(twin, batch):
@@ -101,14 +111,14 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); device = args.device
     torch.manual_seed(args.seed); rng = np.random.default_rng(args.seed)
-    twin, temp_c = load_twin(args.twin, device)
-    plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic(**({"temp_c": temp_c} if temp_c is not None else {})))
+    twin, temp_c, plant_name = load_twin(args.twin, device)
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.named(plant_name, **({"temp_c": temp_c} if temp_c is not None else {})))
     start = torch.load(args.checkpoint, map_location=device, weights_only=False)
     model = ResidualTwinPerformer.from_checkpoint(start, plant, device)
 
     eval_rigs = rigs_around(twin, args.eval_rigs, args.spread, torch.Generator(device).manual_seed(7777))
     eval_twin = repeat(twin, args.eval_rigs)
-    eval_songs = songs(np.random.default_rng(900), args.eval_rigs, 500, device)
+    eval_songs = songs(np.random.default_rng(900), args.eval_rigs, 500, device, plant.config)
     before = evaluate(model, plant, eval_rigs, eval_twin, eval_songs, device)
     print(f"pre-trained: play1 {before[0]:.1f} play2 {before[1]:.1f} cents (MAE on rigs around the twin)", flush=True)
     best = {"step": 0, "play1": before[0], "play2": before[1]}
@@ -121,7 +131,7 @@ def main():
     history, started = [], time.time()
     for step in range(1, args.steps + 1):
         rigs = rigs_around(twin, args.batch, args.spread, generator)
-        cents, voice = songs(rng, args.batch, args.song_steps, device)
+        cents, voice = songs(rng, args.batch, args.song_steps, device, plant.config)
         loss, maes = episode(model, plant, rigs, batch_twin, cents, voice, generator)
         optimizer.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step(); schedule.step()

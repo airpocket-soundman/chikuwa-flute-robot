@@ -67,6 +67,11 @@ class PhysicalPlantConfig:
     # by a factor of two).  Drawn after every other parameter, so the other
     # randomized values are unchanged.  None keeps the +-35 % spreads only.
     motor_scale_range: tuple[float, float] | None = None
+    # How the performers' networks see pitch: (cents - feature_center) / feature_scale.  The defaults are
+    # the simulator's 700..1900 cent range; a rig with another range moves them so the same weights see
+    # the same numbers (features.py holds the defaults for older code).
+    feature_center: float = 1300.0
+    feature_scale: float = 600.0
 
     @classmethod
     def from_dict(cls, values: dict) -> "PhysicalPlantConfig":
@@ -84,6 +89,27 @@ class PhysicalPlantConfig:
                       motor_scale_range=(0.4, 2.5))
         values.update(overrides)
         return cls(**values)
+
+    @classmethod
+    def yamabiko1(cls, **overrides) -> "PhysicalPlantConfig":
+        """The first real rig (measured 2026-11-22, fan 50 %): home sounds 421 Hz (-80 cent); the
+        fundamental reaches about 600 Hz half way along the stroke and overblows beyond, so the target
+        range is -40..480 cent; the plunger does not start below |PWM| 0.5 and crosses the stroke in
+        1.39 s at full PWM.  A closed tube of 0.204 m with a 0.12 m stroke matches the pitch measured
+        after runs of 0.1..0.7 s from home within 10 cent."""
+        values = dict(home_cents=-80.0, low_cents=-40.0, high_cents=480.0, stroke_m=.12, deadband=.5,
+                      max_velocity_strokes_s=1 / 1.39, motor_scale_range=(.6, 1.6),
+                      feature_center=220.0, feature_scale=260.0)
+        values.update(overrides)
+        return cls.realistic(**values)
+
+    @classmethod
+    def named(cls, name: str, **overrides) -> "PhysicalPlantConfig":
+        """``realistic`` (the simulator's rig family) or ``yamabiko1`` (the real rig)."""
+        return {"realistic": cls.realistic, "yamabiko1": cls.yamabiko1}[name](**overrides)
+
+    def normalize(self, cents):
+        return (cents - self.feature_center) / self.feature_scale
 
     @property
     def effective_length_m(self) -> float:

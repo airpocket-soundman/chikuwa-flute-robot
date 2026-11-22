@@ -25,7 +25,7 @@ def twin_json(path, plant):
 def test_rigs_stay_around_the_twin(tmp_path):
     plant = DifferentiableMotorFlute(PhysicalPlantConfig.realistic())
     params = twin_json(tmp_path / "twin.json", plant)
-    twin, temp_c = load_twin(tmp_path / "twin.json", "cpu")
+    twin, temp_c, _ = load_twin(tmp_path / "twin.json", "cpu")
     assert temp_c == 24.0 and twin.hearing_delay_steps.dtype == torch.long
     rigs = rigs_around(twin, 256, .12, torch.Generator().manual_seed(0))
     for name in SCALED:

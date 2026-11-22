@@ -49,9 +49,10 @@ def main():
     ap.add_argument("--checkpoint", default="runs/yamabiko_residual_v1.pt")
     ap.add_argument("--fit-steps", type=int, default=300)
     ap.add_argument("--temp", type=float, default=None, help="room temperature [C] if measured")
+    ap.add_argument("--plant", default="realistic", help="realistic (simulated rigs) or yamabiko1 (the first real rig)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); device = args.device
-    config = PhysicalPlantConfig.realistic(**({"temp_c": args.temp} if args.temp is not None else {}))
+    config = PhysicalPlantConfig.named(args.plant, **({"temp_c": args.temp} if args.temp is not None else {}))
     plant = DifferentiableMotorFlute(config)
     logs = load_logs(args.calibration, device)
     for path in args.songs:
@@ -62,7 +63,7 @@ def main():
     values = {name: float(value[0]) for name, value in vars(twin).items() if value is not None}
     report = {"twin": values, "heard_mae_cents_per_record": [float(x) for x in fit.heard_mae],
               "delay_steps": int(fit.delay[0]), "records": [args.calibration] + list(args.songs),
-              "fit_steps": args.fit_steps, "temp_c": config.temp_c}
+              "fit_steps": args.fit_steps, "temp_c": config.temp_c, "plant": args.plant}
     out = pathlib.Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
     out.with_suffix(".json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     model = ResidualTwinPerformer.from_checkpoint(torch.load(args.checkpoint, map_location=device, weights_only=False),

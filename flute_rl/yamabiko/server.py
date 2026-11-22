@@ -227,7 +227,8 @@ class Server:
         self.link.fan(True, float(req.get("fan", .7)))
         try:
             record = calibrate_real(rig, max_pwm=float(req.get("max_pwm", self.max_pwm)),
-                                    sweep=float(req.get("sweep", 1.0)), homing_seconds=float(req.get("homing_seconds", 1.3)))
+                                    sweep=float(req.get("sweep", 1.0)), homing_seconds=float(req.get("homing_seconds", 1.3)),
+                                    plan=str(req.get("plan", "default")), max_cents=req.get("max_cents"))
         finally:
             self.safe("calibration done")
         out = req.get("out")
@@ -247,6 +248,12 @@ class Server:
         cents, voice = target["cents"].astype(np.float64), target["voice"].astype(bool)
         rig = self._rig(req)
         self.link.fan(True, float(req.get("fan", .7)))
+        # the fan spins up with the valve shut (no sound) before the first note; the steps keep the
+        # firmware's 100 ms command watchdog fed
+        for _ in range(int(round(float(req.get("warmup_s", 3.0)) / STEP_S))):
+            rig.step(0.0, False)
+        # heard above this is the flute overblowing, not a position the twin knows: count it as not heard
+        max_cents = float(req.get("max_cents", cents[voice].max() + 250 if voice.any() else np.inf))
         errors, records = [], {}
         try:
             for play in range(int(req.get("repeats", 1))):
@@ -257,7 +264,7 @@ class Server:
                 pwm_log, heard_log, valid_log = [], [], []
                 for t in range(len(cents)):
                     pwm, valve = runtime.command(t)
-                    h = float(rig.step(pwm, valve)["heard"][0]); ok = bool(np.isfinite(h))
+                    h = float(rig.step(pwm, valve)["heard"][0]); ok = bool(np.isfinite(h)) and h <= max_cents
                     runtime.observe(h if ok else 0.0, ok)
                     pwm_log.append(pwm); heard_log.append(h if ok else 0.0); valid_log.append(ok)
                 heard, valid = np.array(heard_log), np.array(valid_log)

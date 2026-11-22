@@ -26,7 +26,7 @@ from .adaptive_memory import SONG_LOOKAHEAD, Writer, AdaptiveMemoryConfig
 from .deterministic_pipeline import EncoderlessDeterministicPerformer, period_ms
 from .melodies import next_voiced
 from .physical_plant import AudibleListener, DifferentiableMotorFlute
-from .rig_adaptive import WINDOW, future_window, normalize
+from .rig_adaptive import WINDOW
 
 
 @dataclass(frozen=True)
@@ -65,6 +65,11 @@ class ResidualTwinPerformer(nn.Module):
         if write_memory is not None:
             write = write_memory
         cfg, det = self.config, self.skeleton
+        normalize = plant.config.normalize
+
+        def future_window(cents, voice, t):
+            ids = [min(t + k, cents.shape[1] - 1) for k in WINDOW]
+            return torch.cat([normalize(cents[:, ids]), voice[:, ids].to(cents.dtype)], 1)
         dcfg = det.config
         batch, steps = cents.shape; device, dtype = cents.device, cents.dtype
         twin = parameters if twin is None else twin
