@@ -1,0 +1,26 @@
+{
+  "twin": {
+    "torque_gain": 12.942869186401367,
+    "torque_tau_s": 0.0074154967442154884,
+    "inertia": 1.0,
+    "coulomb_friction": 2.2727832794189453,
+    "viscous_friction": 9.936861991882324,
+    "max_velocity_strokes_s": 0.8614600300788879,
+    "flute_offset_cents": -0.37948083877563477,
+    "flute_scale": 1.0,
+    "tube_offset_m": -0.0009830298367887735,
+    "temp_offset_c": -0.12886403501033783,
+    "deadband": 0.552519679069519,
+    "hearing_delay_steps": 0.0
+  },
+  "heard_mae_cents_per_record": [
+    30.464223861694336
+  ],
+  "delay_steps": 0,
+  "records": [
+    "runs/real/calibration_y1f80_02.npz"
+  ],
+  "fit_steps": 300,
+  "temp_c": 25.0,
+  "plant": "yamabiko1_fan80"
+}
