@@ -54,6 +54,8 @@ def main():
     ap.add_argument("--teacher", required=True, help="residual performer checkpoint to imitate first")
     ap.add_argument("--out", required=True)
     ap.add_argument("--imitate-steps", type=int, default=150)
+    ap.add_argument("--soft-deadband", type=float, default=0.0,
+                    help="train through a softplus deadband edge of this width (evaluation keeps the exact one)")
     ap.add_argument("--positions", action="store_true", help="also feed the twin's position of target and heard")
     ap.add_argument("--init", default=None, help="start from this NN checkpoint (then imitation is skipped)")
     ap.add_argument("--steps", type=int, default=200)
@@ -69,6 +71,8 @@ def main():
     torch.manual_seed(args.seed); rng = np.random.default_rng(args.seed)
     twin, temp_c, plant_name = load_twin(args.twin, device)
     plant = DifferentiableMotorFlute(PhysicalPlantConfig.named(plant_name, **({"temp_c": temp_c} if temp_c else {})))
+    train_plant = DifferentiableMotorFlute(PhysicalPlantConfig.named(
+        plant_name, soft_deadband=args.soft_deadband, **({"temp_c": temp_c} if temp_c else {})))
     teacher = ResidualTwinPerformer.from_checkpoint(torch.load(args.teacher, map_location=device, weights_only=False),
                                                     plant, device).eval()
     if args.init:
@@ -121,7 +125,7 @@ def main():
     for step in range(1, args.steps + 1):
         rigs = rigs_around(twin, args.batch, args.spread, generator)
         cents, voice = songs(rng, args.batch, args.song_steps, device, plant.config)
-        result = model.perform(plant, cents, voice, rigs, batch_twin, generator)
+        result = model.perform(train_plant, cents, voice, rigs, batch_twin, generator)
         error, tv = measure(result, cents, voice)
         loss = F.smooth_l1_loss(error[voice] / 100, torch.zeros_like(error[voice]), beta=.2) + args.smooth * tv
         optimizer.zero_grad(set_to_none=True); loss.backward()

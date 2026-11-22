@@ -141,6 +141,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}td{p
 #err{color:var(--warn);min-height:1.5em}.mute{color:var(--mute);font-size:14px}
 </style></head><body><main>
 <h1>やまびこ1号 テスト</h1>
+<p><a href="/whistle">口笛コピー →</a></p>
 <section><button class="stop" id="stop">すべて止める</button><div id="err"></div></section>
 
 <section><h2>リニアアクチュエーター</h2>
@@ -219,7 +220,164 @@ poll();
 """
 
 
-def make_handler(bench: Bench):
+
+# ----- whistle copy: record a whistle, play it back with a performer runtime ---------------------------
+
+WHISTLE_DIR = pathlib.Path(__file__).resolve().parents[1] / "runs" / "real" / "whistle"
+VALVE_US = (1560, 1820)       # the SG90 pulses set on the bench page for the current rig (open, closed)
+
+
+class WhistleJob:
+    """One whistle copy at a time, in a thread: count-in, record, analyse (YIN), play, report."""
+
+    def __init__(self, bench, server_port, runtime, low, high, fan):
+        self.bench, self.server_port = bench, server_port
+        self.runtime, self.low, self.high, self.fan = runtime, low, high, fan
+        self.lock = threading.Lock()
+        self.state = {"phase": "idle", "message": "スタートを押してください"}
+        self.thread = None
+
+    def start(self, seconds, quantize):
+        with self.lock:
+            if self.thread is not None and self.thread.is_alive():
+                raise ValueError("まだ前の口笛コピーが動いています")
+            self.state = {"phase": "count", "message": "準備中"}
+            self.thread = threading.Thread(target=self._run, args=(float(seconds), bool(quantize)), daemon=True)
+            self.thread.start()
+        return {"started": True}
+
+    def status(self):
+        with self.lock:
+            return dict(self.state)
+
+    def _set(self, **kw):
+        with self.lock:
+            self.state.update(kw)
+
+    def _run(self, seconds, quantize):
+        import numpy as np
+        from flute_rl.yamabiko.whistle import clean_track, to_target, whistle_track
+        rig = None
+        try:
+            with self.bench.lock:                      # the page's own connection lets go: one driver at a time
+                self.bench._drop()
+            rig = Remote(port=self.server_port, forward=False)
+            rig.stop(force=True)                       # fan off, valve shut: only the whistle in the mic
+            for k in (3, 2, 1):
+                self._set(phase="count", message=f"{k} …")
+                time.sleep(1)
+            self._set(phase="record", message=f"口笛をどうぞ（{seconds:.0f} 秒）")
+            pcm, sr = rig.record(seconds)
+            self._set(phase="analyse", message="聞き取り中")
+            raw = whistle_track(pcm, sr)
+            cents = clean_track(raw)
+            try:
+                target, voice, report = to_target(cents, self.low, self.high, quantize=quantize)
+            except ValueError:
+                level = 20 * np.log10(max(float(np.sqrt(np.mean((pcm / 32768.0) ** 2))), 1e-9))
+                raise ValueError(f"口笛が聞こえませんでした（録音の大きさ {level:.0f} dB）。マイクの近くで吹いてください")
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            WHISTLE_DIR.mkdir(parents=True, exist_ok=True)
+            path = WHISTLE_DIR / f"{stamp}_target.npz"
+            np.savez(path, cents=target, voice=voice, whistle_cents=raw)
+
+            def listed(a):
+                return [None if not np.isfinite(v) else round(float(v), 1) for v in a]
+            self._set(phase="play", message="演奏中", whistle=listed(raw), cleaned=listed(cents),
+                      target=[round(float(v), 1) for v in target], voice=[bool(v) for v in voice], report=report)
+            rig.valve_positions(*VALVE_US, move_ms=20)
+            result = rig.play(self.runtime, str(path), out=str(WHISTLE_DIR / f"{stamp}_play.npz"), repeats=1,
+                              fan=self.fan, relative=True)
+            played = np.load(WHISTLE_DIR / f"{stamp}_play.npz")
+            h, v, tc = played["0/heard"][0], played["0/valid"][0], played["0/target_cents"][0]
+            m = v & voice
+            key = float(np.median((h - tc)[m])) if m.any() else 0.0
+            rel = float(np.abs(h - tc - key)[m].mean()) if m.any() else None
+            shift = float(result.get("shift_cents", 0.0))
+            self._set(phase="done", message="できました",
+                      heard=[round(float(x - shift), 1) if ok else None for x, ok in zip(h, v)],
+                      key=key, relative_mae=rel, shift=shift, stamp=stamp)
+        except Exception as exc:                       # noqa: BLE001  (shown on the page)
+            self._set(phase="error", message=str(exc))
+        finally:
+            if rig is not None:
+                try:
+                    rig.stop(force=True)
+                finally:
+                    rig.close()
+
+
+WHISTLE_PAGE = r"""<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>口笛コピー</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1d2330;--mute:#6b7280;--line:#e3e6eb;--acc:#2563eb;--warn:#dc2626;--ok:#16a34a;--c1:#9ca3af;--c2:#2563eb;--c3:#111827;--c4:#ea580c}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1b2027;--fg:#e8ebf0;--mute:#9aa3af;--line:#2b323c;--acc:#60a5fa;--warn:#f87171;--ok:#4ade80;--c1:#6b7280;--c2:#60a5fa;--c3:#e5e7eb;--c4:#fb923c}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+main{max-width:900px;margin:0 auto;padding:16px}h1{font-size:20px;margin:4px 0 12px}a{color:var(--acc)}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+h2{font-size:16px;margin:0 0 8px}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+button{font:inherit;font-size:20px;padding:18px 28px;border-radius:12px;border:0;background:var(--acc);color:#fff;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}label{color:var(--mute)}select{font:inherit;padding:6px;border-radius:6px}
+#msg{font-size:22px;font-weight:600;min-height:1.5em}.mute{color:var(--mute);font-size:14px}
+svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margin-right:14px;font-size:14px}
+.sw{display:inline-block;width:14px;height:4px;vertical-align:middle;margin-right:5px;border-radius:2px}
+.num{font-variant-numeric:tabular-nums}
+</style></head><body><main>
+<h1>口笛コピー <span class="mute">— 吹いたメロディーを、やまびこ1号がまねします</span></h1>
+<p class="mute"><a href="/">← テストページへ</a></p>
+<section>
+<div class="row">
+<button id="start">スタート</button>
+<label>録音の長さ <select id="sec"><option>3</option><option>4</option><option selected>5</option><option>6</option><option>8</option></select> 秒</label>
+<label><input type="checkbox" id="quant"> 半音にそろえる</label>
+</div>
+<div id="msg" style="margin-top:12px"></div>
+<div class="mute">縦軸はセント（100 セント = 半音、0 = ラ 440 Hz）。メロディーは音程の間隔を保って笛の音域に移します。</div>
+</section>
+<section><h2>聞いた音（口笛）</h2>
+<div class="legend"><span><i class="sw" style="background:var(--c1)"></i>口笛の音程</span><span><i class="sw" style="background:var(--c2)"></i>整えた後</span></div>
+<svg id="g1" viewBox="0 0 860 260"></svg><div class="mute num" id="info1"></div></section>
+<section><h2>再生した音（笛）</h2>
+<div class="legend"><span><i class="sw" style="background:var(--c3)"></i>目標（口笛を笛の音域へ）</span><span><i class="sw" style="background:var(--c4)"></i>笛が鳴らした音</span></div>
+<svg id="g2" viewBox="0 0 860 260"></svg><div class="mute num" id="info2"></div></section>
+</main><script>
+const $=id=>document.getElementById(id);
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+function plot(svg,series){
+  const W=860,H=260,L=56,R=10,T=10,B=30;let lo=Infinity,hi=-Infinity,n=1;
+  for(const s of series){n=Math.max(n,s.y.length);for(const v of s.y){if(v!==null){lo=Math.min(lo,v);hi=Math.max(hi,v)}}}
+  if(!isFinite(lo)){svg.innerHTML='';return}
+  const pad=Math.max(50,(hi-lo)*.08);lo-=pad;hi+=pad;
+  const x=i=>L+(W-L-R)*i/Math.max(1,n-1),y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
+  const step=(hi-lo)>1600?400:(hi-lo)>700?200:100;let g="";
+  for(let v=Math.ceil(lo/step)*step;v<=hi;v+=step){g+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="${css('--line')}"/><text x="${L-6}" y="${y(v)+4}" font-size="12" text-anchor="end" fill="${css('--mute')}">${v}</text>`}
+  for(let s=0;s<=n/100;s++){g+=`<text x="${x(s*100)}" y="${H-10}" font-size="12" text-anchor="middle" fill="${css('--mute')}">${s}s</text>`}
+  for(const s of series){
+    if(s.dots){for(let i=0;i<s.y.length;i++){if(s.y[i]!==null)g+=`<circle cx="${x(i)}" cy="${y(s.y[i])}" r="1.6" fill="${s.c}"/>`}continue}
+    let d="",up=false;for(let i=0;i<s.y.length;i++){const v=s.y[i];if(v===null){up=false;continue}d+=(up?"L":"M")+x(i).toFixed(1)+" "+y(v).toFixed(1);up=true}
+    g+=`<path d="${d}" fill="none" stroke="${s.c}" stroke-width="${s.w||2}" stroke-linejoin="round"/>`}
+  svg.innerHTML=g}
+async function poll(){
+  let s;try{s=await (await fetch("/api/whistle/status")).json()}catch(e){setTimeout(poll,1500);return}
+  $("msg").textContent=s.message||"";$("msg").style.color=s.phase==="error"?css("--warn"):s.phase==="done"?css("--ok"):"";
+  if(s.whistle){
+    plot($("g1"),[{y:s.whistle,c:css("--c1"),dots:true},{y:s.cleaned,c:css("--c2")}]);
+    const r=s.report;$("info1").textContent=`口笛の幅 ${r.whistle_span_cents.toFixed(0)} セント／笛の音域 ${r.range_cents.toFixed(0)} セント`+(r.clipped_fraction>0?`（はみ出し ${(r.clipped_fraction*100).toFixed(0)} %）`:"")}
+  if(s.target){const tgt=s.target.map((v,i)=>s.voice[i]?v:null);
+    plot($("g2"),[{y:tgt,c:css("--c3"),w:3},...(s.heard?[{y:s.heard.map((v,i)=>s.voice[i]?v:null),c:css("--c4"),dots:true}]:[])]);
+    $("info2").textContent=s.relative_mae!=null?`調のずれ ${s.key>=0?"+":""}${s.key.toFixed(0)} セント／それを除いた平均の誤差 ${s.relative_mae.toFixed(0)} セント`:""}
+  const busy=!["idle","done","error"].includes(s.phase);$("start").disabled=busy;
+  setTimeout(poll,busy?250:1500)}
+$("start").onclick=async()=>{$("start").disabled=true;$("g1").innerHTML="";$("g2").innerHTML="";$("info1").textContent="";$("info2").textContent="";
+  const r=await fetch("/api/whistle/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({seconds:+$("sec").value,quantize:$("quant").checked})});
+  if(!r.ok){$("msg").textContent=(await r.json()).error}};
+poll();
+</script></body></html>
+"""
+
+def make_handler(bench: Bench, whistle: "WhistleJob"):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
@@ -241,6 +399,10 @@ def make_handler(bench: Bench):
                 self._send(200, PAGE, "text/html; charset=utf-8")
             elif self.path == "/api/status":
                 self._run(bench.status)
+            elif self.path == "/whistle":
+                self._send(200, WHISTLE_PAGE, "text/html; charset=utf-8")
+            elif self.path == "/api/whistle/status":
+                self._json(200, whistle.status())
             else:
                 self._json(404, {"error": "not found"})
 
@@ -256,6 +418,7 @@ def make_handler(bench: Bench):
                 "/api/valve": lambda: bench.valve(req.get("open", False)),
                 "/api/servo": lambda: bench.servo_positions(req["open"], req["closed"], req.get("move_ms", 150)),
                 "/api/stop": bench.stop,
+                "/api/whistle/start": lambda: whistle.start(req.get("seconds", 5), req.get("quantize", False)),
             }
             fn = routes.get(self.path)
             if fn is None:
@@ -275,9 +438,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--server-port", type=int, default=8765)
+    ap.add_argument("--runtime", default=str(WHISTLE_DIR.parent / "nn_f80_02_runtime.npz"),
+                    help="whistle copy: the performer runtime that plays it")
+    ap.add_argument("--low", type=float, default=-10.0, help="whistle copy: the rig's lowest target [cent]")
+    ap.add_argument("--high", type=float, default=1200.0, help="whistle copy: the rig's highest target [cent]")
+    ap.add_argument("--fan", type=float, default=.8, help="whistle copy: fan duty while playing")
     args = ap.parse_args()
     bench = Bench(args.server_port)
-    httpd = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(bench))
+    whistle = WhistleJob(bench, args.server_port, args.runtime, args.low, args.high, args.fan)
+    httpd = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(bench, whistle))
     print(f"yamabiko web on port {args.port}", flush=True)
     try:
         httpd.serve_forever()

@@ -252,6 +252,12 @@ def export_nn(model, twin, row=0):
     for index, layer in enumerate(model.head):
         if hasattr(layer, "weight"):
             arrays.update(_linear(f"nn.head.{index}", layer))
+    if model.config.song_slot:
+        for index, layer in enumerate(model.writer.candidate):
+            if hasattr(layer, "weight"):
+                arrays.update(_linear(f"nn.writer.candidate.{index}", layer))
+        arrays.update(_linear("nn.writer.gate", model.writer.gate))
+        arrays["nn.song"] = np.array([model.config.song_slot, model.config.song_rate], np.float64)
     return arrays
 
 
@@ -261,13 +267,18 @@ class NNRuntime(Runtime):
     def __init__(self, arrays):
         super().__init__(arrays)
         self.nn_hidden = self.a["nn.cell.w_hh"].shape[1]
-        self.nn_positions = self.a["nn.inp.w"].shape[1] == 2 * len(WINDOW) + 9
+        self.nn_slot, self.nn_rate = ((int(self.a["nn.song"][0]), float(self.a["nn.song"][1])) if "nn.song" in self.a
+                                      else (0, 0.0))
+        self.nn_positions = self.a["nn.inp.w"].shape[1] - len(SONG_LOOKAHEAD) * self.nn_slot == 2 * len(WINDOW) + 9
+        self.song = None
 
     def prepare(self, cents, voice, keep_song_memory=True):
         self.cents = np.asarray(cents, np.float64); self.voice = np.asarray(voice, bool)
         self.position, self.velocity, self.torque = 0.0, 0.0, -self.t["torque_gain"]
         self.fast = np.zeros(self.nn_hidden, np.float32)
         self.heard, self.valid, self.pwm = 0.0, False, 0.0
+        if self.nn_slot and not (keep_song_memory and self.song is not None and self.song.shape[0] == len(self.cents)):
+            self.song = np.zeros((len(self.cents), self.nn_slot), np.float32)
 
     def command(self, t):
         steps = len(self.cents)
@@ -279,6 +290,7 @@ class NNRuntime(Runtime):
                              float(self.voice[t])]]
                            + ([[self.position_for(self.cents[t]),
                                 self.position_for(self.heard) if self.valid else 0.0]] if self.nn_positions else [])
+                           + ([self.song[[min(t + k, steps - 1) for k in SONG_LOOKAHEAD]].reshape(-1)] if self.nn_slot else [])
                            ).astype(np.float32)
         x = np.tanh(self.a["nn.inp.w"] @ x + self.a["nn.inp.b"])
         gi = self.a["nn.cell.w_ih"] @ x + self.a["nn.cell.b_ih"]; gh = self.a["nn.cell.w_hh"] @ self.fast + self.a["nn.cell.b_hh"]
@@ -289,10 +301,20 @@ class NNRuntime(Runtime):
         y = silu(self.a["nn.head.0.w"] @ self.fast + self.a["nn.head.0.b"])
         self.pwm = float(np.tanh(self.a["nn.head.2.w"] @ y + self.a["nn.head.2.b"])[0])
         self.model_step(self.pwm)
+        self._t = t
         return self.pwm, bool(self.voice[t])
 
     def observe(self, heard, valid):
         self.heard, self.valid = (float(heard) if valid else 0.0), bool(valid)
+        if self.nn_slot:
+            t = self._t; then = max(0, t - 2)
+            heard_n = (self.heard - self.center) / self.scale if self.valid else 0.0
+            feats = np.array([heard_n, float(self.valid), (self.cents[then] - self.center) / self.scale,
+                              float(self.voice[then]), self.position, self.pwm], np.float32)
+            x = np.concatenate([feats, self.fast])
+            proposal = np.tanh(self._mlp("nn.writer.candidate", np.concatenate([x, self.song[then]]), (0, 2)))
+            rate = self.nn_rate * sigmoid(self.a["nn.writer.gate.w"] @ x + self.a["nn.writer.gate.b"])[0]
+            self.song[then] = self.song[then] + rate * (proposal - self.song[then])
 
     def position_for(self, cents):
         """Inverse of cents_at for the twin, clamped to the stroke."""

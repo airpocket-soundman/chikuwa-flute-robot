@@ -88,6 +88,9 @@ class PhysicalPlantConfig:
     # Above this pitch the flute overblows: it sounds an octave up or not at all, which the controllers
     # count as not heard (None: never).  The first rig: about +530 cent, half way along the stroke.
     overblow_cents: float | None = None
+    # Training only: the deadband's edge as softplus(x / t) * t instead of relu(x), so a command a little
+    # short of it still gets a gradient toward moving (0: the exact edge, as on the rig and at evaluation).
+    soft_deadband: float = 0.0
 
     @classmethod
     def from_dict(cls, values: dict) -> "PhysicalPlantConfig":
@@ -290,7 +293,10 @@ class DifferentiableMotorFlute:
             if cfg.kinetic_deadband_ratio != 1.0:   # smooth: the full band at rest, the kinetic one moving
                 rest = torch.exp(-(state.velocity / STICTION_SPEED) ** 2)
                 band = band * (cfg.kinetic_deadband_ratio + (1.0 - cfg.kinetic_deadband_ratio) * rest)
-            pwm = torch.sign(pwm) * torch.relu(pwm.abs() - band) / (1.0 - band)
+            excess = pwm.abs() - band
+            excess = (torch.nn.functional.softplus(excess / cfg.soft_deadband) * cfg.soft_deadband
+                      if cfg.soft_deadband > 0 else torch.relu(excess))
+            pwm = torch.sign(pwm) * excess / (1.0 - band)
         alpha = (cfg.dt / params.torque_tau_s).clamp(max=1.0)
         torque = state.torque + alpha * (params.torque_gain * pwm - state.torque)
         # Smooth Coulomb friction keeps the plant differentiable around zero.
