@@ -345,3 +345,62 @@ class NNRuntime(Runtime):
 def runtime_for(arrays):
     """The runtime class an exported file needs."""
     return NNRuntime(arrays) if "nn.inp.w" in arrays else Runtime(arrays)
+
+
+
+# ----- a separate valve network beside the actuator runtime (valve_nn.ValveNN) ------------------------------
+
+def export_valve(model):
+    """NumPy arrays of a ValveNN (keys ``valve.*``)."""
+    arrays = _linear("valve.inp", model.inp)
+    arrays.update({"valve.cell.w_ih": model.cell.weight_ih.detach().cpu().numpy().astype(np.float32),
+                   "valve.cell.w_hh": model.cell.weight_hh.detach().cpu().numpy().astype(np.float32),
+                   "valve.cell.b_ih": model.cell.bias_ih.detach().cpu().numpy().astype(np.float32),
+                   "valve.cell.b_hh": model.cell.bias_hh.detach().cpu().numpy().astype(np.float32)})
+    arrays.update(_linear("valve.out", model.out))
+    return arrays
+
+
+class WithValve:
+    """An actuator runtime (Runtime or NNRuntime) and a valve network run side by side: the actuator's PWM,
+    the valve network's air.  Same calls as Runtime (prepare, command, observe, cents_at)."""
+
+    def __init__(self, actuator, valve_arrays):
+        self.act = actuator
+        self.v = {k: np.asarray(x) for k, x in valve_arrays.items()}
+        self.hidden = self.v["valve.cell.w_hh"].shape[1]
+        self.self_home = getattr(actuator, "self_home", False)
+
+    def cents_at(self, position):
+        return self.act.cents_at(position)
+
+    def prepare(self, cents, voice, keep_song_memory=True):
+        self.act.prepare(cents, voice, keep_song_memory)
+        self.cents = np.asarray(cents, np.float64); self.voice = np.asarray(voice, bool)
+        self.h = np.zeros(self.hidden, np.float32)
+        self.open = 0.0
+        self.heard, self.valid = 0.0, False
+
+    def command(self, t):
+        position, velocity = self.act.position, self.act.velocity      # the twin's guess before this step
+        pwm, _ = self.act.command(t)
+        a = self.act
+        steps = len(self.cents)
+        ids = [min(t + k, steps - 1) for k in WINDOW]
+        heard_n = (self.heard - a.center) / a.scale if self.valid else 0.0
+        gap = ((self.cents[t] - a.center) / a.scale - heard_n) if self.valid else 0.0
+        x = np.concatenate([(self.cents[ids] - a.center) / a.scale, self.voice[ids].astype(np.float64),
+                            [heard_n, float(self.valid), gap, pwm, position, velocity, self.open]]).astype(np.float32)
+        x = np.tanh(self.v["valve.inp.w"] @ x + self.v["valve.inp.b"])
+        gi = self.v["valve.cell.w_ih"] @ x + self.v["valve.cell.b_ih"]
+        gh = self.v["valve.cell.w_hh"] @ self.h + self.v["valve.cell.b_hh"]
+        h = self.hidden
+        r = sigmoid(gi[:h] + gh[:h]); z = sigmoid(gi[h:2 * h] + gh[h:2 * h])
+        n = np.tanh(gi[2 * h:] + r * gh[2 * h:])
+        self.h = ((1 - z) * n + z * self.h).astype(np.float32)
+        self.open = float(sigmoid(self.v["valve.out.w"] @ self.h + self.v["valve.out.b"])[0])
+        return pwm, self.open >= .5
+
+    def observe(self, heard, valid, *rest):
+        self.heard, self.valid = (float(heard) if valid else 0.0), bool(valid)
+        self.act.observe(heard, valid, *rest)
