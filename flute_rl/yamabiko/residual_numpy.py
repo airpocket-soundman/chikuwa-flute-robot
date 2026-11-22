@@ -261,6 +261,7 @@ class NNRuntime(Runtime):
     def __init__(self, arrays):
         super().__init__(arrays)
         self.nn_hidden = self.a["nn.cell.w_hh"].shape[1]
+        self.nn_positions = self.a["nn.inp.w"].shape[1] == 2 * len(WINDOW) + 9
 
     def prepare(self, cents, voice, keep_song_memory=True):
         self.cents = np.asarray(cents, np.float64); self.voice = np.asarray(voice, bool)
@@ -275,7 +276,10 @@ class NNRuntime(Runtime):
         gap = ((self.cents[t] - self.center) / self.scale - heard_n) if self.valid else 0.0
         x = np.concatenate([(self.cents[ids] - self.center) / self.scale, self.voice[ids].astype(np.float64),
                             [heard_n, float(self.valid), gap, self.pwm, self.position, self.velocity,
-                             float(self.voice[t])]]).astype(np.float32)
+                             float(self.voice[t])]]
+                           + ([[self.position_for(self.cents[t]),
+                                self.position_for(self.heard) if self.valid else 0.0]] if self.nn_positions else [])
+                           ).astype(np.float32)
         x = np.tanh(self.a["nn.inp.w"] @ x + self.a["nn.inp.b"])
         gi = self.a["nn.cell.w_ih"] @ x + self.a["nn.cell.b_ih"]; gh = self.a["nn.cell.w_hh"] @ self.fast + self.a["nn.cell.b_hh"]
         h = self.nn_hidden
@@ -289,6 +293,16 @@ class NNRuntime(Runtime):
 
     def observe(self, heard, valid):
         self.heard, self.valid = (float(heard) if valid else 0.0), bool(valid)
+
+    def position_for(self, cents):
+        """Inverse of cents_at for the twin, clamped to the stroke."""
+        c, t = self.c, self.t
+        if c["closed_tube"] < .5:
+            return min(max((cents - t["flute_offset_cents"] - c["low_cents"]) / (c["pitch_span_cents"] * t["flute_scale"]),
+                           0.0), 1.0)
+        speed = 331.3 + .606 * (c["temp_c"] + t["temp_offset_c"])
+        length = speed / (4.0 * A4 * 2.0 ** ((cents - t["flute_offset_cents"]) / 1200.0))
+        return min(max((c["effective_length_m"] + t["tube_offset_m"] - length) / c["stroke_m"], 0.0), 1.0)
 
 
 def runtime_for(arrays):

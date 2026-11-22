@@ -204,13 +204,23 @@ class Link:
             self.poll(left)
 
 
+HIGHPASS_HZ = 250.0    # the fan at 80 % rumbles at 50..110 Hz, 16 dB under the flute: enough to fail YIN
+
+
+def highpass(x: np.ndarray, sr: int = SR, cutoff: float = HIGHPASS_HZ) -> np.ndarray:
+    """The window without its content below ``cutoff`` (FFT bins zeroed; NumPy only, for the UNO Q)."""
+    spectrum = np.fft.rfft(x - x.mean())
+    spectrum[:int(np.ceil(cutoff * len(x) / sr))] = 0.0
+    return np.fft.irfft(spectrum, len(x))
+
+
 def heard_pitch(x: np.ndarray, sr: int = SR) -> tuple[float, float, float]:
     """(cents or NaN, YIN confidence, level [dBFS]) of one window."""
     rms = float(np.sqrt(np.mean(x * x)))
     db = 20.0 * np.log10(max(rms, 1e-9))
     if db < RMS_GATE_DB:
         return float("nan"), 0.0, db
-    f0, conf = yin_frame(x, sr, PITCH_FMIN, PITCH_FMAX)
+    f0, conf = yin_frame(highpass(x, sr), sr, PITCH_FMIN, PITCH_FMAX)
     return (float(hz_to_cents(f0)) if np.isfinite(f0) else float("nan")), conf, db
 
 

@@ -31,6 +31,13 @@ FEATURES = 2 * len(WINDOW) + 7     # window, heard (3), previous pwm, twin posit
 @dataclass(frozen=True)
 class NNConfig:
     hidden: int = 64
+    # also the twin's stroke position of the target now and of what was heard (closed-tube inverse), so the
+    # feedback "heard here, aiming there" is a difference the network does not have to learn to compute
+    positions: bool = False
+
+    @property
+    def features(self) -> int:
+        return FEATURES + (2 if self.positions else 0)
 
 
 class NNTwinPerformer(nn.Module):
@@ -38,21 +45,26 @@ class NNTwinPerformer(nn.Module):
         super().__init__()
         self.config, self.plant = config, plant
         self.motor = EncoderlessDeterministicPerformer(plant).model     # the twin's motor model, open loop
-        self.inp = nn.Linear(FEATURES, config.hidden)
+        self.inp = nn.Linear(config.features, config.hidden)
         self.cell = nn.GRUCell(config.hidden, config.hidden)
         self.head = nn.Sequential(nn.Linear(config.hidden, config.hidden), nn.SiLU(), nn.Linear(config.hidden, 1))
 
     # ----- one step --------------------------------------------------------------------------------
-    def features(self, cents, voice, t, heard, valid, prev_pwm, estimate):
+    def features(self, cents, voice, t, heard, valid, prev_pwm, estimate, twin=None):
         normalize = self.plant.config.normalize
         steps = cents.shape[1]
         ids = [min(t + k, steps - 1) for k in WINDOW]
         dtype = cents.dtype
         heard_n = torch.where(valid, normalize(heard), torch.zeros_like(heard))
         gap = torch.where(valid, normalize(cents[:, t]) - heard_n, torch.zeros_like(heard))
-        return torch.cat([normalize(cents[:, ids]), voice[:, ids].to(dtype),
-                          torch.stack([heard_n, valid.to(dtype), gap, prev_pwm, estimate.position,
-                                       estimate.velocity, voice[:, t].to(dtype)], 1)], 1)
+        parts = [normalize(cents[:, ids]), voice[:, ids].to(dtype),
+                 torch.stack([heard_n, valid.to(dtype), gap, prev_pwm, estimate.position,
+                              estimate.velocity, voice[:, t].to(dtype)], 1)]
+        if self.config.positions:
+            aim = self.plant.position_for_cents(cents[:, t], twin)
+            at = torch.where(valid, self.plant.position_for_cents(heard, twin), torch.zeros_like(heard))
+            parts.append(torch.stack([aim, at], 1))
+        return torch.cat(parts, 1)
 
     def act(self, x, fast):
         fast = self.cell(torch.tanh(self.inp(x)), fast)
@@ -82,7 +94,7 @@ class NNTwinPerformer(nn.Module):
         band = (twin.deadband if twin.deadband is not None else torch.zeros(batch, device=device)).to(dtype)
         played, pwms = [], []
         for t in range(steps):
-            x = self.features(cents, voice, t, heard, valid, pwm, estimate)
+            x = self.features(cents, voice, t, heard, valid, pwm, estimate, twin)
             pwm, fast = self.act(x, fast)
             state = plant.step(state, pwm, parameters)
             estimate = self.motor.step(estimate, pwm, twin)
@@ -106,7 +118,7 @@ class NNTwinPerformer(nn.Module):
         prev = torch.zeros(batch, device=device, dtype=dtype)
         out = []
         for t in range(steps):
-            x = self.features(cents, voice, t, h, v, prev, estimate)
+            x = self.features(cents, voice, t, h, v, prev, estimate, twin)
             u, fast = self.act(x, fast)
             out.append(u)
             prev = pwm[:, t]

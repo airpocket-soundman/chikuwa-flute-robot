@@ -27,7 +27,7 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from flute_rl.yamabiko.nn_performer import NNTwinPerformer  # noqa: E402
+from flute_rl.yamabiko.nn_performer import NNConfig, NNTwinPerformer  # noqa: E402
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig  # noqa: E402
 from flute_rl.yamabiko.residual_numpy import export_nn  # noqa: E402
 from flute_rl.yamabiko.residual_performer import ResidualTwinPerformer  # noqa: E402
@@ -54,6 +54,8 @@ def main():
     ap.add_argument("--teacher", required=True, help="residual performer checkpoint to imitate first")
     ap.add_argument("--out", required=True)
     ap.add_argument("--imitate-steps", type=int, default=150)
+    ap.add_argument("--positions", action="store_true", help="also feed the twin's position of target and heard")
+    ap.add_argument("--init", default=None, help="start from this NN checkpoint (then imitation is skipped)")
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--smooth", type=float, default=.3)
     ap.add_argument("--spread", type=float, default=.12)
@@ -69,7 +71,12 @@ def main():
     plant = DifferentiableMotorFlute(PhysicalPlantConfig.named(plant_name, **({"temp_c": temp_c} if temp_c else {})))
     teacher = ResidualTwinPerformer.from_checkpoint(torch.load(args.teacher, map_location=device, weights_only=False),
                                                     plant, device).eval()
-    model = NNTwinPerformer(plant).to(device)
+    if args.init:
+        model = NNTwinPerformer.from_checkpoint(torch.load(args.init, map_location=device, weights_only=False),
+                                                plant, device)
+        args.imitate_steps = 0
+    else:
+        model = NNTwinPerformer(plant, NNConfig(positions=args.positions)).to(device)
     generator = torch.Generator(device).manual_seed(args.seed)
     eval_rigs = rigs_around(twin, 48, args.spread, torch.Generator(device).manual_seed(7777))
     eval_twin = repeat(twin, 48)
@@ -104,7 +111,7 @@ def main():
         if step == 1 or step % 25 == 0:
             print(f"imitate {step:4d} mse {float(loss):.4f}  {time.time() - started:6.0f}s", flush=True)
     mae, tv, score = evaluate()
-    print(f"after imitation: MAE {mae:.1f} cents, mean |dPWM| {tv:.3f}", flush=True)
+    print(f"{'start' if args.init else 'after imitation'}: MAE {mae:.1f} cents, mean |dPWM| {tv:.3f}", flush=True)
     best = {"step": 0, "mae": mae, "dpwm": tv, "score": score}
     best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
     history.append({"step": 0, "mae": mae, "dpwm": tv})

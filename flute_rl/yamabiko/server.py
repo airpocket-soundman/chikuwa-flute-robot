@@ -227,6 +227,8 @@ class Server:
         self.fan_on, self.fan_duty = True, float(req.get("fan", .7))
         self.link.fan(True, self.fan_duty)
         try:
+            for _ in range(int(round(float(req.get("warmup_s", 3.0)) / STEP_S))):   # fan spin-up, valve shut
+                rig.step(0.0, False)
             record = calibrate_real(rig, max_pwm=float(req.get("max_pwm", self.max_pwm)),
                                     sweep=float(req.get("sweep", 1.0)), homing_seconds=float(req.get("homing_seconds", 1.3)),
                                     plan=str(req.get("plan", "default")), max_cents=req.get("max_cents"))

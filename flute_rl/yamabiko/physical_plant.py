@@ -85,6 +85,9 @@ class PhysicalPlantConfig:
     # rig's plunger motor is loud enough to hide the flute in about half the steps it runs.  Performers
     # apply it (the plant does not see the command when it listens).
     motor_masking: float = 0.0
+    # Above this pitch the flute overblows: it sounds an octave up or not at all, which the controllers
+    # count as not heard (None: never).  The first rig: about +530 cent, half way along the stroke.
+    overblow_cents: float | None = None
 
     @classmethod
     def from_dict(cls, values: dict) -> "PhysicalPlantConfig":
@@ -112,14 +115,27 @@ class PhysicalPlantConfig:
         after runs of 0.1..0.7 s from home within 10 cent."""
         values = dict(home_cents=-80.0, low_cents=-40.0, high_cents=480.0, stroke_m=.12, deadband=.5,
                       max_velocity_strokes_s=1 / 1.39, motor_scale_range=(.6, 1.6),
-                      feature_center=220.0, feature_scale=260.0, kinetic_deadband_ratio=.4, hold_u=.06, motor_masking=.5)
+                      feature_center=220.0, feature_scale=260.0, kinetic_deadband_ratio=.4, hold_u=.06, motor_masking=.5, overblow_cents=530.0)
         values.update(overrides)
         return cls.realistic(**values)
 
     @classmethod
+    def yamabiko1_fan80(cls, **overrides) -> "PhysicalPlantConfig":
+        """The first rig with the fan at 80 % (2026-11-22): home sounds 430 Hz (-40 cent) and the fundamental
+        rises without overblowing to about 1030 Hz at the far end (a closed tube with a 0.117 m stroke), loud
+        enough to be heard over the motor most of the time.  At rest near the far end it does not sound
+        cleanly, so the targets end an octave above home (-10..1200 cent)."""
+        values = dict(home_cents=-40.0, low_cents=-10.0, high_cents=1200.0, overblow_cents=None,
+                      motor_masking=.2, feature_center=595.0, feature_scale=605.0)
+        values.update(overrides)
+        return cls.yamabiko1(**values)
+
+    @classmethod
     def named(cls, name: str, **overrides) -> "PhysicalPlantConfig":
-        """``realistic`` (the simulator's rig family) or ``yamabiko1`` (the real rig)."""
-        return {"realistic": cls.realistic, "yamabiko1": cls.yamabiko1}[name](**overrides)
+        """``realistic`` (the simulator's rig family), ``yamabiko1`` (the real rig, fan 50 %) or
+        ``yamabiko1_fan80`` (fan 80 %)."""
+        return {"realistic": cls.realistic, "yamabiko1": cls.yamabiko1,
+                "yamabiko1_fan80": cls.yamabiko1_fan80}[name](**overrides)
 
     def normalize(self, cents):
         return (cents - self.feature_center) / self.feature_scale
@@ -293,6 +309,8 @@ class DifferentiableMotorFlute:
               params: PhysicalPlantParameters) -> tuple[torch.Tensor, torch.Tensor]:
         cents = self.cents_at(state.position, params)
         sounding = valve >= .5
+        if self.config.overblow_cents is not None:
+            sounding = sounding & (cents <= self.config.overblow_cents)
         return cents, sounding
 
 

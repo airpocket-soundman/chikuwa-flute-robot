@@ -1,15 +1,17 @@
 import numpy as np
 import torch
 
-from flute_rl.yamabiko.nn_performer import NNTwinPerformer
+import pytest
+
+from flute_rl.yamabiko.nn_performer import NNConfig, NNTwinPerformer
 from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig
 from flute_rl.yamabiko.residual_numpy import NNRuntime, export_nn, runtime_for
 
 
-def _setup():
+def _setup(positions=False):
     torch.manual_seed(0)
     plant = DifferentiableMotorFlute(PhysicalPlantConfig.yamabiko1())
-    model = NNTwinPerformer(plant).double()
+    model = NNTwinPerformer(plant, NNConfig(positions=positions)).double()
     twin = plant.parameters(1, "cpu", torch.float64)
     steps = 120
     cents = torch.full((1, steps), 100.0, dtype=torch.float64); cents[:, 60:] = 300.0
@@ -17,8 +19,9 @@ def _setup():
     return plant, model, twin, cents, voice
 
 
-def test_numpy_runtime_matches_torch_step_by_step():
-    plant, model, twin, cents, voice = _setup()
+@pytest.mark.parametrize("positions", [False, True])
+def test_numpy_runtime_matches_torch_step_by_step(positions):
+    plant, model, twin, cents, voice = _setup(positions)
     rng = np.random.default_rng(1)
     heard = 100.0 + 50 * rng.standard_normal(cents.shape[1])
     valid = rng.random(cents.shape[1]) > .3
@@ -29,7 +32,7 @@ def test_numpy_runtime_matches_torch_step_by_step():
     h = torch.zeros(1, dtype=torch.float64); v = torch.zeros(1, dtype=torch.bool); prev = torch.zeros(1, dtype=torch.float64)
     with torch.no_grad():
         for t in range(cents.shape[1]):
-            u, fast = model.act(model.features(cents, voice, t, h, v, prev, estimate), fast)
+            u, fast = model.act(model.features(cents, voice, t, h, v, prev, estimate, twin), fast)
             estimate = model.motor.step(estimate, u, twin)
             pwm, valve = runtime.command(t)
             assert abs(pwm - float(u)) < 1e-4, t

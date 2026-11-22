@@ -18,7 +18,13 @@ CALIBRATION_YAMABIKO1 = ([(level, 25) for level in (.30, .40, .45, .50, .55, .60
                           (.8, 50), (0.0, 30), (-.8, 50), (-1.0, 40),
                           (.6, 100), (0.0, 30), (-.6, 100), (-1.0, 40),
                           (.7, 40), (0.0, 20), (.7, 40), (0.0, 20), (-1.0, 80)])
-PLANS = {"default": CALIBRATION, "yamabiko1": CALIBRATION_YAMABIKO1}
+# The first rig with the fan at 80 %: no overblowing, so the runs cross the whole stroke (about 14 s).
+CALIBRATION_YAMABIKO1_FULL = ([(level, 25) for level in (.30, .40, .45, .50, .55, .60)] + [(0.0, 10)] +
+                              [(-1.0, 100), (1.0, 100), (0.0, 30), (-1.0, 100),
+                               (.8, 80), (0.0, 30), (-.8, 80), (-1.0, 40),
+                               (.6, 150), (0.0, 30), (-.6, 150), (-1.0, 60),
+                               (.7, 40), (0.0, 20), (.7, 40), (0.0, 20), (.7, 40), (0.0, 20), (-1.0, 100)])
+PLANS = {"default": CALIBRATION, "yamabiko1": CALIBRATION_YAMABIKO1, "yamabiko1_full": CALIBRATION_YAMABIKO1_FULL}
 
 
 def calibration_segments(max_pwm: float = 1.0, sweep: float = 1.0, plan: str = "default"):
