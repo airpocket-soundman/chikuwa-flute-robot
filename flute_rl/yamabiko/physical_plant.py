@@ -124,8 +124,9 @@ class PhysicalPlantConfig:
         """The first rig with the fan at 80 % (2026-11-22): home sounds 430 Hz (-40 cent) and the fundamental
         rises without overblowing to about 1030 Hz at the far end (a closed tube with a 0.117 m stroke), loud
         enough to be heard over the motor most of the time.  At rest near the far end it does not sound
-        cleanly, so the targets end an octave above home (-10..1200 cent)."""
-        values = dict(home_cents=-40.0, low_cents=-10.0, high_cents=1200.0, overblow_cents=None,
+        cleanly, so the targets end an octave above home (-10..1200 cent) and the simulated flute is silent
+        above 1250 cent (``overblow_cents``: here not an octave jump, the same loss of the sound)."""
+        values = dict(home_cents=-40.0, low_cents=-10.0, high_cents=1200.0, overblow_cents=1250.0,
                       motor_masking=.2, feature_center=595.0, feature_scale=605.0)
         values.update(overrides)
         return cls.yamabiko1(**values)
