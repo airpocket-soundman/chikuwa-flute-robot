@@ -1,0 +1,19 @@
+{
+  "name": "step4",
+  "title": "step4: ハード変更後の機体に合わせ直したツインで、アクチュエータと弁の NN を学び直し（耳は NN）",
+  "ear": "nn",
+  "ear_runtime": "ear_01_runtime.npz",
+  "doc": "docs/step4.md",
+  "runtime": "nn_f80_t4_s06_runtime.npz",
+  "valve_runtime": "valve_t4_01_runtime.npz",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  }
+}
