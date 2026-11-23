@@ -5,6 +5,9 @@
 
 いちばんの特徴は、**DCリニアアクチュエータに位置センサー（エンコーダ）を付けず、笛の音の高さを位置の手掛かりにする**こと。自分が鳴らした音をMEMSマイクで聴いて、次の動きを直します。「聞いて返す」ので、名前はやまびこ1号です。
 
+![やまびこ1号の装置全景](https://raw.githubusercontent.com/airpocket-soundman/chikuwa-flute-robot/main/docs/protopedia/step1-photo-overall.jpg)
+
+
 ## 技術的な工夫
 - **NNが駆動信号を直接出す**：再帰型ニューラルネットワーク（GRU）が、目標の音と、聞こえた自分の音を比べながら、DCリニアアクチュエータのPWMを10msごとに直接出力します。手書きのPD制御や位置の推定器は使わず、音程を合わせるフィードバックもNNが担います。
 - **音程を位置センサーにする閉ループ**：エンコーダが無いため、聞こえた音程から位置を知り、音程によるフィードバック制御を同時に行います。
@@ -12,10 +15,20 @@
 - **相対的なメロディーコピー**：口笛のメロディーは、音程の間隔を保ったまま笛の音域へ移して吹きます。
 - **Arduino UNO Qで役割分担**：Linux側で音程の推定（YIN）・NNの推論・口笛コピーとウェブ画面、MCU側でI2Sマイクの取り込み・PWM・サーボ信号・安全停止。NNはNumPyだけで動き、1ステップ約1msで10msの周期に収まります。
 
+![仕組み：自分の音を聞きながら、NNが駆動信号を出す](https://raw.githubusercontent.com/airpocket-soundman/chikuwa-flute-robot/main/docs/protopedia/step1-how-it-works.png)
+
+![モデルと学習：デジタルツインの中で学び、実機で動かす](https://raw.githubusercontent.com/airpocket-soundman/chikuwa-flute-robot/main/docs/protopedia/step1-training.png)
+
+
 ## 実機で分かったこと
 - **静止摩擦が大きい**：DCリニアアクチュエータは|PWM| 0.5以下では動き出しません。従来の制御（PD制御＋位置の推定器）は、そのため細かく上下を繰り返していました（1曲で駆動信号の向きが250〜300回反転）。NNの制御では約10回で、滑らかに動きます。
 - **送風の強さで音域が変わる**：ファン80%では裏返らずに、約430〜880Hzの1オクターブを使えます。
 - **口笛コピーの成績（実機）**：ドレミファミレドで、隣り合う音の音程の誤差は13〜16 cent、音程が取れた割合は99%（100 cent＝半音）。カエルの合唱・うぐいす・スーパーマリオのデモで、聞いた口笛の形を写して吹いています。
+
+![デモ「カエルの合唱」：上が聞いた口笛、下がスライドホイッスルで再生した音](https://raw.githubusercontent.com/airpocket-soundman/chikuwa-flute-robot/main/docs/protopedia/step1-demo-graph.png)
+
+上が聞いた口笛、下がスライドホイッスルで再生した音。黒い線の目標を、オレンジの点が追っています。
+
 
 ## 専用基板を2枚設計
 KiCad 10で回路図・両面PCBを設計し、製造用ガーバーも作成しました。
