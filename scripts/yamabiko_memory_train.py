@@ -64,6 +64,37 @@ def make(rng, count, seconds, ear, config, device):
     return items
 
 
+def real_items(folders, holdout, ear, config, device, rng, crops=8, seconds=(4.0, 20.0)):
+    """Songs cut from whistles recorded on the rig (the page's takes of kind whistle, and the whistle copy's
+    recordings): ``crops`` stretches of ``seconds`` per take, the teacher made from YIN as the whistle copy does.
+    Returns (training items, held-out items); the takes named in ``holdout`` only give held-out items."""
+    from flute_rl.yamabiko.whistle import whistle_track
+    train, test = [], []
+    for folder in folders:
+        for path in sorted(pathlib.Path(folder).glob("*.npz")):
+            if "_play" in path.stem or "_target" in path.stem:
+                continue
+            d = np.load(path)
+            if "pcm" not in d.files or ("kind" in d.files and str(d["kind"]) != "whistle"):
+                continue
+            pcm = d["pcm"]
+            codes = ear_codes(ear, pcm / 32768.0, device)
+            n = len(codes)
+            track = np.r_[np.nan, whistle_track(pcm, 16000)][:n]   # whistle_track centres one hop later
+            track = np.r_[track, np.full(n - len(track), np.nan)]
+            held = any(h in path.stem for h in holdout)
+            r = np.random.default_rng(abs(hash(path.stem)) % 2**32) if held else rng
+            for _ in range(crops):
+                length = int(min(n, r.uniform(*seconds) * 100))
+                start = int(r.integers(0, max(1, n - length + 1)))
+                t = teacher(track[start:start + length], config, WHISTLE)
+                if t is None or t[1].sum() < 50:
+                    continue
+                item = (codes[start:start + length], torch.tensor(t[0]), torch.tensor(t[1]))
+                (test if held else train).append(item)
+    return train, test
+
+
 def batch(items, device):
     L = max(len(c) for c, _, _ in items)
     B = len(items)
@@ -176,6 +207,9 @@ def main():
     ap.add_argument("--demo", default=None)
     ap.add_argument("--play", default=None, help="twin json: also play recalled targets in the simulator")
     ap.add_argument("--actuator", default="models/step4/nn_f80_t4_s06.pt")
+    ap.add_argument("--real", nargs="*", default=[], help="folders of whistles recorded on the rig")
+    ap.add_argument("--real-holdout", nargs="*", default=[], help="stems of recordings kept for the test only")
+    ap.add_argument("--real-share", type=float, default=.4, help="share of each batch cut from real whistles")
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); dev = args.device
@@ -185,13 +219,19 @@ def main():
     started = time.time()
     train = make(np.random.default_rng(args.seed), args.songs, (3.0, 20.0), ear, config, dev)
     tests = {s: make(np.random.default_rng(args.seed + 100 + s), 32, float(s), ear, config, dev) for s in (5, 10, 20, 30)}
-    print(f"data: {len(train)} songs, {sum(len(c) for c, _, _ in train) / 6000:.0f} min  {time.time() - started:.0f}s", flush=True)
+    real_train, real_test = (real_items(args.real, args.real_holdout, ear, config, dev, np.random.default_rng(args.seed + 7))
+                             if args.real else ([], []))
+    print(f"data: {len(train)} songs, {sum(len(c) for c, _, _ in train) / 6000:.0f} min; real {len(real_train)} songs "
+          f"for training, {len(real_test)} held out  {time.time() - started:.0f}s", flush=True)
     model = torch_model(config).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.steps)
     rng = np.random.default_rng(args.seed + 1)
     for step in range(1, args.steps + 1):
-        ear_b, target, voice, mask = batch([train[i] for i in rng.choice(len(train), args.batch)], dev)
+        k = int(round(args.batch * args.real_share)) if real_train else 0
+        chosen = [train[i] for i in rng.choice(len(train), args.batch - k)] + \
+                 [real_train[i] for i in rng.choice(len(real_train), k)] if k else [train[i] for i in rng.choice(len(train), args.batch)]
+        ear_b, target, voice, mask = batch(chosen, dev)
         W, G = model.write(ear_b, mask)
         cents, vlog = model.read(W, G, torch.arange(ear_b.shape[1], device=dev))
         pitch = (F.smooth_l1_loss(cents / 100, target / 100, beta=.25, reduction="none") * (1 + voice) * mask).sum() / mask.sum()
@@ -200,14 +240,21 @@ def main():
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step(); sched.step()
         if step % 500 == 0 or step == args.steps:
             s10 = scores(model, tests[10], dev)
+            sr = scores(model, real_test, dev) if real_test else None
             print(f"step {step:5d} loss {loss.item():.4f}  10 s: mae {s10['mae_cents']:.1f} within25 {s10['within_25c']:.3f}"
-                  f" voice {s10['voice_agree']:.3f}  {time.time() - started:.0f}s", flush=True)
+                  f" voice {s10['voice_agree']:.3f}"
+                  + (f"  real: mae {sr['mae_cents']:.1f} after offset {sr['mae_after_offset']:.1f} voice {sr['voice_agree']:.3f}" if sr else "")
+                  + f"  {time.time() - started:.0f}s", flush=True)
     report = {"config": vars(args), "by_length": {f"{s}s": scores(model, items, dev) for s, items in tests.items()}}
     if args.demo:
         items, names = demo_items(args.demo, ear, config, dev)
         report["demo"] = {n: scores(model, [it], dev) for n, it in zip(names, items)}
+    if real_test:
+        report["real_holdout"] = scores(model, real_test, dev)
     if args.play:
         report["play_10s"] = play_scores(model, tests[10][:12], dev, args.play, args.actuator)
+        if real_test:
+            report["play_real"] = play_scores(model, real_test[:12], dev, args.play, args.actuator)
         if args.demo:
             report["play_demo"] = play_scores(model, items, dev, args.play, args.actuator)
     print(json.dumps(report, indent=2, ensure_ascii=False))
