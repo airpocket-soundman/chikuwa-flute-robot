@@ -3,7 +3,7 @@
     python scripts/yamabiko_web_dev.py [--port 8080]      # then open http://127.0.0.1:8080/
 
 The command server runs here on the fake link of tests/test_yamabiko_server.py (a 1 kHz tone at 16 kHz in
-real time); ``POST /dev/press`` presses the fake board button (the page's EXEC button).
+real time); ``POST /dev/press`` presses the fake board button, ``{"n": 2}`` twice quickly.
 """
 from __future__ import annotations
 
@@ -35,8 +35,14 @@ def main():
 
     class Dev(handler):
         def do_POST(self):
-            if self.path == "/dev/press":
-                link.buttons += 1
+            if self.path == "/dev/press":              # {"n": 2} for a double press
+                import json
+                import time
+                n = int(json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}").get("n", 1))
+                for i in range(n):
+                    if i:
+                        time.sleep(.15)
+                    link.buttons += 1
                 return self._json(200, {"buttons": link.buttons})
             return super().do_POST()
 

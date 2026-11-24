@@ -6,10 +6,13 @@
 
 > **2026-11-24 追記（画面とボタン）:** UNO Q の `http://<UNO Q>:8080/` が演奏の画面になった（`scripts/yamabiko_web.py`。手動テストは `/bench`）。
 > classic・step1〜（`models/*/profile.json` があるもの全部）を画面で選び、選んだ版は `runs/web_step.txt` に残る。
-> 基板の EXEC ボタン：待機中に押すと録音開始（その版で未測定ならキャリブレーションから）→ もう一度押すと録音を終えて聞き取り・演奏 → キャリブレーション・演奏中に押すと止まる（サーバーが `stop_on_button` でボタンを見る）。録音は最長 30 秒。
-> 起動時は crontab の `@reboot` でサーバー（15 秒後）と画面（45 秒後、`--no-calibrate-at-start`）が立ち上がる。起動時に笛は鳴らない。
-> 手で起動し直すときは UNO Q の `bash /home/arduino/yamabiko/restart.sh`（`--no-button` を付けるとボタンを受け付けない）。
-> PC で画面だけ試すときは `python scripts/yamabiko_web_dev.py --port 8081`（偽の MCU、音は出ない。`POST /dev/press` がボタン）。
+> - 電源を入れると crontab の `@reboot` でサーバー（15 秒後）と画面（45 秒後）が立ち上がり、**画面が起動後に一度キャリブレーションする（笛が約 10 秒鳴る）**。
+> - 基板の EXEC ボタン：**1 回押す**＝録音開始（新しい曲、練習の記録は消える）→ **1 回押す**＝録音を終えて聞き取り・演奏（練習 1 回目）→
+>   **すばやく 2 回押す**（0.5 秒以内）＝録音せずに同じ曲をもう一度（練習 2 回目、3 回目…）。キャリブレーション・演奏中に押すと止まる。
+> - 練習：サーバーが同じ曲の演奏器を次の演奏まで持ち続ける（`cmd_play` の `practice`）。曲の記憶（`song_slot`）を持つ版なら、前の演奏で書いた記憶を読んで上達する。持たない版は毎回同じに吹く。
+> - 画面の「録音」「練習：もう一度」「止める」はボタンと同じ働き。基板のボタンが押されると、画面の同じボタンが光る（状態の `press`）。
+> - 手で起動し直す：UNO Q の `bash /home/arduino/yamabiko/restart.sh`（`scripts/uno_q_restart.sh`）。`--no-calibrate-at-start --no-button` で音を出さない起動。
+> - PC で画面だけ試す：`python scripts/yamabiko_web_dev.py --port 8081`（偽の MCU、音は出ない。`POST /dev/press`、`{"n": 2}` で 2 回押し）。
 
 A・B 基板を UNO Q に載せて初めて通電し、PC から命令で動かせるところまで来た。その時点の引き継ぎ。
 前の版（2026-09-18、基板設計の前段）は git の履歴にある（`git log -- docs/handoff.md`）。

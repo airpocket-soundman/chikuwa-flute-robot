@@ -102,6 +102,7 @@ class Server:
         self.peak_hold, self.peak_seen = 0, None
         self.audio_seen_end, self.audio_seen_t, self.audio_restarts = None, time.monotonic(), 0
         self.jobs = []                     # (client, id, kind, data) finished in the loop
+        self.practice = None               # (runtime, valve, target) and the runtime the last practice play used
         self.running = True
         self.next_step = time.monotonic()
 
@@ -266,10 +267,17 @@ class Server:
     def cmd_play(self, client, req):
         from .residual_numpy import runtime_for
         self.take(client)
-        runtime = runtime_for(dict(np.load(req["runtime"])))
-        if req.get("valve_runtime"):                   # a separate valve network beside the actuator's
-            from .residual_numpy import WithValve
-            runtime = WithValve(runtime, dict(np.load(req["valve_runtime"])))
+        # practice: the same runtime (and so its song memory) is kept for the next play of the same target
+        key = (req["runtime"], req.get("valve_runtime"), req["target"])
+        practising = bool(req.get("practice")) and self.practice is not None and self.practice[0] == key
+        if practising:
+            runtime = self.practice[1]
+        else:
+            runtime = runtime_for(dict(np.load(req["runtime"])))
+            if req.get("valve_runtime"):               # a separate valve network beside the actuator's
+                from .residual_numpy import WithValve
+                runtime = WithValve(runtime, dict(np.load(req["valve_runtime"])))
+        self.practice = (key, runtime) if req.get("practice") else None
         target = np.load(req["target"])
         cents, voice = target["cents"].astype(np.float64), target["voice"].astype(bool)
         rig = self._rig(req)
@@ -316,7 +324,7 @@ class Server:
                         shift = float(np.clip(np.median(heard_home) - runtime.cents_at(0.0), -150, 150))
                         cents = cents + shift
                         max_cents += shift
-                runtime.prepare(cents, voice, keep_song_memory=play > 0)
+                runtime.prepare(cents, voice, keep_song_memory=play > 0 or practising)
                 pwm_log, heard_log, valid_log, valve_log = [], [], [], []
                 audio_start = self.link.audio.end
                 for t in range(len(cents)):
@@ -348,7 +356,8 @@ class Server:
             pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(out, count=len(errors), shift_cents=shift, sr=SR, **records)
         return {"heard_error_cents": errors, "late_steps": rig.late_steps, "out": out, "shift_cents": shift,
-                "stopped": stopped}
+                "stopped": stopped, "practised": practising,
+                "song_memory": bool(getattr(getattr(runtime, "act", runtime), "nn_slot", 0))}
 
     def cmd_tune(self, client, req):
         """Today's flute: the home note and one sweep out to the far end and back at ``pwm`` (the end switch

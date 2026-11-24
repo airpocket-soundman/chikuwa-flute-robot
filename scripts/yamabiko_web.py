@@ -260,16 +260,22 @@ STEP_FILE = pathlib.Path(__file__).resolve().parents[1] / "runs" / "web_step.txt
 
 
 class WhistleJob:
-    """One job at a time, in a thread: calibrate, or record a whistle until the button (or the page) says
-    stop, analyse it with the chosen step and play it back.  The board button drives it (``press``):
+    """One job at a time, in a thread: calibrate, record a whistle until the button (or the page) says stop,
+    analyse it with the chosen step and play it, or play the last song again.  The board button drives it:
 
-        idle -> record      the first press starts recording (after calibrating if this step has not been)
-        record -> play      the second press ends the recording; analyse, then play
-        otherwise -> stop   a press while calibrating, analysing or playing stops (the server watches the
-                            button itself during tune and play, which keep it busy)
+        idle, one press      record (after calibrating if this step has not been): a new song, practice reset
+        record, a press      end the recording; analyse, then play (practice play 1)
+        idle, two presses    play the last song again without recording (practice): the server keeps the
+                             performer's song memory between these plays, so a step with one gets better
+        otherwise, a press   stop (calibrating, analysing, playing: the server watches the button itself
+                             during tune and play, which keep it busy)
+
+    Every press is also put in the status (``press``: its number and what it did), so the page shows the
+    same button pressed.  The page's buttons call the same actions.
     """
 
     BUSY_SERVER = ("tune", "play")          # phases the command server is busy in (it watches the button)
+    DOUBLE_S = .5                           # a second press within this is a double press
 
     def __init__(self, bench, server_port, profiles):
         self.bench, self.server_port = bench, server_port
@@ -283,6 +289,9 @@ class WhistleJob:
         self.tunings = {}         # per step, the last calibration: shift_cents, home / top pitch, the sweep
         self.wavs = {}            # "whistle" / "flute": WAV bytes of the last copy
         self.button_base = None   # the press count after a tune / play (the server consumed those presses)
+        self.song = None          # the last recorded song: step, target path, the page's tracks
+        self.practice = []        # relative error of every play of that song (practice play 1, 2, ...)
+        self.presses = 0
 
     # ----- the chosen step ---------------------------------------------------------------------------
     def _saved_step(self):
@@ -316,7 +325,7 @@ class WhistleJob:
                 raise ValueError("まだ前の作業が動いています")
             self.stopped = False
             self.end_recording.clear()
-            self.state = {"phase": "prepare", "message": first}
+            self.state = {"phase": "prepare", "message": first, "press": self.state.get("press")}
             self.thread = threading.Thread(target=target, args=args, daemon=True)
             self.thread.start()
         return {"started": True}
@@ -342,14 +351,35 @@ class WhistleJob:
         self.end_recording.set()
         return {"server_busy": self.state.get("phase") in self.BUSY_SERVER}
 
-    def press(self):
+    def _pressed(self, action, presses):
+        """Put a board-button press in the status for the page: its number, single or double, the action."""
+        self.presses += 1
+        self._set(press={"n": self.presses, "action": action, "double": presses >= 2})
+
+    def press(self, presses=1):
+        """The board button: ``presses`` within DOUBLE_S of each other (1 or 2)."""
         phase = self.state.get("phase")
         if not self.busy():
-            self.start(self.state.get("quantize", False))
+            action = "replay" if presses >= 2 else "record"
+            self._pressed(action, presses)
+            try:
+                self.replay() if presses >= 2 else self.start(self.state.get("quantize", False))
+            except ValueError as exc:
+                self._set(phase="idle", message=str(exc))
         elif phase == "record":
+            self._pressed("finish", presses)
             self.finish()
         else:
+            self._pressed("stop", presses)
             self.stop()
+
+    def replay(self, step=None):
+        """Play the last recorded song again, without recording (practice)."""
+        if self.song is None:
+            raise ValueError("まだ録音がありません。1 回押して録音してください")
+        if self.song["step"] != self.step:
+            raise ValueError(f"最後の録音は {self.song['step']} のものです。1 回押して録音し直してください")
+        return self._launch(self._replay, self.profiles[self.step], first="もう一度（練習）")
 
     def calibrate_at_start(self, wait_s=180.0):
         """Once after the page starts (the board just booted): wait for the command server, then calibrate."""
@@ -397,9 +427,21 @@ class WhistleJob:
                     seen = count
                     continue
                 if count != seen:
+                    presses = (count - seen) % 256
                     seen = count
+                    if not self.busy():                # idle: wait for a second press
+                        until = time.monotonic() + self.DOUBLE_S
+                        while time.monotonic() < until and presses < 2:
+                            time.sleep(.05)
+                            try:
+                                now = rig.status().get("button_count")
+                            except Exception:          # noqa: BLE001
+                                break
+                            if now is not None and now != seen:
+                                presses += (now - seen) % 256
+                                seen = now
                     try:
-                        self.press()
+                        self.press(presses)
                     except ValueError:
                         pass
         threading.Thread(target=go, daemon=True).start()
@@ -407,7 +449,8 @@ class WhistleJob:
     def status(self):
         with self.lock:
             return dict(self.state, tuning=self.tunings.get(self.step), has_audio=sorted(self.wavs), step=self.step,
-                        busy=self.busy(),
+                        busy=self.busy(), practice=list(self.practice),
+                        song_step=self.song["step"] if self.song else None,
                         steps=[{"name": n, "title": p.get("title", n), "ear": p.get("ear", "yin"),
                                 "memory": bool(p.get("memory_runtime")), "valve_nn": bool(p.get("valve_runtime"))}
                                for n, p in self.profiles.items()])
@@ -428,6 +471,7 @@ class WhistleJob:
                               **common_ear(profile))
         except RemoteError as exc:
             if "button" in str(exc):
+                self._pressed("stop", 1)
                 raise Stopped("ボタンで止めました") from None
             raise
         finally:
@@ -461,6 +505,54 @@ class WhistleJob:
             self._set(phase="idle", message=str(exc))
         except Exception as exc:                       # noqa: BLE001
             self._set(phase="error", message=f"キャリブレーションできませんでした: {exc}")
+        finally:
+            self._release(rig)
+
+    def _play(self, rig, profile):
+        """Play the last song (practice: the server keeps the song memory from its previous play)."""
+        import numpy as np
+        song = self.song
+        n = len(self.practice) + 1
+        self._set(phase="play", message=f"演奏中（練習 {n} 回目、ボタンで止められます）", heard=None, relative_mae=None)
+        out = WHISTLE_DIR / f"{song['stamp']}_play{n}.npz"
+        try:
+            result = rig.play(profile["runtime_path"], song["path"], out=str(out), repeats=1, fan=profile["fan"],
+                              shift_cents=self.tunings[profile["name"]]["shift_cents"], warmup_s=2.0,
+                              ear=profile.get("ear", "yin"), stop_on_button=True, practice=True,
+                              valve_runtime=profile.get("valve_runtime_path"),
+                              ear_runtime=profile.get("ear_runtime_path"))
+        finally:
+            self._note_buttons(rig)
+        played = np.load(out)
+        if "0/pcm" in played:
+            self.wavs["flute"] = wav_bytes(played["0/pcm"], int(played["sr"]))
+        h, v, tc = played["0/heard"][0], played["0/valid"][0], played["0/target_cents"][0]
+        m = v & song["voice"][:len(v)]
+        key = float(np.median((h - tc)[m])) if m.any() else 0.0
+        rel = float(np.abs(h - tc - key)[m].mean()) if m.any() else None
+        shift = float(result.get("shift_cents", 0.0))
+        if result.get("stopped"):
+            self._pressed("stop", 1)
+            message = "ボタンで止めました"
+        else:
+            self.practice.append(None if rel is None else round(rel, 1))
+            memory = "（この版は練習の記憶を持っていないので、毎回同じように吹きます）" if not result.get("song_memory") else ""
+            message = f"できました（練習 {n} 回目）。2 回押すともう一度、1 回押すと新しく録音します{memory}"
+        self._set(phase="done", message=message, heard=[round(float(x - shift), 1) if ok else None for x, ok in zip(h, v)],
+                  key=key, relative_mae=rel, shift=shift, stamp=song["stamp"])
+
+    def _replay(self, profile):
+        rig = None
+        try:
+            rig = self._connect(profile)
+            if profile["name"] not in self.tunings:
+                self._tune(rig, profile)
+            self._check()
+            self._play(rig, profile)
+        except Stopped as exc:
+            self._set(phase="idle", message=str(exc))
+        except Exception as exc:                       # noqa: BLE001
+            self._set(phase="error", message=str(exc))
         finally:
             self._release(rig)
 
@@ -523,28 +615,11 @@ class WhistleJob:
 
             def listed(a):
                 return [None if not np.isfinite(v) else round(float(v), 1) for v in a]
-            self._set(phase="play", message="演奏中（ボタンで止められます）", whistle=listed(raw), cleaned=listed(cents),
-                      target=[round(float(v), 1) for v in target], voice=[bool(v) for v in voice], report=report,
-                      heard=None, relative_mae=None)
-            try:
-                result = rig.play(profile["runtime_path"], str(path), out=str(WHISTLE_DIR / f"{stamp}_play.npz"),
-                                  repeats=1, fan=profile["fan"], shift_cents=self.tunings[profile["name"]]["shift_cents"],
-                                  warmup_s=2.0, ear=profile.get("ear", "yin"), stop_on_button=True,
-                                  valve_runtime=profile.get("valve_runtime_path"),
-                                  ear_runtime=profile.get("ear_runtime_path"))
-            finally:
-                self._note_buttons(rig)
-            played = np.load(WHISTLE_DIR / f"{stamp}_play.npz")
-            if "0/pcm" in played:
-                self.wavs["flute"] = wav_bytes(played["0/pcm"], int(played["sr"]))
-            h, v, tc = played["0/heard"][0], played["0/valid"][0], played["0/target_cents"][0]
-            m = v & voice[:len(v)]
-            key = float(np.median((h - tc)[m])) if m.any() else 0.0
-            rel = float(np.abs(h - tc - key)[m].mean()) if m.any() else None
-            shift = float(result.get("shift_cents", 0.0))
-            self._set(phase="done", message="ボタンで止めました" if result.get("stopped") else "できました",
-                      heard=[round(float(x - shift), 1) if ok else None for x, ok in zip(h, v)],
-                      key=key, relative_mae=rel, shift=shift, stamp=stamp)
+            self.song = {"step": profile["name"], "path": str(path), "voice": voice, "stamp": stamp}
+            self.practice = []
+            self._set(whistle=listed(raw), cleaned=listed(cents), target=[round(float(v), 1) for v in target],
+                      voice=[bool(v) for v in voice], report=report)
+            self._play(rig, profile)
         except Stopped as exc:
             self._set(phase="idle", message=str(exc))
         except Exception as exc:                       # noqa: BLE001  (shown on the page)
@@ -583,8 +658,16 @@ h2{font-size:16px;margin:0 0 10px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 button{font:inherit;border:0;border-radius:12px;cursor:pointer}
 button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
-#main{font-size:20px;font-weight:700;padding:16px 28px;background:var(--acc);color:var(--onacc);min-width:240px}
-#main.record{background:var(--rec)}#main.stop{background:var(--warn)}
+.act{font-size:19px;font-weight:700;padding:14px 22px;color:var(--onacc);display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:200px;transition:transform .08s}
+.act small{font-size:12px;font-weight:500;opacity:.85}
+#rec{background:var(--acc)}#rec.record{background:var(--rec)}#again{background:var(--c2);filter:saturate(.7)}#stop{background:var(--warn)}
+.act:active,.act.flash{transform:scale(.95);box-shadow:0 0 0 6px var(--acc2),0 0 0 8px var(--acc)}
+.act.flash{animation:flash .7s}@keyframes flash{0%{filter:brightness(1.6)}100%{filter:none}}
+@media (prefers-reduced-motion:reduce){.act.flash{animation:none}}
+.practice{display:flex;gap:10px;align-items:flex-end;min-height:84px;flex-wrap:wrap}
+.practice div{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;color:var(--mute)}
+.practice i{display:block;width:34px;background:var(--c4);border-radius:4px 4px 0 0}
+.practice b{font-size:13px;color:var(--fg);font-variant-numeric:tabular-nums}
 button.sub{background:transparent;color:var(--fg);border:1px solid var(--line);padding:12px 16px}
 button:disabled{opacity:.45;cursor:default}
 label{color:var(--mute);font-size:14px}
@@ -605,16 +688,20 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
   <div id="msg"></div>
   <div class="bar" id="bar" hidden><i id="barfill"></i></div>
   <div class="flow" id="flow">
-    <div data-p="idle"><b>① ボタンを押す</b>録音が始まります</div>
-    <div data-p="record"><b>② 吹き終わったらもう一度</b>録音を終えて、聞き取りと演奏へ</div>
-    <div data-p="play"><b>③ 演奏中に押すと止まる</b>キャリブレーション中も同じ</div>
+    <div data-p="idle"><b>① 1 回押す</b>録音が始まります（新しい曲）</div>
+    <div data-p="record"><b>② 吹き終わったら 1 回押す</b>録音を終えて、聞き取りと演奏へ</div>
+    <div data-p="again"><b>③ 2 回押す</b>録音せずにもう一度。練習を重ねるほどうまくなります</div>
   </div>
   <div class="row">
-    <button id="main">録音スタート</button>
+    <button id="rec" class="act">録音<small>基板のボタン 1 回</small></button>
+    <button id="again" class="act">練習：もう一度<small>基板のボタン 2 回</small></button>
+    <button id="stop" class="act">止める<small>動いている間に 1 回</small></button>
+  </div>
+  <div class="row">
     <button id="cal" class="sub">キャリブレーション</button>
     <label><input type="checkbox" id="quant"> 半音にそろえる</label>
   </div>
-  <div class="mute" id="hint">基板の EXEC ボタンと、この画面のボタンは同じ働きです。版の選択だけはこの画面で行います。</div>
+  <div class="mute" id="hint"></div>
 </section>
 
 <section>
@@ -622,6 +709,9 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
   <div class="steps" id="steps"></div>
   <div class="mute" style="margin-top:8px">選んだ版は覚えておき、次に起動したときも使います。</div>
 </section>
+
+<section><h2>練習の成績 <span class="mute" id="practiceinfo"></span></h2>
+<div class="practice" id="practice"><span class="mute">録音して演奏すると、1 回目から順に並びます（調を合わせた平均の誤差、セント。低いほど良い）</span></div></section>
 
 <div class="grid2">
 <section><h2>聞いた口笛</h2>
@@ -661,7 +751,7 @@ function plot(svg,series,H){
   svg.innerHTML=g}
 async function api(path,body){const r=await fetch("/api/whistle/"+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
   if(!r.ok){$("msg").textContent=(await r.json()).error}return r.ok}
-let S={},shownTune=null,shownStamp=null,stepsKey="";
+let S={},shownTune=null,shownStamp=null,stepsKey="",lastPress=null,shownPractice="";
 function renderSteps(s){
   const key=JSON.stringify(s.steps)+s.step+s.busy;if(key===stepsKey)return;stepsKey=key;
   $("steps").innerHTML=s.steps.map(p=>{const t=[p.ear==="nn"?"耳 NN":"耳 YIN",p.valve_nn?"弁 NN":"弁 規則",...(p.memory?["記憶"]:[])];
@@ -673,13 +763,23 @@ async function poll(){
   S=s;const ph=s.phase||"idle";
   $("dot").className="dot "+ph;$("phase").textContent=PHASE[ph]||ph;$("stepnow").textContent=s.step?"・"+s.step:"";
   $("msg").textContent=s.message||"";$("msg").style.color=ph==="error"?css("--warn"):"";
-  const stage=ph==="record"?"record":["tune","analyse","play","prepare"].includes(ph)?"play":"idle";
+  const stage=ph==="record"?"record":(s.practice||[]).length&&!s.busy?"again":"idle";
   for(const d of $("flow").children)d.classList.toggle("on",d.dataset.p===stage);
   if(ph==="record"&&s.record_started){$("bar").hidden=false;$("barfill").style.width=Math.min(100,(Date.now()/1000-s.record_started)/s.max_seconds*100)+"%"}else{$("bar").hidden=true}
-  const m=$("main");
-  if(!s.busy){m.textContent="録音スタート";m.className=""}else if(ph==="record"){m.textContent="録音終了して演奏";m.className="record"}else{m.textContent="止める";m.className="stop"}
-  m.disabled=s.busy&&["tune","play"].includes(ph);
-  $("hint").textContent=m.disabled?"いまは基板の EXEC ボタンで止められます（画面からは届きません）。":"基板の EXEC ボタンと、この画面のボタンは同じ働きです。版の選択だけはこの画面で行います。";
+  const rec=$("rec"),serverBusy=s.busy&&["tune","play"].includes(ph);
+  rec.firstChild.textContent=ph==="record"?"録音終了して演奏":"録音";rec.classList.toggle("record",ph==="record");
+  rec.disabled=s.busy&&ph!=="record";
+  $("again").disabled=s.busy||!s.song_step||s.song_step!==s.step;
+  $("stop").disabled=!s.busy||ph==="record"||serverBusy;
+  $("hint").textContent=serverBusy?"いまは基板の EXEC ボタンで止められます（画面からは届きません）。":"基板の EXEC ボタンと、この画面のボタンは同じ働きです。版の選択だけはこの画面で行います。";
+  if(s.press&&s.press.n!==lastPress){if(lastPress!==null){const b=$({record:"rec",finish:"rec",replay:"again",stop:"stop"}[s.press.action]);
+      if(b){b.classList.remove("flash");void b.offsetWidth;b.classList.add("flash");setTimeout(()=>b.classList.remove("flash"),700)}}lastPress=s.press.n}
+  const pr=s.practice||[];const key2=JSON.stringify(pr);
+  if(key2!==shownPractice){shownPractice=key2;
+    if(pr.length){const mx=Math.max(...pr.filter(v=>v!==null),1);
+      $("practice").innerHTML=pr.map((v,i)=>`<div><b>${v===null?"-":v.toFixed(0)}</b><i style="height:${v===null?2:Math.max(4,v/mx*60)}px"></i>${i+1} 回目</div>`).join("");
+      $("practiceinfo").textContent=pr.length>1&&pr[0]!==null&&pr[pr.length-1]!==null?`1 回目 ${pr[0].toFixed(0)} → ${pr.length} 回目 ${pr[pr.length-1].toFixed(0)} セント`:""}
+    else{$("practice").innerHTML='<span class="mute">録音して演奏すると、1 回目から順に並びます（調を合わせた平均の誤差、セント。低いほど良い）</span>';$("practiceinfo").textContent=""}}
   $("cal").disabled=s.busy;
   renderSteps(s);
   if(s.whistle){plot($("g1"),[{y:s.whistle,c:css("--c1"),dots:true},{y:s.cleaned,c:css("--c2")}]);
@@ -695,7 +795,8 @@ async function poll(){
     $("info3").textContent=`${tu.time} に測定：縮み切り ${hz(tu.home_cents)} Hz、いちばん高い音 ${tu.sweep_max_cents!=null?hz(tu.sweep_max_cents):"-"} Hz、ツインとのずれ ${tu.shift_cents>=0?"+":""}${tu.shift_cents.toFixed(0)} セント`}
   const ha=s.has_audio||[];$("pw").disabled=s.busy||!ha.includes("whistle");$("pf").disabled=s.busy||!ha.includes("flute");
   setTimeout(poll,s.busy?250:1000)}
-$("main").onclick=()=>{if(!S.busy)api("start",{quantize:$("quant").checked});else if(S.phase==="record")api("finish");else api("stop")};
+$("rec").onclick=()=>{if(S.phase==="record")api("finish");else api("start",{quantize:$("quant").checked})};
+$("again").onclick=()=>api("replay");$("stop").onclick=()=>api("stop");
 $("cal").onclick=()=>api("calibrate");
 function listen(name){const a=$("au");a.src=`/api/whistle/${name}.wav?t=${Date.now()}`;a.play()}
 $("pw").onclick=()=>listen("whistle");$("pf").onclick=()=>listen("flute");
@@ -754,6 +855,7 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
                 "/api/stop": bench.stop,
                 "/api/whistle/start": lambda: whistle.start(req.get("quantize", False), req.get("step")),
                 "/api/whistle/finish": whistle.finish,
+                "/api/whistle/replay": lambda: whistle.replay(),
                 "/api/whistle/stop": whistle.stop,
                 "/api/whistle/step": lambda: whistle.choose(req["step"]),
                 "/api/whistle/calibrate": lambda: whistle.calibrate(req.get("step")),

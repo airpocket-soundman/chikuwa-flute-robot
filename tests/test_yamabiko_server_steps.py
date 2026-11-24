@@ -76,3 +76,24 @@ def test_the_board_button_stops_a_play(server, files):   # noqa: F811
     assert int(record["count"]) == 1 and record["0/pwm"].shape[1] < steps
     assert record["0/target_cents"].shape == record["0/pwm"].shape
     assert link.fan_state[0] is False                     # back to safe
+
+
+def test_practice_keeps_the_song_memory_between_plays(server, files):   # noqa: F811
+    srv, link = server
+    torch.manual_seed(1)
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.yamabiko1_fan80())
+    model = NNTwinPerformer(plant, NNConfig(positions=True, song_slot=4))
+    with torch.no_grad():
+        for p in model.writer.parameters():
+            p.normal_(0, .5)                               # write something
+    np.savez(files / "song.npz", **export_nn(model, plant.parameters(1, "cpu")))
+    kw = dict(out=str(files / "p.npz"), repeats=1, fan=.8, warmup_s=.05, homing_seconds=.05, practice=True)
+    with Remote(port=srv.port, forward=False) as rig:
+        first = rig.play(str(files / "song.npz"), str(files / "target.npz"), **kw)
+        memory = srv.practice[1].song.copy()
+        second = rig.play(str(files / "song.npz"), str(files / "target.npz"), **kw)
+        assert not first["practised"] and second["practised"] and second["song_memory"]
+        assert np.abs(memory).sum() > 0 and srv.practice[1].song is not None
+        np.savez(files / "other.npz", cents=np.full(60, 1400.0, np.float32), voice=np.ones(60, bool))
+        third = rig.play(str(files / "song.npz"), str(files / "other.npz"), **kw)      # a new song: fresh
+        assert not third["practised"]
