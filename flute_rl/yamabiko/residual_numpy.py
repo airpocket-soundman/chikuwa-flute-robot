@@ -260,6 +260,7 @@ def export_nn(model, twin, row=0):
         arrays["nn.song"] = np.array([model.config.song_slot, model.config.song_rate], np.float64)
     arrays["nn.flags"] = np.array([model.config.valve, model.config.current, model.config.self_home], np.float64)
     arrays["nn.inputs"] = np.array([model.config.positions, model.config.twin_free], np.float64)
+    arrays["nn.prev_play"] = np.array(int(model.config.prev_play))
     return arrays
 
 
@@ -282,6 +283,8 @@ class NNRuntime(Runtime):
             self.nn_twin_free = False
         self.current = 0.0
         self.song = None
+        self.nn_prev = bool(self.a.get("nn.prev_play", 0))     # practice: the previous play's record
+        self.rec = None
 
     def prepare(self, cents, voice, keep_song_memory=True):
         self.cents = np.asarray(cents, np.float64); self.voice = np.asarray(voice, bool)
@@ -292,6 +295,12 @@ class NNRuntime(Runtime):
         self.heard, self.valid, self.pwm = 0.0, False, 0.0
         if self.nn_slot and not (keep_song_memory and self.song is not None and self.song.shape[0] == len(self.cents)):
             self.song = np.zeros((len(self.cents), self.nn_slot), np.float32)
+        if self.nn_prev:
+            steps = len(self.cents)
+            same = keep_song_memory and self.rec is not None and len(self.rec["err"]) == steps
+            self.prev = self.rec if same else {"err": np.zeros(steps), "valid": np.zeros(steps), "pwm": np.zeros(steps)}
+            self.prev_has = 1.0 if same else 0.0
+            self.rec = {"err": np.zeros(steps), "valid": np.zeros(steps), "pwm": np.zeros(steps)}
 
     def command(self, t):
         steps = len(self.cents)
@@ -304,6 +313,7 @@ class NNRuntime(Runtime):
                            + ([[self.position_for(self.cents[t]),
                                 self.position_for(self.heard) if self.valid else 0.0]] if self.nn_positions else [])
                            + ([self.song[[min(t + k, steps - 1) for k in SONG_LOOKAHEAD]].reshape(-1)] if self.nn_slot else [])
+                           + (self._prev_features(t) if self.nn_prev else [])
                            + ([[self.current]] if self.nn_current else [])
                            ).astype(np.float32)
         x = np.tanh(self.a["nn.inp.w"] @ x + self.a["nn.inp.b"])
@@ -321,10 +331,21 @@ class NNRuntime(Runtime):
         self.current = abs(self.pwm)              # until observe() hears the real one
         return self.pwm, valve
 
+    def _prev_features(self, t):
+        from .nn_performer import PREV_LOOK
+        steps = len(self.cents)
+        look = [min(t + k, steps - 1) for k in PREV_LOOK]
+        return [self.prev["err"][look], self.prev["valid"][look], self.prev["pwm"][look], [self.prev_has]]
+
     def observe(self, heard, valid, current=None):
         """``current``: the motor current as a fraction of the full-PWM running current (the rig: isense_mv
         / CURRENT_FULL_MV), 0 when an end switch has cut it."""
         self.heard, self.valid = (float(heard) if valid else 0.0), bool(valid)
+        if self.nn_prev:                                   # this play's record, for the next play
+            t = self._t
+            self.rec["err"][t] = ((self.heard - self.cents[t]) / self.scale) if self.valid else 0.0
+            self.rec["valid"][t] = float(self.valid)
+            self.rec["pwm"][t] = self.pwm
         if current is not None:
             self.current = float(current)
         if self.nn_slot:

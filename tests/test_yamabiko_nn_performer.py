@@ -84,3 +84,42 @@ def test_twin_free_layout_drops_the_twin_inputs_and_loads_by_name():
     rt.prepare(np.linspace(0, 600, 30), np.ones(30, bool))
     for t in range(30):
         rt.command(t); rt.observe(0.0, False)
+
+
+def test_prev_play_record_is_read_on_the_next_play_the_same_on_numpy():
+    import numpy as np
+    import torch
+    from flute_rl.yamabiko.nn_performer import NNConfig, NNTwinPerformer
+    from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig
+    from flute_rl.yamabiko.residual_numpy import export_nn, runtime_for
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.yamabiko1_fan80())
+    torch.manual_seed(0)
+    m = NNTwinPerformer(plant, NNConfig(twin_free=True, prev_play=True))
+    with torch.no_grad():
+        m.inp.weight.normal_(0, .3)
+    twin = plant.parameters(1, "cpu")
+    rt = runtime_for(export_nn(m, twin))
+    steps = 40
+    cents = np.linspace(0, 600, steps); voice = np.ones(steps, bool)
+    C = torch.tensor(cents, dtype=torch.float32)[None]; V = torch.tensor(voice)[None]
+    rng = np.random.default_rng(0)
+    song, worst, first = m.empty_song(1, steps, "cpu", torch.float32), 0.0, []
+    for play in range(2):
+        rt.prepare(cents, voice, keep_song_memory=play > 0)
+        est, fast = m.start(1, "cpu", torch.float32, twin)
+        pwm, h, v = torch.zeros(1), torch.zeros(1), torch.zeros(1, dtype=torch.bool)
+        errs, vals, pws, out = [], [], [], []
+        with torch.no_grad():
+            for t in range(steps):
+                x = m.features(C, V, t, h, v, pwm, est, twin, song)
+                pwm, fast = m.act(x, fast); est = m.motor.step(est, pwm, twin)
+                p, _ = rt.command(t); worst = max(worst, abs(p - float(pwm))); out.append(p)
+                hv, ok = float(rng.uniform(0, 700)), bool(rng.random() > .3)
+                rt.observe(hv, ok)
+                h, v = torch.tensor([hv if ok else 0.0]), torch.tensor([ok])
+                n = plant.config.normalize
+                errs.append(float(n(h) - n(C[:, t])) if ok else 0.0); vals.append(float(ok)); pws.append(float(pwm))
+        song = {"err": torch.tensor([errs]), "valid": torch.tensor([vals]), "pwm": torch.tensor([pws]), "has": torch.ones(1)}
+        first.append(out)
+    assert worst < 1e-5
+    assert not np.allclose(first[0], first[1])          # the second play reads the first one's record

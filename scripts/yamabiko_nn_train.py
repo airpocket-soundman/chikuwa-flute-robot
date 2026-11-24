@@ -81,6 +81,8 @@ def main():
     ap.add_argument("--valve-weight", type=float, default=1.0, help="weight of the valve-follows-the-score cost")
     ap.add_argument("--song-slot", type=int, default=0,
                     help="practice: a song memory of this size per step (from --init, its weights start at 0)")
+    ap.add_argument("--prev-play", action="store_true",
+                    help="practice by the record of the previous play (iterative learning control), from --init")
     ap.add_argument("--plays", type=int, default=1,
                     help="practice: plays of the same song on the same rig per episode, the song memory kept "
                          "between them; later plays weigh more")
@@ -111,6 +113,8 @@ def main():
             upgrade.update(twin_free=True, positions=False)
         if args.song_slot:
             upgrade.update(song_slot=args.song_slot)
+        if args.prev_play:
+            upgrade.update(prev_play=True)
         model = NNTwinPerformer.from_checkpoint(torch.load(args.init, map_location=device, weights_only=False),
                                                 plant, device, **upgrade)
         args.imitate_steps = 0
@@ -125,7 +129,7 @@ def main():
                                        np.random.default_rng(901), lead)
     batch_twin = repeat(twin, args.batch)
 
-    practice = bool(model.config.song_slot)
+    practice = bool(model.config.song_slot or model.config.prev_play)
 
     def evaluate():
         """(MAE, |dPWM|, score) of the last play; with a song memory the same songs are played ``--eval-plays``

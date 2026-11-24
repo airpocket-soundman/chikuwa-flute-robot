@@ -27,6 +27,7 @@ from .features import SONG_LOOKAHEAD, WINDOW
 from .physical_plant import AudibleListener, DifferentiableMotorFlute
 
 FEATURES = 2 * len(WINDOW) + 7     # window, heard (3), previous pwm, twin position / velocity, voice now
+PREV_LOOK = (0, 3, 6, 10, 15, 20, 30)  # steps ahead read from the record of the previous play (practice)
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,10 @@ class NNConfig:
     # step7: no input from the twin's physics (no open-loop position / velocity of its motor model, and no
     # ``positions``): the recurrent state has to keep track of where the plunger is from what it hears
     twin_free: bool = False
+    # practice (iterative learning control): the record of the previous play of the same song (pitch error
+    # where heard, heard or not, the PWM) is read PREV_LOOK steps ahead; the network learns to correct
+    # what went wrong there last time.  The record is data outside the network, kept by the runtime.
+    prev_play: bool = False
 
     @property
     def features(self) -> int:
@@ -62,6 +67,9 @@ class NNConfig:
         if self.positions and not self.twin_free:
             names += ["aim_position", "heard_position"]
         names += [f"song{k}.{i}" for k in SONG_LOOKAHEAD for i in range(self.song_slot)]
+        if self.prev_play:
+            names += ([f"prev_err+{k}" for k in PREV_LOOK] + [f"prev_valid+{k}" for k in PREV_LOOK]
+                      + [f"prev_pwm+{k}" for k in PREV_LOOK] + ["has_prev"])
         if self.current:
             names.append("current")
         return names
@@ -100,11 +108,17 @@ class NNTwinPerformer(nn.Module):
             parts.append(torch.stack([aim, at], 1))
         if self.config.song_slot:
             parts.append(torch.cat([song[min(t + k, steps - 1)] for k in SONG_LOOKAHEAD], 1))
+        if self.config.prev_play:
+            look = [min(t + k, steps - 1) for k in PREV_LOOK]
+            parts += [song["err"][:, look], song["valid"][:, look], song["pwm"][:, look], song["has"][:, None]]
         if self.config.current:
             parts.append((prev_pwm.abs() if current is None else current)[:, None])
         return torch.cat(parts, 1)
 
     def empty_song(self, batch, steps, device, dtype):
+        if self.config.prev_play:                         # no previous play yet
+            zero = torch.zeros(batch, steps, device=device, dtype=dtype)
+            return {"err": zero, "valid": zero, "pwm": zero, "has": torch.zeros(batch, device=device, dtype=dtype)}
         return [torch.zeros(batch, self.config.song_slot, device=device, dtype=dtype) for _ in range(steps)]
 
     def write(self, song, cents, voice, t, heard, valid, estimate, pwm, fast):
@@ -159,6 +173,9 @@ class NNTwinPerformer(nn.Module):
         band = (twin.deadband if twin.deadband is not None else torch.zeros(batch, device=device)).to(dtype)
         if self.config.song_slot:
             song = list(song) if song is not None else self.empty_song(batch, steps, device, dtype)
+        if cfg.prev_play:
+            song = song if song is not None else self.empty_song(batch, steps, device, dtype)
+            rec_err, rec_valid = [], []
         played, pwms = [], []
         for t in range(steps):
             x = self.features(cents, voice, t, heard, valid, pwm, estimate, twin, song, current)
@@ -182,7 +199,14 @@ class NNTwinPerformer(nn.Module):
                 valid = valid & ~((pwm.abs() > band) & lost)
             if self.config.song_slot:
                 self.write(song, cents, voice, t, heard, valid, estimate, pwm, fast)
+            if cfg.prev_play:
+                normalize = plant.config.normalize
+                rec_err.append(torch.where(valid, normalize(heard) - normalize(cents[:, t]), torch.zeros_like(heard)))
+                rec_valid.append(valid.to(dtype))
             played.append(emitted); pwms.append(pwm)
+        if cfg.prev_play:                                 # this play's record, for the next play (data, no grad)
+            song = {"err": torch.stack(rec_err, 1).detach(), "valid": torch.stack(rec_valid, 1),
+                    "pwm": torch.stack(pwms, 1).detach(), "has": torch.ones(batch, device=device, dtype=dtype)}
         result = {"pitch_cents": torch.stack(played, 1), "pwm": torch.stack(pwms, 1), "song": song}
         if cfg.valve:
             result["valve"] = torch.stack(valve_soft, 1)                  # open probability the air follows
@@ -198,7 +222,7 @@ class NNTwinPerformer(nn.Module):
         h = torch.zeros(batch, device=device, dtype=dtype)
         v = torch.zeros(batch, device=device, dtype=torch.bool)
         prev = torch.zeros(batch, device=device, dtype=dtype)
-        song = self.empty_song(batch, steps, device, dtype) if self.config.song_slot else None
+        song = self.empty_song(batch, steps, device, dtype) if (self.config.song_slot or self.config.prev_play) else None
         out = []
         for t in range(steps):
             x = self.features(cents, voice, t, h, v, prev, estimate, twin, song)
