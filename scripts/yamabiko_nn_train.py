@@ -79,6 +79,12 @@ def main():
     ap.add_argument("--all-nn", action="store_true",
                     help="every actuator command from the network: valve output, motor current input, self homing")
     ap.add_argument("--valve-weight", type=float, default=1.0, help="weight of the valve-follows-the-score cost")
+    ap.add_argument("--song-slot", type=int, default=0,
+                    help="practice: a song memory of this size per step (from --init, its weights start at 0)")
+    ap.add_argument("--plays", type=int, default=1,
+                    help="practice: plays of the same song on the same rig per episode, the song memory kept "
+                         "between them; later plays weigh more")
+    ap.add_argument("--eval-plays", type=int, default=5)
     ap.add_argument("--twin-free", action="store_true",
                     help="step7: drop the twin's position / velocity / positions inputs (from --init by name)")
     ap.add_argument("--init", default=None, help="start from this NN checkpoint (then imitation is skipped)")
@@ -103,6 +109,8 @@ def main():
         upgrade = dict(valve=True, current=True, self_home=True) if args.all_nn else {}
         if args.twin_free:
             upgrade.update(twin_free=True, positions=False)
+        if args.song_slot:
+            upgrade.update(song_slot=args.song_slot)
         model = NNTwinPerformer.from_checkpoint(torch.load(args.init, map_location=device, weights_only=False),
                                                 plant, device, **upgrade)
         args.imitate_steps = 0
@@ -117,13 +125,23 @@ def main():
                                        np.random.default_rng(901), lead)
     batch_twin = repeat(twin, args.batch)
 
+    practice = bool(model.config.song_slot)
+
     def evaluate():
+        """(MAE, |dPWM|, score) of the last play; with a song memory the same songs are played ``--eval-plays``
+        times on the same rigs and ``evaluate.per_play`` keeps every play's MAE (practice should lower it)."""
+        song, per_play = None, []
         with torch.no_grad():
             model.eval()
-            result = model.perform(plant, eval_cents, eval_voice, eval_rigs, eval_twin, torch.Generator(device).manual_seed(0))
+            for play in range(args.eval_plays if practice else 1):
+                result = model.perform(plant, eval_cents, eval_voice, eval_rigs, eval_twin,
+                                       torch.Generator(device).manual_seed(play), song=song)
+                song = result["song"]
+                error, tv = measure(result, eval_cents, eval_voice)
+                per_play.append(round(float(error[eval_voice].abs().mean()), 2))
             model.train()
-        error, tv = measure(result, eval_cents, eval_voice)
-        mae = float(error[eval_voice].abs().mean())
+        evaluate.per_play = per_play
+        mae = float(np.mean(per_play[1:])) if practice else per_play[0]       # practice: plays 2.. count
         miss = float(valve_miss(result, eval_voice))
         evaluate.miss = miss
         return mae, float(tv), mae + 100 * args.smooth * float(tv) + 100 * args.valve_weight * miss
@@ -148,8 +166,9 @@ def main():
         if step == 1 or step % 25 == 0:
             print(f"imitate {step:4d} mse {float(loss):.4f}  {time.time() - started:6.0f}s", flush=True)
     mae, tv, score = evaluate()
-    print(f"{'start' if args.init else 'after imitation'}: MAE {mae:.1f} cents, mean |dPWM| {tv:.3f}", flush=True)
-    best = {"step": 0, "mae": mae, "dpwm": tv, "score": score}
+    print(f"{'start' if args.init else 'after imitation'}: MAE {mae:.1f} cents, mean |dPWM| {tv:.3f}"
+          f"{f'  per play {evaluate.per_play}' if practice else ''}", flush=True)
+    best = {"step": 0, "mae": mae, "dpwm": tv, "score": score, "per_play": evaluate.per_play}
     best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
     history.append({"step": 0, "mae": mae, "dpwm": tv})
 
@@ -158,11 +177,15 @@ def main():
     for step in range(1, args.steps + 1):
         rigs = rigs_around(twin, args.batch, args.spread, generator)
         cents, voice = with_lead(*songs(rng, args.batch, args.song_steps, device, plant.config), rng, lead)
-        result = model.perform(train_plant, cents, voice, rigs, batch_twin, generator)
-        error, tv = measure(result, cents, voice)
-        miss = valve_miss(result, voice)
-        loss = (F.smooth_l1_loss(error[voice] / 100, torch.zeros_like(error[voice]), beta=.2) + args.smooth * tv
-                + args.valve_weight * miss)
+        song, loss, weights = None, 0.0, np.linspace(.3, 1.0, args.plays) if args.plays > 1 else np.ones(1)
+        for weight in weights:                         # the same songs on the same rigs, the memory kept
+            result = model.perform(train_plant, cents, voice, rigs, batch_twin, generator, song=song)
+            song = result["song"]
+            error, tv = measure(result, cents, voice)
+            miss = valve_miss(result, voice)
+            loss = loss + float(weight) * (F.smooth_l1_loss(error[voice] / 100, torch.zeros_like(error[voice]), beta=.2)
+                                           + args.smooth * tv + args.valve_weight * miss)
+        loss = loss / float(weights.sum())
         optimizer.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step(); schedule.step()
         if step == 1 or step % 10 == 0:
@@ -171,11 +194,11 @@ def main():
                   f"  {time.time() - started:6.0f}s", flush=True)
         if step % args.eval_every == 0 or step == args.steps:
             mae, tv_e, score = evaluate()
-            history.append({"step": step, "mae": mae, "dpwm": tv_e})
-            print(f"eval {step}: MAE {mae:.1f} |dPWM| {tv_e:.3f} valve miss {evaluate.miss:.3f} score {score:.1f}",
-                  flush=True)
+            history.append({"step": step, "mae": mae, "dpwm": tv_e, "per_play": evaluate.per_play})
+            print(f"eval {step}: MAE {mae:.1f} |dPWM| {tv_e:.3f} valve miss {evaluate.miss:.3f} score {score:.1f}"
+                  f"{f'  per play {evaluate.per_play}' if practice else ''}", flush=True)
             if score < best["score"]:
-                best = {"step": step, "mae": mae, "dpwm": tv_e, "score": score}
+                best = {"step": step, "mae": mae, "dpwm": tv_e, "score": score, "per_play": evaluate.per_play}
                 best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
     model.load_state_dict(best_state); model.eval()
