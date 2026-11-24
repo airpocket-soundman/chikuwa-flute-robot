@@ -52,6 +52,10 @@ class NNConfig:
     # where heard, heard or not, the PWM) is read PREV_LOOK steps ahead; the network learns to correct
     # what went wrong there last time.  The record is data outside the network, kept by the runtime.
     prev_play: bool = False
+    # step7's rig memory: a small vector kept across songs on the same rig (not per song), written slowly
+    # while playing from what was heard against the target; it carries the rig's quirks into the next song
+    rig_memory: int = 0
+    rig_rate: float = .02
 
     @property
     def features(self) -> int:
@@ -71,6 +75,7 @@ class NNConfig:
                       + [f"prev_pwm+{k}" for k in PREV_LOOK] + ["has_prev"])
         if self.current:
             names.append("current")
+        names += [f"rig{i}" for i in range(self.rig_memory)]
         return names
 
     @property
@@ -88,9 +93,12 @@ class NNTwinPerformer(nn.Module):
         self.head = nn.Sequential(nn.Linear(config.hidden, config.hidden), nn.SiLU(), nn.Linear(config.hidden, config.outputs))
         if config.song_slot:
             self.writer = Writer(AdaptiveMemoryConfig(fast_hidden=config.hidden), config.song_slot, config.song_rate)
+        if config.rig_memory:
+            self.rigmem = Writer(AdaptiveMemoryConfig(fast_hidden=config.hidden), config.rig_memory, config.rig_rate)
 
     # ----- one step --------------------------------------------------------------------------------
-    def features(self, cents, voice, t, heard, valid, prev_pwm, estimate, twin=None, song=None, current=None):
+    def features(self, cents, voice, t, heard, valid, prev_pwm, estimate, twin=None, song=None, current=None,
+                 rig=None):
         normalize = self.plant.config.normalize
         steps = cents.shape[1]
         ids = [min(t + k, steps - 1) for k in WINDOW]
@@ -112,7 +120,19 @@ class NNTwinPerformer(nn.Module):
             parts += [song["err"][:, look], song["valid"][:, look], song["pwm"][:, look], song["has"][:, None]]
         if self.config.current:
             parts.append((prev_pwm.abs() if current is None else current)[:, None])
+        if self.config.rig_memory:
+            parts.append(rig if rig is not None else torch.zeros(cents.shape[0], self.config.rig_memory,
+                                                                 device=cents.device, dtype=dtype))
         return torch.cat(parts, 1)
+
+    def write_rig(self, rig, cents, voice, t, heard, valid, estimate, pwm, fast):
+        """The rig memory learns from two steps ago (the heard pitch has caught up), only while it hears."""
+        normalize = self.plant.config.normalize
+        then = max(0, t - 2); dtype = cents.dtype
+        position = torch.zeros_like(heard) if self.config.twin_free else estimate.position
+        feats = torch.stack([torch.where(valid, normalize(heard), torch.zeros_like(heard)), valid.to(dtype),
+                             normalize(cents[:, then]), voice[:, then].to(dtype), position, pwm], 1)
+        return self.rigmem(feats, fast, rig, valid.to(dtype))
 
     def empty_song(self, batch, steps, device, dtype):
         if self.config.prev_play:                         # no previous play yet
@@ -145,7 +165,8 @@ class NNTwinPerformer(nn.Module):
         return estimate, torch.zeros(batch, self.config.hidden, device=device, dtype=dtype)
 
     # ----- closed loop on the simulator ------------------------------------------------------------
-    def perform(self, plant, cents, voice, parameters, twin, generator=None, start_position=None, song=None):
+    def perform(self, plant, cents, voice, parameters, twin, generator=None, start_position=None, song=None,
+                rig=None):
         """Play ``cents``/``voice`` (B, T) on the simulated rigs ``parameters``; ``twin`` is the fitted rig
         whose motor model gives the open-loop guess.  Returns pitch_cents (emitted) and pwm, (B, T), and the
         song memory after the play (pass it back as ``song`` to play the same song again)."""
@@ -175,9 +196,11 @@ class NNTwinPerformer(nn.Module):
         if cfg.prev_play:
             song = song if song is not None else self.empty_song(batch, steps, device, dtype)
             rec_err, rec_valid = [], []
+        if cfg.rig_memory:                               # carried over from the songs before on this rig
+            rig = rig if rig is not None else torch.zeros(batch, cfg.rig_memory, device=device, dtype=dtype)
         played, pwms = [], []
         for t in range(steps):
-            x = self.features(cents, voice, t, heard, valid, pwm, estimate, twin, song, current)
+            x = self.features(cents, voice, t, heard, valid, pwm, estimate, twin, song, current, rig)
             pwm, logit, fast = self.act_all(x, fast)
             state = plant.step(state, pwm, parameters)
             estimate = self.motor.step(estimate, pwm, twin)
@@ -198,6 +221,8 @@ class NNTwinPerformer(nn.Module):
                 valid = valid & ~((pwm.abs() > band) & lost)
             if self.config.song_slot:
                 self.write(song, cents, voice, t, heard, valid, estimate, pwm, fast)
+            if cfg.rig_memory:
+                rig = self.write_rig(rig, cents, voice, t, heard, valid, estimate, pwm, fast)
             if cfg.prev_play:
                 normalize = plant.config.normalize
                 rec_err.append(torch.where(valid, normalize(heard) - normalize(cents[:, t]), torch.zeros_like(heard)))
@@ -206,7 +231,7 @@ class NNTwinPerformer(nn.Module):
         if cfg.prev_play:                                 # this play's record, for the next play (data, no grad)
             song = {"err": torch.stack(rec_err, 1).detach(), "valid": torch.stack(rec_valid, 1),
                     "pwm": torch.stack(pwms, 1).detach(), "has": torch.ones(batch, device=device, dtype=dtype)}
-        result = {"pitch_cents": torch.stack(played, 1), "pwm": torch.stack(pwms, 1), "song": song}
+        result = {"pitch_cents": torch.stack(played, 1), "pwm": torch.stack(pwms, 1), "song": song, "rig": rig}
         if cfg.valve:
             result["valve"] = torch.stack(valve_soft, 1)                  # open probability the air follows
         return result
@@ -264,5 +289,5 @@ class NNTwinPerformer(nn.Module):
             grown[:, :w.shape[1]] = w
             state["inp.weight"] = grown
         missing, unexpected = model.load_state_dict(state, strict=False)
-        assert not unexpected and all(k.startswith("writer.") for k in missing), (missing, unexpected)
+        assert not unexpected and all(k.startswith(("writer.", "rigmem.")) for k in missing), (missing, unexpected)
         return model

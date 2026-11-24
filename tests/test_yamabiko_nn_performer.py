@@ -123,3 +123,42 @@ def test_prev_play_record_is_read_on_the_next_play_the_same_on_numpy():
         first.append(out)
     assert worst < 1e-5
     assert not np.allclose(first[0], first[1])          # the second play reads the first one's record
+
+
+def test_rig_memory_is_kept_across_songs_the_same_on_numpy():
+    import numpy as np
+    import torch
+    from flute_rl.yamabiko.nn_performer import NNConfig, NNTwinPerformer
+    from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig
+    from flute_rl.yamabiko.residual_numpy import export_nn, runtime_for
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.yamabiko1_fan80())
+    torch.manual_seed(0)
+    m = NNTwinPerformer(plant, NNConfig(twin_free=True, rig_memory=4, rig_rate=.5))
+    with torch.no_grad():
+        m.inp.weight.normal_(0, .3)
+        for p in m.rigmem.parameters():
+            p.normal_(0, .5)
+    twin = plant.parameters(1, "cpu")
+    rt = runtime_for(export_nn(m, twin))
+    rng = np.random.default_rng(0)
+    rig, worst = torch.zeros(1, 4), 0.0
+    for song in range(2):                                     # two different songs, the rig memory carried
+        steps = 30
+        cents = np.linspace(0, 300 + 300 * song, steps); voice = np.ones(steps, bool)
+        C = torch.tensor(cents, dtype=torch.float32)[None]; V = torch.tensor(voice)[None]
+        rt.prepare(cents, voice)
+        est, fast = m.start(1, "cpu", torch.float32, twin)
+        pwm, h, v = torch.zeros(1), torch.zeros(1), torch.zeros(1, dtype=torch.bool)
+        with torch.no_grad():
+            for t in range(steps):
+                x = m.features(C, V, t, h, v, pwm, est, twin, None, None, rig)
+                pwm, fast = m.act(x, fast); est = m.motor.step(est, pwm, twin)
+                p, _ = rt.command(t); worst = max(worst, abs(p - float(pwm)))
+                hv, ok = float(rng.uniform(0, 700)), bool(rng.random() > .3)
+                rt.observe(hv, ok)
+                h, v = torch.tensor([hv if ok else 0.0]), torch.tensor([ok])
+                rig = m.write_rig(rig, C, V, t, h, v, est, pwm, fast)
+        assert np.allclose(rt.rig, rig[0].numpy(), atol=1e-5)
+    assert worst < 1e-5 and np.abs(rt.rig).sum() > 0
+    rt.reset_rig()
+    assert not rt.rig.any()

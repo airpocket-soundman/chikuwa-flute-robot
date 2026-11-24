@@ -261,6 +261,12 @@ def export_nn(model, twin, row=0):
     arrays["nn.flags"] = np.array([model.config.valve, model.config.current, model.config.self_home], np.float64)
     arrays["nn.inputs"] = np.array([model.config.positions, model.config.twin_free], np.float64)
     arrays["nn.prev_play"] = np.array(int(model.config.prev_play))
+    if model.config.rig_memory:
+        for index, layer in enumerate(model.rigmem.candidate):
+            if hasattr(layer, "weight"):
+                arrays.update(_linear(f"nn.rigmem.candidate.{index}", layer))
+        arrays.update(_linear("nn.rigmem.gate", model.rigmem.gate))
+        arrays["nn.rig"] = np.array([model.config.rig_memory, model.config.rig_rate], np.float64)
     return arrays
 
 
@@ -285,6 +291,10 @@ class NNRuntime(Runtime):
         self.song = None
         self.nn_prev = bool(self.a.get("nn.prev_play", 0))     # practice: the previous play's record
         self.rec = None
+        # step7's rig memory: kept across plays (prepare does not clear it), reset_rig() for a new rig
+        self.nn_rig, self.nn_rig_rate = ((int(self.a["nn.rig"][0]), float(self.a["nn.rig"][1])) if "nn.rig" in self.a
+                                         else (0, 0.0))
+        self.rig = np.zeros(self.nn_rig, np.float32)
 
     def prepare(self, cents, voice, keep_song_memory=True):
         self.cents = np.asarray(cents, np.float64); self.voice = np.asarray(voice, bool)
@@ -315,6 +325,7 @@ class NNRuntime(Runtime):
                            + ([self.song[[min(t + k, steps - 1) for k in SONG_LOOKAHEAD]].reshape(-1)] if self.nn_slot else [])
                            + (self._prev_features(t) if self.nn_prev else [])
                            + ([[self.current]] if self.nn_current else [])
+                           + ([self.rig] if self.nn_rig else [])
                            ).astype(np.float32)
         x = np.tanh(self.a["nn.inp.w"] @ x + self.a["nn.inp.b"])
         gi = self.a["nn.cell.w_ih"] @ x + self.a["nn.cell.b_ih"]; gh = self.a["nn.cell.w_hh"] @ self.fast + self.a["nn.cell.b_hh"]
@@ -331,6 +342,20 @@ class NNRuntime(Runtime):
         self.current = abs(self.pwm)              # until observe() hears the real one
         return self.pwm, valve
 
+    def reset_rig(self):
+        self.rig = np.zeros(self.nn_rig, np.float32)
+
+    def _write_rig(self):
+        t = self._t; then = max(0, t - 2)
+        heard_n = (self.heard - self.center) / self.scale if self.valid else 0.0
+        position = 0.0 if self.nn_twin_free else self.position
+        feats = np.array([heard_n, float(self.valid), (self.cents[then] - self.center) / self.scale,
+                          float(self.voice[then]), position, self.pwm], np.float32)
+        x = np.concatenate([feats, self.fast])
+        proposal = np.tanh(self._mlp("nn.rigmem.candidate", np.concatenate([x, self.rig]), (0, 2)))
+        rate = self.nn_rig_rate * sigmoid(self.a["nn.rigmem.gate.w"] @ x + self.a["nn.rigmem.gate.b"])[0] * float(self.valid)
+        self.rig = (self.rig + rate * (proposal - self.rig)).astype(np.float32)
+
     def _prev_features(self, t):
         from .features import PREV_LOOK
         steps = len(self.cents)
@@ -341,6 +366,8 @@ class NNRuntime(Runtime):
         """``current``: the motor current as a fraction of the full-PWM running current (the rig: isense_mv
         / CURRENT_FULL_MV), 0 when an end switch has cut it."""
         self.heard, self.valid = (float(heard) if valid else 0.0), bool(valid)
+        if self.nn_rig:
+            self._write_rig()
         if self.nn_prev:                                   # this play's record, for the next play
             t = self._t
             self.rec["err"][t] = ((self.heard - self.cents[t]) / self.scale) if self.valid else 0.0
