@@ -93,6 +93,11 @@ def main():
                     help="--rig-memory: weight of guessing the rig from the memory after each song (training only)")
     ap.add_argument("--rig-rate", type=float, default=None, help="--rig-memory: the memory's write rate")
     ap.add_argument("--new-lr", type=float, default=10.0, help="learning-rate factor for the newly added parts")
+    ap.add_argument("--rig-oracle", action="store_true",
+                    help="stage 1 of the rig memory: the true rig (nn_performer.RIG_AUX) is its content, never written")
+    ap.add_argument("--rig-fit", action="store_true",
+                    help="stage 2: the network from --init (a --rig-oracle one) is frozen; only the rig memory is "
+                         "trained to tell the rig, from what it hears over songs on the same rig")
     ap.add_argument("--songs-per-rig", type=int, default=3,
                     help="--rig-memory: different songs played one after another on the same rigs per episode")
     ap.add_argument("--twin-free", action="store_true",
@@ -143,6 +148,9 @@ def main():
 
     practice = bool(model.config.song_slot or model.config.prev_play)
     rig_mode = bool(model.config.rig_memory)
+    if args.rig_fit:                                 # stage 2: only the rig memory learns
+        for n, p_ in model.named_parameters():
+            p_.requires_grad_(n.startswith("rigmem."))
     if rig_mode:                                     # different songs, one after another, on the same rigs
         eval_sets = [with_lead(*songs(np.random.default_rng(900 + k), 48, 500, device, plant.config),
                                np.random.default_rng(1900 + k), lead) for k in range(args.eval_plays)]
@@ -156,8 +164,10 @@ def main():
             with torch.no_grad():
                 model.eval()
                 for k, (ec, ev) in enumerate(eval_sets):
+                    if args.rig_oracle:
+                        rig = model.rig_answer(eval_rigs, eval_twin)
                     result = model.perform(plant, ec, ev, eval_rigs, eval_twin, torch.Generator(device).manual_seed(k),
-                                           rig=rig)
+                                           rig=rig, rig_write=not args.rig_oracle)
                     rig = result["rig"]
                     error, tv = measure(result, ec, ev)
                     per_play.append(round(float(error[ev].abs().mean()), 2))
@@ -217,13 +227,20 @@ def main():
         cents, voice = with_lead(*songs(rng, args.batch, args.song_steps, device, plant.config), rng, lead)
         if rig_mode:                                   # different songs on the same rigs, the rig memory kept
             rig, loss, weights = None, 0.0, np.linspace(.3, 1.0, args.songs_per_rig)
+            answer = model.rig_answer(rigs, batch_twin)
+            if args.rig_oracle:                        # stage 1: one song, the true rig as the memory
+                weights = np.ones(1)
             for weight in weights:
-                result = model.perform(train_plant, cents, voice, rigs, batch_twin, generator, rig=rig)
+                result = model.perform(train_plant, cents, voice, rigs, batch_twin, generator,
+                                       rig=answer if args.rig_oracle else rig, rig_write=not args.rig_oracle)
                 rig = result["rig"]
                 error, tv = measure(result, cents, voice)
                 miss = valve_miss(result, voice)
-                loss = loss + float(weight) * (F.smooth_l1_loss(error[voice] / 100, torch.zeros_like(error[voice]), beta=.2)
-                                               + args.smooth * tv + args.valve_weight * miss)
+                if args.rig_fit:                       # stage 2: the memory after each song should tell the rig
+                    loss = loss + float(weight) * F.mse_loss(rig, answer)
+                else:
+                    loss = loss + float(weight) * (F.smooth_l1_loss(error[voice] / 100, torch.zeros_like(error[voice]), beta=.2)
+                                                   + args.smooth * tv + args.valve_weight * miss)
                 if args.rig_aux:
                     answer = model.rig_answer(rigs, batch_twin)
                     loss = loss + args.rig_aux * F.mse_loss(model.rig_aux(rig), answer)

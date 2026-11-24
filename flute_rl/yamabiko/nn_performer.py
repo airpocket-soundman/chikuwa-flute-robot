@@ -26,7 +26,10 @@ from .deterministic_pipeline import EncoderlessDeterministicPerformer
 from .features import PREV_LOOK, SONG_LOOKAHEAD, WINDOW
 from .physical_plant import AudibleListener, DifferentiableMotorFlute
 
-RIG_AUX = ("torque_gain", "max_velocity_strokes_s", "deadband", "flute_offset_cents", "tube_offset_m")
+# what the rig memory holds (step7, as rapid motor adaptation): the rig against the twin, each -1..1
+RIG_AUX = ("torque_gain", "coulomb_friction", "viscous_friction", "max_velocity_strokes_s", "deadband",
+           "tube_offset_m", "flute_offset_cents")
+RIG_SPREAD = .25
 FEATURES = 2 * len(WINDOW) + 7     # window, heard (3), previous pwm, twin position / velocity, voice now
 
 
@@ -131,12 +134,11 @@ class NNTwinPerformer(nn.Module):
     @staticmethod
     def rig_answer(parameters, twin):
         """What the rig memory should be able to tell (training only): the rig against the twin, scaled to ~1."""
-        log = lambda a, b: torch.log(a / b)
-        return torch.stack([log(parameters.torque_gain, twin.torque_gain) / .25,
-                            log(parameters.max_velocity_strokes_s, twin.max_velocity_strokes_s) / .25,
-                            (parameters.deadband - twin.deadband) / .1,
-                            (parameters.flute_offset_cents - twin.flute_offset_cents) / 30.0,
-                            (parameters.tube_offset_m - twin.tube_offset_m) / .003], 1)
+        ratio = lambda n: torch.log(getattr(parameters, n) / getattr(twin, n).clamp_min(1e-6)) / RIG_SPREAD
+        out = [ratio(n) for n in RIG_AUX[:5]]
+        out += [(parameters.tube_offset_m - twin.tube_offset_m) / .002,
+                (parameters.flute_offset_cents - twin.flute_offset_cents) / 5.0]
+        return torch.stack(out, 1).clamp(-1, 1)
 
     def write_rig(self, rig, cents, voice, t, heard, valid, estimate, pwm, fast):
         """The rig memory learns from two steps ago (the heard pitch has caught up), only while it hears."""
@@ -179,7 +181,7 @@ class NNTwinPerformer(nn.Module):
 
     # ----- closed loop on the simulator ------------------------------------------------------------
     def perform(self, plant, cents, voice, parameters, twin, generator=None, start_position=None, song=None,
-                rig=None):
+                rig=None, rig_write=True):
         """Play ``cents``/``voice`` (B, T) on the simulated rigs ``parameters``; ``twin`` is the fitted rig
         whose motor model gives the open-loop guess.  Returns pitch_cents (emitted) and pwm, (B, T), and the
         song memory after the play (pass it back as ``song`` to play the same song again)."""
@@ -234,7 +236,7 @@ class NNTwinPerformer(nn.Module):
                 valid = valid & ~((pwm.abs() > band) & lost)
             if self.config.song_slot:
                 self.write(song, cents, voice, t, heard, valid, estimate, pwm, fast)
-            if cfg.rig_memory:
+            if cfg.rig_memory and rig_write:
                 rig = self.write_rig(rig, cents, voice, t, heard, valid, estimate, pwm, fast)
             if cfg.prev_play:
                 normalize = plant.config.normalize
