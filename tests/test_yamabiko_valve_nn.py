@@ -51,3 +51,22 @@ def test_closed_loop_gives_valve_gradients_only():
     cmd.mean().backward()
     assert valve.out.weight.grad is not None and valve.out.weight.grad.abs().sum() > 0
     assert all(p.grad is None for p in actuator.parameters())
+
+
+def test_twin_free_valve_runs_beside_the_actuator_on_numpy():
+    import numpy as np
+    import torch
+    from flute_rl.yamabiko.nn_performer import NNConfig, NNTwinPerformer
+    from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig
+    from flute_rl.yamabiko.residual_numpy import WithValve, export_nn, export_valve, runtime_for
+    from flute_rl.yamabiko.valve_nn import ValveConfig, ValveNN
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.yamabiko1_fan80())
+    torch.manual_seed(0)
+    valve = ValveNN(plant.config.normalize, ValveConfig(twin_free=True))
+    assert valve.inp.weight.shape[1] == ValveConfig().features - 2
+    act = NNTwinPerformer(plant, NNConfig(twin_free=True))
+    rt = WithValve(runtime_for(export_nn(act, plant.parameters(1, "cpu"))), export_valve(valve))
+    assert rt.twin_free
+    rt.prepare(np.linspace(0, 600, 20), np.ones(20, bool))
+    for t in range(20):
+        rt.command(t); rt.observe(0.0, False)

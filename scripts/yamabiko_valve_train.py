@@ -89,6 +89,7 @@ def main():
     ap.add_argument("--target", choices=["travel", "heard"], default="travel",
                     help="travel: shut for rests, re-articulation and the travel of a leap (score and twin only); "
                          "heard: open only where the flute sounds within --tol (it learns to stay shut)")
+    ap.add_argument("--twin-free", action="store_true", help="step7: no twin position / velocity inputs")
     ap.add_argument("--steps", type=int, default=300)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--song-steps", type=int, default=400)
@@ -106,7 +107,7 @@ def main():
                                                plant, device).eval()
     for p in actuator.parameters():
         p.requires_grad_(False)
-    valve = ValveNN(plant.config.normalize).to(device)
+    valve = ValveNN(plant.config.normalize, ValveConfig(twin_free=args.twin_free)).to(device)
     generator = torch.Generator(device).manual_seed(args.seed)
     eval_rigs = rigs_around(twin, 48, args.spread, torch.Generator(device).manual_seed(7777))
     eval_twin = repeat(twin, 48)

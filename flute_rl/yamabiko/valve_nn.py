@@ -22,13 +22,18 @@ VALVE_FEATURES = 2 * len(WINDOW) + 7    # window, heard (3), actuator pwm, twin 
 @dataclass(frozen=True)
 class ValveConfig:
     hidden: int = 32
+    twin_free: bool = False     # step7: no twin position / velocity among the inputs
+
+    @property
+    def features(self) -> int:
+        return VALVE_FEATURES - (2 if self.twin_free else 0)
 
 
 class ValveNN(nn.Module):
     def __init__(self, normalize, config: ValveConfig = ValveConfig()):
         super().__init__()
         self.config, self.normalize = config, normalize
-        self.inp = nn.Linear(VALVE_FEATURES, config.hidden)
+        self.inp = nn.Linear(config.features, config.hidden)
         self.cell = nn.GRUCell(config.hidden, config.hidden)
         self.out = nn.Linear(config.hidden, 1)
 
@@ -38,9 +43,10 @@ class ValveNN(nn.Module):
         dtype = cents.dtype
         heard_n = torch.where(valid, n(heard), torch.zeros_like(heard))
         gap = torch.where(valid, n(cents[:, t]) - heard_n, torch.zeros_like(heard))
-        return torch.cat([n(cents[:, ids]), voice[:, ids].to(dtype),
-                          torch.stack([heard_n, valid.to(dtype), gap, pwm, estimate.position, estimate.velocity,
-                                       prev_open], 1)], 1)
+        now = [heard_n, valid.to(dtype), gap, pwm]
+        if not self.config.twin_free:
+            now += [estimate.position, estimate.velocity]
+        return torch.cat([n(cents[:, ids]), voice[:, ids].to(dtype), torch.stack(now + [prev_open], 1)], 1)
 
     def step(self, x, h):
         h = self.cell(torch.tanh(self.inp(x)), h)

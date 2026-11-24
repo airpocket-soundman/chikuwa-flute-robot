@@ -367,6 +367,7 @@ def export_valve(model):
                    "valve.cell.b_ih": model.cell.bias_ih.detach().cpu().numpy().astype(np.float32),
                    "valve.cell.b_hh": model.cell.bias_hh.detach().cpu().numpy().astype(np.float32)})
     arrays.update(_linear("valve.out", model.out))
+    arrays["valve.twin_free"] = np.array(int(model.config.twin_free))
     return arrays
 
 
@@ -379,6 +380,7 @@ class WithValve:
         self.v = {k: np.asarray(x) for k, x in valve_arrays.items()}
         self.hidden = self.v["valve.cell.w_hh"].shape[1]
         self.self_home = getattr(actuator, "self_home", False)
+        self.twin_free = bool(self.v.get("valve.twin_free", 0))
 
     def cents_at(self, position):
         return self.act.cents_at(position)
@@ -399,7 +401,8 @@ class WithValve:
         heard_n = (self.heard - a.center) / a.scale if self.valid else 0.0
         gap = ((self.cents[t] - a.center) / a.scale - heard_n) if self.valid else 0.0
         x = np.concatenate([(self.cents[ids] - a.center) / a.scale, self.voice[ids].astype(np.float64),
-                            [heard_n, float(self.valid), gap, pwm, position, velocity, self.open]]).astype(np.float32)
+                            [heard_n, float(self.valid), gap, pwm]
+                            + ([] if self.twin_free else [position, velocity]) + [self.open]]).astype(np.float32)
         x = np.tanh(self.v["valve.inp.w"] @ x + self.v["valve.inp.b"])
         gi = self.v["valve.cell.w_ih"] @ x + self.v["valve.cell.b_ih"]
         gh = self.v["valve.cell.w_hh"] @ self.h + self.v["valve.cell.b_hh"]
