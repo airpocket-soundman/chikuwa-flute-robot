@@ -170,7 +170,7 @@ class MemoryRuntime:
         g = self.G / max(self.A, 1e-3)
         out = self._mlp("dec", np.concatenate([r, g]).astype(np.float32))
         mid, half = (self.low + self.high) / 2, (self.high - self.low) / 2
-        return float(mid + half * out[0]), float(1 / (1 + np.exp(-out[1])))
+        return float(mid + half * out[0]), float(1 / (1 + np.exp(-np.clip(out[1], -50.0, 50.0))))
 
 
 def score_from_recording(pcm, ear, memory_arrays, lead_steps: int = 60, tail_steps: int = 60):
