@@ -298,6 +298,7 @@ class WhistleJob:
         self.button_base = None   # the press count after a tune / play (the server consumed those presses)
         self.song = None          # the last recorded song: step, target path, the page's tracks
         self.practice = []        # relative error of every play of that song (practice play 1, 2, ...)
+        self.plays = []           # every play of that song for the page: n, heard (as the target), error
         self.presses = 0
         self.collect = False      # the data collection mode: record only, no calibration, no play
         self.collect_kind, self.collect_seconds = "whistle", MAX_RECORD_S
@@ -335,7 +336,9 @@ class WhistleJob:
                 raise ValueError("まだ前の作業が動いています")
             self.stopped = False
             self.end_recording.clear()
-            self.state = {"phase": "prepare", "message": first, "press": self.state.get("press")}
+            keep = ("press", "whistle", "cleaned", "target", "voice", "report", "heard", "key", "relative_mae", "shift",
+                    "stamp", "plays_n", "plays_id")       # the last song's graphs stay while it is played again
+            self.state = {"phase": "prepare", "message": first, **{k: self.state[k] for k in keep if k in self.state}}
             self.thread = threading.Thread(target=target, args=args, daemon=True)
             self.thread.start()
         return {"started": True}
@@ -648,8 +651,12 @@ class WhistleJob:
             self.practice.append(None if rel is None else round(rel, 1))
             memory = "（この版は練習の記憶を持っていないので、毎回同じように吹きます）" if not result.get("song_memory") else ""
             message = f"できました（練習 {n} 回目）。2 回押すともう一度、1 回押すと新しく録音します{memory}"
+        heard = [round(float(x - shift - key), 1) if ok else None for x, ok in zip(h, v)]   # in the target's key
+        if not result.get("stopped"):
+            self.plays = (self.plays + [{"n": n, "heard": heard, "error": None if rel is None else round(rel, 1)}])[-8:]
         self._set(phase="done", message=message, heard=[round(float(x - shift), 1) if ok else None for x, ok in zip(h, v)],
-                  key=key, relative_mae=rel, shift=shift, stamp=song["stamp"])
+                  key=key, relative_mae=rel, shift=shift, stamp=song["stamp"], plays_n=len(self.plays),
+                  plays_id=f"{song['stamp']}:{n}")
 
     def _replay(self, profile):
         rig = None
@@ -688,6 +695,8 @@ class WhistleJob:
             time.sleep(.3)                             # the click of the button
             start = rig.audio_mark()
             began = time.monotonic()
+            self._set(whistle=None, cleaned=None, target=None, voice=None, report=None, heard=None, relative_mae=None,
+                      plays_n=0, plays_id=None)          # a new song: the last one's graphs go
             self._set(phase="record", message="口笛をどうぞ。吹き終わったらボタンを押してください",
                       record_began=time.monotonic(), max_seconds=MAX_RECORD_S)
             self.end_recording.wait(MAX_RECORD_S)
@@ -727,6 +736,7 @@ class WhistleJob:
                 return [None if not np.isfinite(v) else round(float(v), 1) for v in a]
             self.song = {"step": profile["name"], "path": str(path), "voice": voice, "stamp": stamp}
             self.practice = []
+            self.plays = []
             self._set(whistle=listed(raw), cleaned=listed(cents), target=[round(float(v), 1) for v in target],
                       voice=[bool(v) for v in voice], report=report)
             self._play(rig, profile)
@@ -744,9 +754,11 @@ MAIN_PAGE = r"""<!doctype html>
 <title>やまびこ1号</title>
 <style>
 :root{--bg:#f3f5f4;--card:#fff;--fg:#17201d;--mute:#5f6b66;--line:#dde3e0;--acc:#1f7a6c;--acc2:#e7f2ef;--rec:#c2410c;--warn:#b42318;--ok:#15803d;
---c1:#9aa5a1;--c2:#1f7a6c;--c3:#17201d;--c4:#d9622b;--onacc:#fff}
+--c1:#9aa5a1;--c2:#1f7a6c;--c3:#17201d;--c4:#d9622b;--onacc:#fff;
+--p1:#f2b38a;--p2:#e8875a;--p3:#d9622b;--p4:#b5481c;--p5:#8f3613;--p6:#6b270c}
 @media (prefers-color-scheme:dark){:root{--bg:#121816;--card:#1a221f;--fg:#e6ece9;--mute:#9aa8a2;--line:#2b3531;--acc:#4fc3ad;--acc2:#1f2e2a;--rec:#fb923c;--warn:#f87171;--ok:#4ade80;
---c1:#6b7773;--c2:#4fc3ad;--c3:#e6ece9;--c4:#fb923c;--onacc:#0f1513}}
+--c1:#6b7773;--c2:#4fc3ad;--c3:#e6ece9;--c4:#fb923c;--onacc:#0f1513;
+--p1:#7a4a2c;--p2:#a35f33;--p3:#cc7738;--p4:#f0913f;--p5:#fbb071;--p6:#fdd2a8}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif}
 [hidden]{display:none!important}
 main{max-width:960px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:14px}
@@ -787,6 +799,13 @@ button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 .goal{height:10px;border-radius:5px;background:var(--acc2);overflow:hidden}.goal i{display:block;height:100%;background:var(--acc)}
 .takes{display:flex;flex-direction:column;gap:4px;font-size:14px;font-variant-numeric:tabular-nums}
 .takes div{display:flex;gap:12px;color:var(--mute)}.takes div b{color:var(--fg);font-weight:500}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--fg);font-size:13px;font-variant-numeric:tabular-nums}
+.chips button i{width:12px;height:12px;border-radius:50%}
+.chips button[aria-pressed="false"]{opacity:.4}
+.multi{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.multi div{border:1px solid var(--line);border-radius:10px;padding:6px 8px;display:flex;flex-direction:column;gap:2px;font-size:13px}
+.multi b{font-variant-numeric:tabular-nums}
 .practice{display:flex;gap:10px;align-items:flex-end;min-height:84px;flex-wrap:wrap}
 .practice div{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;color:var(--mute)}
 .practice i{display:block;width:34px;background:var(--c4);border-radius:4px 4px 0 0}
@@ -863,10 +882,14 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
 <svg id="g1" viewBox="0 0 860 260"></svg><div class="mute num" id="info1"></div>
 <div class="row" style="margin-top:8px"><button class="sub" id="pw" disabled>▶ 口笛を聞く</button></div></section>
 <section><h2>笛の演奏</h2>
-<div class="legend"><span><i class="sw" style="background:var(--c3)"></i>目標（笛の音域へ移した口笛）</span><span><i class="sw" style="background:var(--c4)"></i>笛が鳴らした音</span></div>
+<div class="legend"><span><i class="sw" style="background:var(--c3)"></i>目標（笛の音域へ移した口笛）</span><span><i class="sw" style="background:var(--c4)"></i>笛が鳴らした音（新しい回ほど濃い）</span></div>
 <svg id="g2" viewBox="0 0 860 260"></svg><div class="mute num" id="info2"></div>
-<div class="row" style="margin-top:8px"><button class="sub" id="pf" disabled>▶ 笛の演奏を聞く</button></div></section>
+<div class="chips" id="playChips"></div>
+<div class="row" style="margin-top:8px"><button class="sub" id="pf" disabled>▶ 笛の演奏を聞く（最後の回）</button></div></section>
 </div>
+
+<section id="multiBox" hidden><h2>回ごとの演奏 <span class="mute">目標（黒）と、その回に鳴った音（調を合わせて）</span></h2>
+<div class="multi" id="multi"></div></section>
 
 <section><h2>キャリブレーション（その日の笛）</h2>
 <div class="legend"><span><i class="sw" style="background:var(--c2)"></i>縮み切り → 伸び切り → 縮み切り（PWM 0.6）</span></div>
@@ -895,6 +918,18 @@ function plot(svg,series,H){
   svg.innerHTML=g}
 async function api(path,body){const r=await fetch("/api/whistle/"+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
   if(!r.ok){$("msg").textContent=(await r.json()).error}return r.ok}
+let P={plays:[]},playsId=null,hiddenPlays=new Set();
+function playColor(i,n){const k=n<=1?6:Math.round(1+i*5/(n-1));return css("--p"+Math.min(6,Math.max(1,k)))}
+async function loadPlays(){try{P=await (await fetch("/api/whistle/plays")).json()}catch(e){return}hiddenPlays.clear();drawPlays()}
+function drawPlays(){
+  const pl=P.plays||[];if(!pl.length||!P.target){$("multiBox").hidden=true;return}
+  const tgt=P.target.map((v,i)=>P.voice[i]?v:null),n=pl.length,mask=a=>a.map((v,i)=>P.voice[i]?v:null);
+  plot($("g2"),[{y:tgt,c:css("--c3"),w:3},...pl.map((p,i)=>hiddenPlays.has(p.n)?null:{y:mask(p.heard),c:playColor(i,n),dots:true}).filter(Boolean)]);
+  $("playChips").innerHTML=pl.map((p,i)=>`<button data-n="${p.n}" aria-pressed="${!hiddenPlays.has(p.n)}"><i style="background:${playColor(i,n)}"></i>${p.n} 回目 ${p.error==null?"-":p.error.toFixed(0)+" セント"}</button>`).join("");
+  for(const b of $("playChips").children)b.onclick=()=>{const k=+b.dataset.n;hiddenPlays.has(k)?hiddenPlays.delete(k):hiddenPlays.add(k);drawPlays()};
+  $("multiBox").hidden=false;
+  $("multi").innerHTML=pl.map((p,i)=>`<div><span><b>${p.n} 回目</b>　誤差 ${p.error==null?"-":p.error.toFixed(0)+" セント"}</span><svg viewBox="0 0 860 200" id="m${i}"></svg></div>`).join("");
+  pl.forEach((p,i)=>plot($("m"+i),[{y:tgt,c:css("--c3"),w:3},{y:mask(p.heard),c:playColor(i,n),dots:true}],200))}
 let S={},shownTune=null,shownStamp=null,stepsKey="",lastPress=null,shownPractice="",shownTake="",polledAt=0;
 const KIND={whistle:"口笛",quiet:"無音・部屋の音",other:"話し声など"};
 function remainNow(){if(S.phase!=="record"||S.record_elapsed==null)return null;const el=S.record_elapsed+(Date.now()-polledAt)/1000;return Math.max(0,S.max_seconds-el)}
@@ -950,10 +985,12 @@ async function poll(){
   if(s.whistle){plot($("g1"),[{y:s.whistle,c:css("--c1"),dots:true},{y:s.cleaned,c:css("--c2")}]);
     const r=s.report||{};$("info1").textContent=r.whistle_span_cents!=null?`口笛の幅 ${r.whistle_span_cents.toFixed(0)} セント／笛の音域 ${r.range_cents.toFixed(0)} セント`+(r.clipped_fraction>0?`（はみ出し ${(r.clipped_fraction*100).toFixed(0)} %）`:""):r.memory?`記憶に ${r.listened_steps} ステップ書き込み、そこから思い出した楽譜`:""}
   else{$("g1").innerHTML="";$("info1").textContent=""}
-  if(s.target){const tgt=s.target.map((v,i)=>s.voice[i]?v:null);
-    plot($("g2"),[{y:tgt,c:css("--c3"),w:3},...(s.heard?[{y:s.heard.map((v,i)=>s.voice[i]?v:null),c:css("--c4"),dots:true}]:[])]);
-    $("info2").textContent=s.relative_mae!=null?`調のずれ ${s.key>=0?"+":""}${s.key.toFixed(0)} セント／それを除いた平均の誤差 ${s.relative_mae.toFixed(0)} セント`:""}
-  else{$("g2").innerHTML="";$("info2").textContent=""}
+  if(s.target){
+    if(s.plays_id&&s.plays_id!==playsId&&!s.busy){playsId=s.plays_id;loadPlays()}
+    if(s.busy||!P.plays.length){const tgt=s.target.map((v,i)=>s.voice[i]?v:null);
+      plot($("g2"),[{y:tgt,c:css("--c3"),w:3},...(s.heard?[{y:s.heard.map((v,i)=>s.voice[i]?v:null),c:css("--c4"),dots:true}]:[])])}
+    $("info2").textContent=s.relative_mae!=null?`最後の回：調のずれ ${s.key>=0?"+":""}${s.key.toFixed(0)} セント／それを除いた平均の誤差 ${s.relative_mae.toFixed(0)} セント`:""}
+  else{$("g2").innerHTML="";$("info2").textContent="";$("playChips").innerHTML="";$("multiBox").hidden=true;P={plays:[]};playsId=null}
   const tu=s.tuning;if(!tu){shownTune=null;$("g3").innerHTML="";$("info3").textContent="この版ではまだ測っていません（最初の録音の前に測ります）"}
   if(tu&&tu.time!==shownTune){shownTune=tu.time;plot($("g3"),[{y:tu.heard,c:css("--c2"),dots:true}],200);
     const hz=c=>(440*Math.pow(2,c/1200)).toFixed(0);
@@ -1001,6 +1038,9 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
                 self._run(bench.status)
             elif self.path == "/api/whistle/status":
                 self._json(200, whistle.status())
+            elif self.path == "/api/whistle/plays":          # every play of the song (fetched when it changes)
+                self._json(200, {"plays": whistle.plays, "target": whistle.state.get("target"),
+                                 "voice": whistle.state.get("voice")})
             elif self.path.split("?")[0] in ("/api/whistle/whistle.wav", "/api/whistle/flute.wav", "/api/whistle/take.wav"):
                 name = self.path.split("?")[0].rsplit("/", 1)[1][:-4]
                 data = whistle.wavs.get(name)
