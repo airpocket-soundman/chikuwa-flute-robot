@@ -31,6 +31,8 @@ def load_profiles(root: pathlib.Path | str = MODELS) -> dict:
             profile["valve_runtime_path"] = str(path.parent / profile["valve_runtime"])
         if profile.get("ear_runtime"):
             profile["ear_runtime_path"] = str(path.parent / profile["ear_runtime"])
+        if profile.get("memory_runtime"):                  # step6: the score kept in weights
+            profile["memory_runtime_path"] = str(path.parent / profile["memory_runtime"])
         profile.setdefault("whistle", {})
         profile.setdefault("ear", "yin")
         out[profile["name"]] = profile

@@ -356,15 +356,22 @@ class WhistleJob:
             WHISTLE_DIR.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(WHISTLE_DIR / f"{stamp}_whistle.npz", pcm=pcm, sr=sr)   # data for the ear (step5)
             self._set(phase="analyse", message="聞き取り中")
-            if common_ear(profile):                    # step5: the same ear network hears the whistle
-                from flute_rl.yamabiko.ear_nn import Ear
-                raw = Ear(dict(np.load(profile["ear_runtime_path"]))).track(pcm, sr)
-            else:
-                raw = whistle_track(pcm, sr)
-            cents = clean_track(raw, **profile.get("whistle", {}))
             try:
-                target, voice, report = to_target(cents, profile["low_cents"], profile["high_cents"],
-                                                  quantize=quantize)
+                if profile.get("memory_runtime_path"):      # step6: written into the memory, read back from it
+                    from flute_rl.yamabiko.ear_nn import Ear
+                    from flute_rl.yamabiko.score_memory import score_from_recording
+                    target, voice, raw, report = score_from_recording(
+                        pcm, Ear(dict(np.load(profile["ear_runtime_path"]))), dict(np.load(profile["memory_runtime_path"])))
+                    cents = raw
+                else:
+                    if common_ear(profile):                # step5: the same ear network hears the whistle
+                        from flute_rl.yamabiko.ear_nn import Ear
+                        raw = Ear(dict(np.load(profile["ear_runtime_path"]))).track(pcm, sr)
+                    else:
+                        raw = whistle_track(pcm, sr)
+                    cents = clean_track(raw, **profile.get("whistle", {}))
+                    target, voice, report = to_target(cents, profile["low_cents"], profile["high_cents"],
+                                                      quantize=quantize)
             except ValueError:
                 level = 20 * np.log10(max(float(np.sqrt(np.mean((pcm / 32768.0) ** 2))), 1e-9))
                 raise ValueError(f"口笛が聞こえませんでした（録音の大きさ {level:.0f} dB）。マイクの近くで吹いてください")

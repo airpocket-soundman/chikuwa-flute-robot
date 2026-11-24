@@ -41,3 +41,21 @@ def test_numpy_runtime_matches_torch():
         got, p = rt.recall(i)
         assert got == pytest.approx(float(cents[0, i]), abs=1e-3)
         assert p == pytest.approx(float(torch.sigmoid(vlog[0, i])), abs=1e-4)
+
+
+def test_score_from_recording_runs_the_ear_and_the_memory():
+    from flute_rl.yamabiko.ear_nn import Ear, EarConfig, export as export_ear, torch_model as ear_model
+    from flute_rl.yamabiko.score_memory import score_from_recording
+    torch.manual_seed(0)
+    ear = Ear(export_ear(ear_model(EarConfig.wide(level=True))))
+    model = torch_model(MemoryConfig(keys=32, hidden=32))
+    with torch.no_grad():
+        model.dec[-1].bias.copy_(torch.tensor([0.0, 5.0]))          # always "sounding", in the middle
+        model.dec[-1].weight.zero_()
+    t = np.arange(16000) / 16000
+    pcm = (np.sin(2 * np.pi * 1500 * t) * 8000).astype(np.int16)
+    target, voice, heard, report = score_from_recording(pcm, ear, export(model), lead_steps=60, tail_steps=60)
+    steps = (16000 - 320) // 160 + 1
+    assert len(heard) == steps and report["listened_steps"] == steps
+    assert len(target) == len(voice) == steps + 120 and not voice[:60].any() and voice[60:60 + steps].all()
+    assert np.allclose(target[60:60 + steps], 595.0, atol=1e-3)

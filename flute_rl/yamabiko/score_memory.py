@@ -129,7 +129,11 @@ class MemoryRuntime:
         self.freqs = self.a["mem.freqs"]
         self.low, self.high = float(self.a["mem.low"]), float(self.a["mem.high"])
         value = self.a[self._last("enc") + ".w"].shape[0]
-        self.W = np.zeros((value + 1, 2 * len(self.freqs)), np.float64)
+        self.W = np.zeros((value + 1, 2 * len(self.freqs)), np.float32)
+        # the position code turns by a fixed angle every step: keep it as phasors and rotate them
+        self.turn = np.exp(2j * np.pi * self.freqs * STEP_S)
+        self.phasor = np.ones(len(self.freqs), np.complex128)
+        self.scale = 1 / np.sqrt(len(self.freqs))
         self.G = np.zeros(self.a[self._last("gen") + ".w"].shape[0] - 1, np.float64)
         self.A = 0.0
         self.n = 0
@@ -148,9 +152,12 @@ class MemoryRuntime:
         return x
 
     def listen(self, ear_code):
-        k = position_code(np.array([self.n]), self.freqs)[0]
-        v = np.append(self._mlp("enc", np.asarray(ear_code, np.float32)), 1.0)
+        k = (np.concatenate([self.phasor.real, self.phasor.imag]) * self.scale).astype(np.float32)
+        v = np.append(self._mlp("enc", np.asarray(ear_code, np.float32)), np.float32(1.0)).astype(np.float32)
         self.W += np.outer(v, k)
+        self.phasor *= self.turn
+        if self.n % 1000 == 999:
+            self.phasor /= np.abs(self.phasor)
         g = self._mlp("gen", np.asarray(ear_code, np.float32))
         a = 1 / (1 + np.exp(-g[-1]))
         self.G += a * g[:-1]
@@ -164,3 +171,33 @@ class MemoryRuntime:
         out = self._mlp("dec", np.concatenate([r, g]).astype(np.float32))
         mid, half = (self.low + self.high) / 2, (self.high - self.low) / 2
         return float(mid + half * out[0]), float(1 / (1 + np.exp(-out[1])))
+
+
+def score_from_recording(pcm, ear, memory_arrays, lead_steps: int = 60, tail_steps: int = 60):
+    """The whistle copy of step6: every 10 ms of a 16 kHz recording goes through the ear network (``ear``, an
+    ear_nn.Ear) into the memory, then the whole target is read back from it.  Returns (target cents, voice,
+    heard cents (the ear's own pitch, for the page), report).  The player's fixed lead and tail are added (the
+    lead holds the first recalled pitch while the plunger gets there); nothing after the last recalled note
+    but the tail is kept."""
+    from .ear_nn import FRAME, decode
+    x = np.asarray(pcm)
+    x = x / 32768.0 if x.dtype.kind in "iu" else x.astype(np.float64)
+    memory = MemoryRuntime(memory_arrays)
+    heard = []
+    for end in range(FRAME, len(x) + 1, 160):
+        (logits, v), code = ear._run(x[end - FRAME:end])
+        cents, p = decode(logits, v, ear.low_cents)
+        heard.append(cents if p >= ear.threshold else np.nan)
+        memory.listen(code)
+    recalled = np.array([memory.recall(i) for i in range(memory.n)])
+    if not len(recalled) or not (recalled[:, 1] >= .5).any():
+        raise ValueError("no whistle heard")
+    cents, voice = recalled[:, 0], recalled[:, 1] >= .5
+    last = np.flatnonzero(voice)[-1]
+    cents, voice = cents[:last + 1], voice[:last + 1]
+    first = cents[np.flatnonzero(voice)[0]]
+    target = np.r_[np.full(lead_steps, first), cents, np.full(tail_steps, cents[-1])].astype(np.float32)
+    voice = np.r_[np.zeros(lead_steps, bool), voice, np.zeros(tail_steps, bool)]
+    report = {"memory": "score_memory", "listened_steps": int(memory.n), "voiced_steps": int(voice.sum()),
+              "steps": int(len(target))}
+    return target, voice, np.array(heard), report
