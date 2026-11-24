@@ -1,0 +1,21 @@
+{
+  "name": "step7c",
+  "title": "step7c: step7b を新しいツイン（11-24 の実機演奏も入れた twin_05）で学び直した版",
+  "ear": "nn",
+  "ear_runtime": "ear_06_runtime.npz",
+  "doc": "docs/step7.md",
+  "runtime": "nn_f80_t7_tw05_runtime.npz",
+  "valve_runtime": "valve_t7_tw05_runtime.npz",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  },
+  "common_ear": true,
+  "memory_runtime": "mem_04_runtime.npz"
+}

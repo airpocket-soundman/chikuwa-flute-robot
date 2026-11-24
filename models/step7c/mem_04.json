@@ -1,0 +1,107 @@
+{
+  "config": {
+    "ear": "models/step5/ear_06.pt",
+    "out": "runs/memory/mem_04",
+    "songs": 1200,
+    "steps": 30000,
+    "batch": 16,
+    "lr": 0.001,
+    "keys": 4096,
+    "max_hz": 15.0,
+    "demo": "runs/ear/demo",
+    "play": "runs/real/twin_y1f80_04.json",
+    "actuator": "models/step7/nn_f80_t7_init.pt",
+    "real": [
+      "runs/real/whistle_data",
+      "runs/real/whistle"
+    ],
+    "real_holdout": [
+      "20261124_111404",
+      "20261124_111830"
+    ],
+    "real_share": 0.4,
+    "seed": 11,
+    "device": "cuda"
+  },
+  "by_length": {
+    "5s": {
+      "mae_cents": 38.10359573364258,
+      "within_25c": 0.44621641747857854,
+      "mae_after_offset": 17.39090919494629,
+      "voice_agree": 0.9821518036072143,
+      "songs": 32
+    },
+    "10s": {
+      "mae_cents": 29.835182189941406,
+      "within_25c": 0.5334096367811327,
+      "mae_after_offset": 18.131149291992188,
+      "voice_agree": 0.9816066066066066,
+      "songs": 32
+    },
+    "20s": {
+      "mae_cents": 48.91282653808594,
+      "within_25c": 0.39621246278832956,
+      "mae_after_offset": 24.620746612548828,
+      "voice_agree": 0.9798024012006002,
+      "songs": 32
+    },
+    "30s": {
+      "mae_cents": 44.410430908203125,
+      "within_25c": 0.4224852491749934,
+      "mae_after_offset": 26.931549072265625,
+      "voice_agree": 0.9786908136045349,
+      "songs": 32
+    }
+  },
+  "demo": {
+    "デモ1カエルの合唱": {
+      "mae_cents": 125.15750122070312,
+      "within_25c": 0.006493506493506494,
+      "mae_after_offset": 20.35384178161621,
+      "voice_agree": 0.8829953198127926,
+      "songs": 1
+    },
+    "デモ2うぐいす": {
+      "mae_cents": 84.94772338867188,
+      "within_25c": 0.06382978723404255,
+      "mae_after_offset": 22.168825149536133,
+      "voice_agree": 0.9017857142857143,
+      "songs": 1
+    },
+    "デモ3スーパーマリオ": {
+      "mae_cents": 243.15933227539062,
+      "within_25c": 0.08045977011494253,
+      "mae_after_offset": 106.8694076538086,
+      "voice_agree": 0.981672394043528,
+      "songs": 1
+    }
+  },
+  "real_holdout": {
+    "mae_cents": 64.57798767089844,
+    "within_25c": 0.2463090174315924,
+    "mae_after_offset": 33.9862060546875,
+    "voice_agree": 0.9386054956532843,
+    "songs": 16
+  },
+  "play_10s": {
+    "rule": 0.6403638518392348,
+    "memory": 0.31722183310059954,
+    "rule_in_key": 0.6461068039849133,
+    "memory_in_key": 0.4326493376303602,
+    "songs": 12
+  },
+  "play_real": {
+    "rule": NaN,
+    "memory": NaN,
+    "rule_in_key": NaN,
+    "memory_in_key": NaN,
+    "songs": 12
+  },
+  "play_demo": {
+    "rule": 0.6141819571865444,
+    "memory": 0.0064029051987767585,
+    "rule_in_key": 0.7842497026843357,
+    "memory_in_key": 0.7079558486238532,
+    "songs": 3
+  }
+}

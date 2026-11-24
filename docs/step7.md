@@ -78,3 +78,31 @@ python scripts/yamabiko_nn_train.py runs/real/twin_y1f80_04.json --teacher runs/
 python scripts/yamabiko_nn_train.py runs/real/twin_y1f80_04.json --teacher runs/yamabiko_residual_v1.pt --init runs/real/nn_f80_t7_rig_oracle.pt     --rig-memory 7 --rig-rate .1 --rig-fit --songs-per-rig 3 --spread .25 --soft-deadband 0.05 --steps 300 --lr 3e-3 --new-lr 1 --smooth 0.6 --out runs/real/nn_f80_t7_rig_fit
 ```
 
+
+## 2026-11-25 追記：新しいツイン（twin_y1f80_05）と step7c
+
+ツインを、11-24 の実機の演奏（classic・classic_ear・step3〜5・step7 の 3 曲 × 2 回）も入れて同定し直した（`twin_y1f80_05`）。
+実機の記録をツインで再現したときの音程のずれ（`scripts/yamabiko_twin_check.py`）：
+
+| 記録 | twin_y1f80_04 | twin_y1f80_05 |
+|---|---|---|
+| 11-24 の演奏（36 本） | 52.1 cent | **40.7 cent** |
+| それより前（較正と 11-23 の step3、7 本） | 39.7 cent | **38.3 cent** |
+
+静止摩擦 1.27 → 0.34、音程のずれ 24 → 5 cent、聞こえの遅れ 2 → 0 歩と、特性の値は大きく動いた。
+
+このツインで step7b の演奏の NN（step7 の重みから 1500 回）と弁の NN（楽譜どおり、速い口笛の楽譜を半分）を学び直したのが **step7c**（耳 ear_06・記憶 mem_04 は同じ）。
+
+| シミュレーター（32 台、±25 cent 以内） | twin_04 の周り：step7b | step7c | twin_05 の周り：step7b | step7c | classic_ear |
+|---|---|---|---|---|---|
+| ドレミファミレド | 84.4 % | 86.0 % | 85.3 % | **86.5 %** | 90.4 % |
+| 音階 | 72.6 % | 75.2 % | 74.6 % | **77.5 %** | 81.9 % |
+| 跳躍 | 35.5 % | 33.0 % | 32.4 % | 32.6 % | 40.4 % |
+
+step7b より 1〜3 ポイント良いが、シミュレーターではまだ classic_ear に届かない。実機の評価は許可待ち。
+
+```bash
+python scripts/yamabiko_nn_train.py runs/real/twin_y1f80_05.json --teacher runs/yamabiko_residual_v1.pt --init models/step7/nn_f80_t7_init.pt --twin-free --soft-deadband 0.05 --steps 1500 --smooth 0.6 --out runs/real/nn_f80_t7_tw05
+python scripts/yamabiko_valve_train.py runs/real/twin_y1f80_05.json --actuator runs/real/nn_f80_t7_tw05.pt --twin-free --target score --whistle-songs 0.5 --out runs/real/valve_t7_tw05
+python scripts/yamabiko_compare_sim.py --steps classic_ear step7 step7b step7c --twin runs/real/twin_y1f80_05_runtime.npz --rigs 32
+```
