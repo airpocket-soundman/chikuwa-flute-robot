@@ -1,0 +1,35 @@
+{
+  "name": "classic",
+  "title": "classic: 比較用の古典制御（PID・観測器・規則の弁、NN なし、耳は YIN）",
+  "doc": "docs/classic.md",
+  "runtime": "classic_runtime.npz",
+  "ear": "yin",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  },
+  "twin": "twin_y1f80_04_runtime.npz",
+  "gains": {
+    "kp": 20.0,
+    "ki": 2.6,
+    "kd": 0.72,
+    "i_zone": 0.06,
+    "i_max": 0.25,
+    "hold_tol": 0.004,
+    "hold_release": 0.04,
+    "hold_speed": 0.05,
+    "pitch_ki": 0.0016,
+    "trim_max": 0.1,
+    "trim_gate_cents": 150.0,
+    "settle_steps": 25,
+    "valve_lead": 3,
+    "valve_gate": 0.098,
+    "valve_wait_steps": 25
+  }
+}

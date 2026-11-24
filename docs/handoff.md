@@ -1,7 +1,8 @@
 # 引き継ぎ — やまびこ1号（2026-11-22）
 
 > **2026-11-24 追記:** 制御側の現状（step4 の 3 つの NN と入出力）と、全部 NN にして E2E のフィジカル AI にするまでの段取り（step5〜8）は
-> [nn-e2e-plan.md](nn-e2e-plan.md) にまとめた。以下は機体・基板・UNO Q の記録。
+> [nn-e2e-plan.md](nn-e2e-plan.md) にまとめた。比較用の古典制御（PID、NN なし）は [classic.md](classic.md)。
+> 実機で再開するときの手順は nn-e2e-plan.md の 6 章。以下は機体・基板・UNO Q の記録。
 
 A・B 基板を UNO Q に載せて初めて通電し、PC から命令で動かせるところまで来た。その時点の引き継ぎ。
 前の版（2026-09-18、基板設計の前段）は git の履歴にある（`git log -- docs/handoff.md`）。

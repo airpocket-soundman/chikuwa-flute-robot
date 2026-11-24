@@ -143,6 +143,9 @@ ONNX は `models/step4/onnx/`、書き出しは `python scripts/export_step_mode
 各段は「シミュレーターで比べる → 実機で step 同士を比べる（`scripts/yamabiko_step_eval.py`）」の順で進め、
 `models/stepN/` と `docs/stepN.md` を残す。
 
+比べる相手として、NN を使わない古典制御（PID・観測器・規則の弁）を `models/classic/` に置いてある（[classic.md](classic.md)）。
+シミュレーターでは `python scripts/yamabiko_compare_sim.py --steps classic step4`（PyTorch なし）、実機では `--steps classic step4` で同じように比べられる。
+
 ### step4 の実機評価（先に済ませる）
 
 step4 はシミュレーターでしか評価していない。
@@ -208,9 +211,36 @@ python scripts/yamabiko_step_eval.py --steps step3 step4 --targets f80_doremi f8
 | 書き込み式の記憶（fast weights） | 推論中に `W ← W + η v kᵀ` で行列に書き込み、`W k` で読み出す記憶。線形の注意機構と同じ計算なので普通に学習できる |
 | step | 実機で比べられる配備の単位。`models/stepN/` と `docs/stepN.md` |
 
-## 6. 次の一手
+## 6. 次の一手（実機環境で再開するとき）
 
-1. step4 を実機で評価する（3 章の冒頭）。
-2. step5 の準備として、耳の範囲を設定で変えられるようにし（`ear_nn.py` の `BINS`・`LOW_CENTS` を `EarConfig` へ）、合成の口笛で学習の仕組みを通す。
-3. 口笛を実機のマイクで録る。
-4. 並行して、step6 の「重みに書き込む記憶」をシミュレーターで今の楽譜と比べる（録音を待たずにできる）。
+この計画と classic は作業ブランチ `claude/magical-ride-s4qbbq` にある（`main` へはまだ取り込んでいない）。
+
+### 6.1 実機の PC で最初にやること
+
+```bash
+git fetch origin claude/magical-ride-s4qbbq
+git checkout claude/magical-ride-s4qbbq            # または main に取り込んでから main で
+python -m pytest -q tests/test_yamabiko_classic.py tests/test_yamabiko_server.py    # PyTorch なしで通る
+python scripts/yamabiko_compare_sim.py --steps classic step4 --rigs 16              # シミュレーターで再確認
+UNOQ=ssh bash scripts/uno_q_push.sh                 # classic_numpy.py・sim_numpy.py・models/classic/ も送られる
+```
+
+- `runs/real/target_f80_chromatic.npz` など `runs/` の中身は git にない。実機の PC の `runs/real/` にあるものを使う。
+- 図を出すスクリプトは matplotlib が要る（`pip install matplotlib`）。
+
+### 6.2 実機での比較（classic・step3・step4 を同じ日に続けて）
+
+```bash
+python scripts/yamabiko_step_eval.py --steps classic step3 step4 --targets f80_doremi f80_scale f80_chromatic --repeats 2
+```
+
+- 結果は `runs/real/eval/<日時>_*` に出る。[step3.md](step3.md) の表と同じ物差し（音程の誤差・音の間隔の誤差・±25 cent 以内・滑る音・鳴った割合・反転）。
+- classic は耳が YIN、step3・4 は耳が NN。制御の差と耳の差が混ざるので、必要なら classic の `profile.json` の `ear` を `nn`（`ear_runtime` に `../step4/ear_01_runtime.npz` 相当を置く）にした版も作って比べる。
+- classic のゲインはシミュレーターで探した値。実機で大きく振れる・届かないときは `scripts/yamabiko_classic_export.py --set kp=… ki=… kd=…` で作り直す（[classic.md](classic.md)）。
+- 結果は [classic.md](classic.md) と [step4.md](step4.md) の「実機での評価」に書き足す。
+
+### 6.3 その後
+
+1. step5 の準備として、耳の範囲を設定で変えられるようにし（`ear_nn.py` の `BINS`・`LOW_CENTS` を `EarConfig` へ）、合成の口笛で学習の仕組みを通す。
+2. 口笛を実機のマイクで録る（10〜20 分、いろいろな高さ・跳躍・グライド・息の多い音）。
+3. 並行して、step6 の「重みに書き込む記憶」をシミュレーターで今の楽譜と比べる（録音を待たずにできる）。

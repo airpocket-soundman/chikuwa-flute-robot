@@ -344,6 +344,9 @@ class NNRuntime(Runtime):
 
 def runtime_for(arrays):
     """The runtime class an exported file needs."""
+    if "classic.gains" in arrays:                       # the classic deterministic performer (no network)
+        from .classic_numpy import ClassicRuntime
+        return ClassicRuntime(arrays)
     return NNRuntime(arrays) if "nn.inp.w" in arrays else Runtime(arrays)
 
 
