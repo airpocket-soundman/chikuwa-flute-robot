@@ -966,6 +966,7 @@ $("mPlay").onclick=()=>api("mode",{collect:false});$("mCollect").onclick=()=>api
 $("take").onclick=()=>{if(S.phase==="record")api("finish");else api("take")};$("del").onclick=()=>api("delete_last");
 $("kind").onchange=()=>api("mode",{kind:$("kind").value});$("secs").onchange=()=>api("mode",{seconds:+$("secs").value});
 $("pt").onclick=()=>listen("take");
+if(location.pathname==="/collect")api("mode",{collect:true});         // the page that opens in the record-only mode
 $("cal").onclick=()=>api("calibrate");
 function listen(name){const a=$("au");a.src=`/api/whistle/${name}.wav?t=${Date.now()}`;a.play()}
 $("pw").onclick=()=>listen("whistle");$("pf").onclick=()=>listen("flute");
@@ -992,7 +993,7 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
             self._send(code, json.dumps(obj, ensure_ascii=False))
 
         def do_GET(self):
-            if self.path in ("/", "/index.html", "/whistle"):
+            if self.path.split("?")[0] in ("/", "/index.html", "/whistle", "/collect"):
                 self._send(200, MAIN_PAGE, "text/html; charset=utf-8")
             elif self.path == "/bench":
                 self._send(200, PAGE, "text/html; charset=utf-8")
