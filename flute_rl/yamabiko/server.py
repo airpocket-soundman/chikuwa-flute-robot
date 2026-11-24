@@ -225,6 +225,7 @@ class Server:
         from .calibration import calibrate_real
         self.take(client)
         rig = self._rig(req)
+        rig.ear = self._ear(req)                              # step5: the same ear as the play
         self.fan_on, self.fan_duty = True, float(req.get("fan", .7))
         self.link.fan(True, self.fan_duty)
         try:
@@ -254,11 +255,7 @@ class Server:
         target = np.load(req["target"])
         cents, voice = target["cents"].astype(np.float64), target["voice"].astype(bool)
         rig = self._rig(req)
-        if req.get("ear", "yin") == "nn":                     # step3: the ear network instead of YIN
-            from .ear_nn import Ear
-            rig.ear = Ear(dict(np.load(req["ear_runtime"])))
-        elif req.get("ear", "yin") != "yin":
-            raise ValueError(f"unknown ear {req.get('ear')!r} (yin or nn)")
+        rig.ear = self._ear(req)                              # step3: the ear network instead of YIN
         self.fan_on, self.fan_duty = True, float(req.get("fan", .7))
         self.link.fan(True, self.fan_duty)
         # the fan spins up with the valve shut (no sound) before the first note; the steps keep the
@@ -332,6 +329,7 @@ class Server:
         from .residual_numpy import runtime_for
         self.take(client)
         rig = self._rig(req)
+        rig.ear = self._ear(req)                              # step5: the same ear as the play
         self.fan_on, self.fan_duty = True, float(req.get("fan", .8))
         self.link.fan(True, self.fan_duty)
         pwm = float(req.get("pwm", .6))
@@ -369,6 +367,17 @@ class Server:
                 "home_cents": home_cents, "top_cents": float(np.median(top)) if top else None,
                 "sweep_max_cents": float(np.percentile(sweep, 98)) if sweep else None,
                 "shift_cents": float(np.clip(home_cents - twin_home, -150, 150))}
+
+    @staticmethod
+    def _ear(req):
+        """The ear a request asks for: None for YIN, or an ear_nn.Ear with ``ear="nn"`` and ``ear_runtime``."""
+        kind = req.get("ear", "yin")
+        if kind == "yin":
+            return None
+        if kind != "nn":
+            raise ValueError(f"unknown ear {kind!r} (yin or nn)")
+        from .ear_nn import Ear
+        return Ear(dict(np.load(req["ear_runtime"])))
 
     def _rig(self, req):
         rig = RealRig(self.link, flip=bool(req.get("flip", False)), max_pwm=min(float(req.get("max_pwm", self.max_pwm)),

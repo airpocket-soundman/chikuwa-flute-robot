@@ -225,6 +225,13 @@ poll();
 # ----- whistle copy: record a whistle, play it back with a performer runtime ---------------------------
 
 WHISTLE_DIR = pathlib.Path(__file__).resolve().parents[1] / "runs" / "real" / "whistle"
+
+
+def common_ear(profile):
+    """Server arguments for the profile's ear when it hears everything (step5: "common_ear": true), else {}."""
+    if profile.get("common_ear") and profile.get("ear") == "nn":
+        return {"ear": "nn", "ear_runtime": profile["ear_runtime_path"]}
+    return {}
 def wav_bytes(pcm, sr):
     import io
     import wave
@@ -300,7 +307,7 @@ class WhistleJob:
 
     def _tune(self, rig, profile):
         self._set(phase="tune", message="キャリブレーション中（縮み切りの音と、上下に 1 往復）")
-        result = rig.tune(runtime=profile["runtime_path"], fan=profile["fan"])
+        result = rig.tune(runtime=profile["runtime_path"], fan=profile["fan"], **common_ear(profile))
         tuning = {k: result[k] for k in ("shift_cents", "home_cents", "top_cents", "sweep_max_cents", "heard", "phase")}
         tuning["time"] = time.strftime("%H:%M")
         self.tunings[profile["name"]] = tuning
@@ -345,8 +352,15 @@ class WhistleJob:
             self._set(phase="record", message=f"口笛をどうぞ（{seconds:.0f} 秒）")
             pcm, sr = rig.record(seconds)
             self.wavs = {"whistle": wav_bytes(pcm, sr)}
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            WHISTLE_DIR.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(WHISTLE_DIR / f"{stamp}_whistle.npz", pcm=pcm, sr=sr)   # data for the ear (step5)
             self._set(phase="analyse", message="聞き取り中")
-            raw = whistle_track(pcm, sr)
+            if common_ear(profile):                    # step5: the same ear network hears the whistle
+                from flute_rl.yamabiko.ear_nn import Ear
+                raw = Ear(dict(np.load(profile["ear_runtime_path"]))).track(pcm, sr)
+            else:
+                raw = whistle_track(pcm, sr)
             cents = clean_track(raw, **profile.get("whistle", {}))
             try:
                 target, voice, report = to_target(cents, profile["low_cents"], profile["high_cents"],
@@ -354,8 +368,6 @@ class WhistleJob:
             except ValueError:
                 level = 20 * np.log10(max(float(np.sqrt(np.mean((pcm / 32768.0) ** 2))), 1e-9))
                 raise ValueError(f"口笛が聞こえませんでした（録音の大きさ {level:.0f} dB）。マイクの近くで吹いてください")
-            stamp = time.strftime("%Y%m%d_%H%M%S")
-            WHISTLE_DIR.mkdir(parents=True, exist_ok=True)
             path = WHISTLE_DIR / f"{stamp}_target.npz"
             np.savez(path, cents=target, voice=voice, whistle_cents=raw)
 

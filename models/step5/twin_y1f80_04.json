@@ -1,0 +1,36 @@
+{
+  "twin": {
+    "torque_gain": 9.972590446472168,
+    "torque_tau_s": 0.008718694560229778,
+    "inertia": 1.0,
+    "coulomb_friction": 1.2731131315231323,
+    "viscous_friction": 10.502616882324219,
+    "max_velocity_strokes_s": 0.8265530467033386,
+    "flute_offset_cents": 24.295238494873047,
+    "flute_scale": 1.0,
+    "tube_offset_m": 0.00741274980828166,
+    "temp_offset_c": 9.697571754455566,
+    "deadband": 0.29814621806144714,
+    "hearing_delay_steps": 2.0
+  },
+  "heard_mae_cents_per_record": [
+    42.2083854675293
+  ],
+  "delay_steps": 2,
+  "records": [
+    "runs/real/calibration_y1f80_03.npz",
+    "runs/real/calibration_y1f80_mid_02.npz",
+    "runs/real/eval/20261123_174554_step1_f80_chromatic.npz",
+    "runs/real/eval/20261123_174554_step1_f80_doremi.npz",
+    "runs/real/eval/20261123_174554_step1_f80_scale.npz",
+    "runs/real/eval/20261123_174554_step2_f80_chromatic.npz",
+    "runs/real/eval/20261123_174554_step2_f80_doremi.npz",
+    "runs/real/eval/20261123_174554_step2_f80_scale.npz",
+    "runs/real/eval/20261123_174554_step3_f80_chromatic.npz",
+    "runs/real/eval/20261123_174554_step3_f80_doremi.npz",
+    "runs/real/eval/20261123_174554_step3_f80_scale.npz"
+  ],
+  "fit_steps": 300,
+  "temp_c": 25.0,
+  "plant": "yamabiko1_fan80"
+}

@@ -13,18 +13,32 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
-BIN_CENTS, LOW_CENTS, BINS = 25.0, -600.0, 96
+BIN_CENTS, LOW_CENTS, BINS = 25.0, -600.0, 96      # step3's ear (ear_01): the flute only
 FRAME = 320
+# step5's common ear: the flute and a whistle, about 310 Hz .. 4 kHz (-600 .. +3825 cent re A4)
+WIDE_BINS = 178
 
 
-def bin_cents():
-    return LOW_CENTS + BIN_CENTS * np.arange(BINS)
+def bin_cents(low_cents: float = LOW_CENTS, bins: int = BINS):
+    return low_cents + BIN_CENTS * np.arange(bins)
 
 
 @dataclass(frozen=True)
 class EarConfig:
     channels: tuple = (24, 32, 48)
     hidden: int = 128
+    low_cents: float = LOW_CENTS        # centre of the first bin
+    bins: int = BINS                    # 25-cent bins
+    level: bool = False                 # also feed the frame's level (the input is normalised, so it is lost)
+
+    @classmethod
+    def wide(cls, **kw):
+        return cls(bins=WIDE_BINS, **kw)
+
+
+def level_feature(rms):
+    """The frame's level as the network sees it: (dBFS + 40) / 20, about -1 for the room, +2 for a loud note."""
+    return (20.0 * np.log10(np.maximum(rms, 1e-6)) + 40.0) / 20.0
 
 
 def torch_model(config: EarConfig = EarConfig()):
@@ -39,7 +53,8 @@ def torch_model(config: EarConfig = EarConfig()):
             self.conv = nn.Sequential(nn.Conv1d(1, c1, 32, stride=4), nn.ReLU(),       # 320 -> 73
                                       nn.Conv1d(c1, c2, 8, stride=2), nn.ReLU(),       # 73 -> 33
                                       nn.Conv1d(c2, c3, 5, stride=2), nn.ReLU())       # 33 -> 15
-            self.fc = nn.Sequential(nn.Linear(c3 * 15, cfg.hidden), nn.ReLU(), nn.Linear(cfg.hidden, BINS + 1))
+            self.fc = nn.Sequential(nn.Linear(c3 * 15 + int(cfg.level), cfg.hidden), nn.ReLU(),
+                                    nn.Linear(cfg.hidden, cfg.bins + 1))
 
         @staticmethod
         def normalize(x):
@@ -47,9 +62,13 @@ def torch_model(config: EarConfig = EarConfig()):
             return x / (x.pow(2).mean(1, keepdim=True).sqrt() + 1e-4)
 
         def forward(self, x):
-            """x: (B, 320) float samples in [-1, 1).  Returns (pitch logits (B, 96), voicing logit (B,))."""
-            out = self.fc(self.conv(self.normalize(x)[:, None]).flatten(1))
-            return out[:, :BINS], out[:, BINS]
+            """x: (B, 320) float samples in [-1, 1).  Returns (pitch logits (B, bins), voicing logit (B,))."""
+            z = self.conv(self.normalize(x)[:, None]).flatten(1)
+            if self.config.level:
+                rms = (x - x.mean(1, keepdim=True)).pow(2).mean(1, keepdim=True).sqrt()
+                z = torch.cat([z, (20.0 * torch.log10(rms.clamp_min(1e-6)) + 40.0) / 20.0], 1)
+            out = self.fc(z)
+            return out[:, :self.config.bins], out[:, self.config.bins]
 
         def checkpoint(self, **metadata):
             return {"format": "yamabiko-ear-v1", "config": asdict(self.config), "state_dict": self.state_dict(),
@@ -58,16 +77,18 @@ def torch_model(config: EarConfig = EarConfig()):
     return EarNet(config)
 
 
-def decode(logits, voiced_logit):
-    """(cents, voiced probability) from the network's outputs (NumPy or torch arrays of one frame or many)."""
+def decode(logits, voiced_logit, low_cents: float = LOW_CENTS):
+    """(cents, voiced probability) from the network's outputs (NumPy or torch arrays of one frame or many).
+    The number of bins is the logits' width; ``low_cents`` is the first bin's centre."""
     logits = np.asarray(logits, np.float64)
     single = logits.ndim == 1
     logits = np.atleast_2d(logits)
+    bins = logits.shape[1]
     best = logits.argmax(1)
     cents = np.empty(len(logits))
-    centres = bin_cents()
+    centres = bin_cents(low_cents, bins)
     for i, b in enumerate(best):
-        lo, hi = max(0, b - 2), min(BINS, b + 3)
+        lo, hi = max(0, b - 2), min(bins, b + 3)
         p = np.exp(logits[i, lo:hi] - logits[i, lo:hi].max())
         cents[i] = (p * centres[lo:hi]).sum() / p.sum()
     voiced = 1.0 / (1.0 + np.exp(-np.asarray(voiced_logit, np.float64)))
@@ -75,7 +96,8 @@ def decode(logits, voiced_logit):
 
 
 def export(model):
-    arrays = {}
+    arrays = {"ear.low_cents": np.array(float(model.config.low_cents)), "ear.bins": np.array(int(model.config.bins)),
+              "ear.level": np.array(int(model.config.level))}
     for i, layer in enumerate(model.conv):
         if hasattr(layer, "weight"):
             arrays[f"ear.conv{i}.w"] = layer.weight.detach().cpu().numpy().astype(np.float32)
@@ -89,10 +111,14 @@ def export(model):
 
 
 class Ear:
-    """The ear network on NumPy: ``hear(samples)`` -> (cents or NaN, voiced probability)."""
+    """The ear network on NumPy: ``hear(samples)`` -> (cents or NaN, voiced probability); ``track(pcm)`` hears a
+    whole recording every 10 ms (the whistle, step5)."""
 
     def __init__(self, arrays, voiced_threshold: float = .5):
         self.a = {k: np.asarray(v) for k, v in arrays.items()}
+        self.low_cents = float(self.a.get("ear.low_cents", LOW_CENTS))     # files before step5 have neither
+        self.bins = int(self.a.get("ear.bins", BINS))
+        self.level = bool(self.a.get("ear.level", 0))
         self.convs = sorted({k.split(".")[1] for k in self.a if k.startswith("ear.conv")}, key=lambda s: int(s[4:]))
         self.fcs = sorted({k.split(".")[1] for k in self.a if k.startswith("ear.fc")}, key=lambda s: int(s[2:]))
         self.threshold = voiced_threshold
@@ -100,7 +126,8 @@ class Ear:
     def forward(self, x):
         x = np.asarray(x, np.float32)
         x = x - x.mean()
-        x = x / (np.sqrt(np.mean(x * x)) + 1e-4)
+        rms = float(np.sqrt(np.mean(x * x)))
+        x = x / (rms + 1e-4)
         h = x[None, :]                                           # (channels, length)
         for name in self.convs:
             w, b, s = self.a[f"ear.{name}.w"], self.a[f"ear.{name}.b"], int(self.a[f"ear.{name}.stride"])
@@ -110,11 +137,13 @@ class Ear:
             cols = h[:, idx]                                                 # (cin, n, k)
             h = np.maximum(np.einsum("oik,ink->on", w, cols) + b[:, None], 0.0)
         z = h.reshape(-1)
+        if self.level:
+            z = np.append(z, np.float32(level_feature(rms)))
         for i, name in enumerate(self.fcs):
             z = self.a[f"ear.{name}.w"] @ z + self.a[f"ear.{name}.b"]
             if i < len(self.fcs) - 1:
                 z = np.maximum(z, 0.0)
-        return z[:BINS], z[BINS]
+        return z[:self.bins], z[self.bins]
 
     def hear(self, samples):
         """samples: the last 320 samples as floats in [-1, 1) (or int16)."""
@@ -122,5 +151,18 @@ class Ear:
         if x.dtype.kind in "iu":
             x = x / 32768.0
         logits, v = self.forward(x)
-        cents, voiced = decode(logits, v)
+        cents, voiced = decode(logits, v, self.low_cents)
         return (cents if voiced >= self.threshold else float("nan")), voiced
+
+    def track(self, pcm, sr: int = 16000, hop_s: float = .01):
+        """Pitch of a recording every 10 ms, in cents re A4 (NaN where nothing sounds), each from the last 20 ms
+        as on the rig.  ``sr`` must be the microphone's 16 kHz (the frame is 320 samples)."""
+        if sr != 16000:
+            raise ValueError("the ear hears 16 kHz")
+        x = np.asarray(pcm)
+        x = x / 32768.0 if x.dtype.kind in "iu" else x.astype(np.float64)
+        hop = int(round(sr * hop_s))
+        out = []
+        for end in range(FRAME, len(x) + 1, hop):
+            out.append(self.hear(x[end - FRAME:end])[0])
+        return np.array(out)

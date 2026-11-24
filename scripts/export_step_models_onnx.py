@@ -41,13 +41,15 @@ def _model(nodes, inputs, outputs, inits, name, doc):
 
 
 def ear_graph(a, name):
+    bins = int(a.get("ear.bins", BINS))                     # step5's wide ear records its bins
+    low = float(a.get("ear.low_cents", -600.0))
     convs = sorted({k.split(".")[1] for k in a if k.startswith("ear.conv")}, key=lambda s: int(s[4:]))
     fcs = sorted({k.split(".")[1] for k in a if k.startswith("ear.fc")}, key=lambda s: int(s[2:]))
     inits = [numpy_helper.from_array(np.array([1], np.int64), "axis1"),
              _init("eps", np.array(1e-4)),
              numpy_helper.from_array(np.array([0], np.int64), "s0"),
-             numpy_helper.from_array(np.array([BINS], np.int64), "s96"),
-             numpy_helper.from_array(np.array([BINS + 1], np.int64), "s97")]
+             numpy_helper.from_array(np.array([bins], np.int64), "s96"),
+             numpy_helper.from_array(np.array([bins + 1], np.int64), "s97")]
     nodes = [  # RMS normalisation, as EarNet.normalize
         helper.make_node("ReduceMean", ["samples"], ["mean"], keepdims=1, axes=[1], name="mean"),
         helper.make_node("Sub", ["samples", "mean"], ["centred"], name="remove_dc"),
@@ -68,6 +70,16 @@ def ear_graph(a, name):
         x = f"{c}_relu"
     nodes.append(helper.make_node("Flatten", [x], ["flat"], axis=1, name="flatten"))
     x = "flat"
+    if int(a.get("ear.level", 0)):              # step5: the frame's level, (dBFS + 40) / 20
+        inits += [_init("min_rms", np.array(1e-6)), _init("db_per_log10", np.array(20.0 / np.log(10.0))),
+                  _init("forty", np.array(40.0)), _init("twenty", np.array(20.0))]
+        nodes += [helper.make_node("Max", ["rms", "min_rms"], ["rms_floor"], name="level_floor"),
+                  helper.make_node("Log", ["rms_floor"], ["ln_rms"], name="level_ln"),
+                  helper.make_node("Mul", ["ln_rms", "db_per_log10"], ["db"], name="level_db"),
+                  helper.make_node("Add", ["db", "forty"], ["db40"], name="level_offset"),
+                  helper.make_node("Div", ["db40", "twenty"], ["level"], name="level_scale"),
+                  helper.make_node("Concat", ["flat", "level"], ["flat_level"], axis=1, name="with_level")]
+        x = "flat_level"
     for i, f in enumerate(fcs):
         inits += [_init(f"{f}.weight", a[f"ear.{f}.w"]), _init(f"{f}.bias", a[f"ear.{f}.b"])]
         nodes.append(helper.make_node("Gemm", [x, f"{f}.weight", f"{f}.bias"], [f"{f}_out"], transB=1, name=f"fc{i + 1}"))
@@ -80,11 +92,11 @@ def ear_graph(a, name):
               helper.make_node("Squeeze", ["voiced_2d", "axis1"], ["voiced_logit"], name="voiced_scalar")]
     return _model(nodes,
                   [helper.make_tensor_value_info("samples", TensorProto.FLOAT, [1, FRAME])],
-                  [helper.make_tensor_value_info("pitch_logits", TensorProto.FLOAT, [1, BINS]),
+                  [helper.make_tensor_value_info("pitch_logits", TensorProto.FLOAT, [1, bins]),
                    helper.make_tensor_value_info("voiced_logit", TensorProto.FLOAT, [1])],
                   inits, name,
-                  "Ear: last 20 ms (320 samples @16 kHz) -> 96 pitch bins of 25 cent (-600..+1775 cent re A4) "
-                  "and a voicing logit.")
+                  f"Ear: last 20 ms (320 samples @16 kHz) -> {bins} pitch bins of 25 cent "
+                  f"({low:+.0f}..{low + 25 * (bins - 1):+.0f} cent re A4) and a voicing logit.")
 
 
 def gru_graph(a, prefix, head, out_act, out_name, name, doc):
