@@ -17,5 +17,5 @@
     "max_gap_steps": 2
   },
   "common_ear": true,
-  "memory_runtime": "mem_03_k4096_h15_runtime.npz"
+  "memory_runtime": "mem_04_runtime.npz"
 }
