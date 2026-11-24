@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>やまびこ1号 実機比較 11-24</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column of ~44rem; figures break out to 60rem. One color per controller throughout. */
+:root{
+  --bg:#f5f6f4; --surface:#ffffff; --fg:#1d2422; --muted:#5d6864; --line:#d9dedb; --grid:#e8ece9;
+  --classic:#8c6a2f; --classic_ear:#d0701c; --step3:#1f8a7a; --step4:#3355cc; --step5:#8a4fc4; --step7:#c0306a;
+  --target:#1d2422; --valve:#ebe6dc;
+  --f-display:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",sans-serif;
+  --f-body:"Noto Sans JP","Hiragino Sans","Yu Gothic",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141917; --surface:#1c2320; --fg:#e6ebe8; --muted:#9aa6a1; --line:#2f3935; --grid:#252d2a;
+  --classic:#d2a865; --classic_ear:#f39a4d; --step3:#3cc2ad; --step4:#7d97ff; --step5:#bb8cf0; --step7:#f06d9f;
+  --target:#e6ebe8; --valve:#2c2a24; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141917; --surface:#1c2320; --fg:#e6ebe8; --muted:#9aa6a1; --line:#2f3935; --grid:#252d2a;
+  --classic:#d2a865; --classic_ear:#f39a4d; --step3:#3cc2ad; --step4:#7d97ff; --step5:#bb8cf0; --step7:#f06d9f;
+  --target:#e6ebe8; --valve:#2c2a24; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:16px;line-height:1.8;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:2.5rem 4rem}
+main{max-width:60rem;margin:0 auto;display:flex;flex-direction:column;gap:3rem}
+.col{max-width:44rem}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;line-height:1.35;margin:0}
+h1{font-size:clamp(1.8rem,4.5vw,2.5rem);font-weight:900}
+h2{font-size:1.45rem;font-weight:700}h3{font-size:1.05rem;font-weight:700}
+p{margin:0}section{display:flex;flex-direction:column;gap:1rem}
+.eyebrow{font-family:var(--f-mono);font-size:.78rem;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
+.lead{font-size:1.08rem}.note{font-size:.85rem;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:.4em;font-family:var(--f-mono);font-size:.82rem;font-weight:500}
+.chip i{width:.8em;height:.8em;border-radius:2px;display:inline-block}
+.headline{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.headline div{background:var(--surface);padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.2rem;min-width:0}
+.big{font-family:var(--f-mono);font-size:1.8rem;font-weight:500;font-variant-numeric:tabular-nums;line-height:1.2}
+.big small{font-size:.9rem;color:var(--muted);margin-left:.2em}.lab{font-size:.85rem;color:var(--muted)}
+@media (max-width:620px){.headline{grid-template-columns:1fr}}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{padding:.5rem .75rem;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+tr:last-child td{border-bottom:none}th{font-weight:700;font-size:.8rem;color:var(--muted)}
+td.n{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums}td.best{font-weight:700}
+td.wrap{white-space:normal;min-width:14rem}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:1rem 1rem .75rem;display:flex;flex-direction:column;gap:.75rem;min-width:0}
+.tabs{display:flex;flex-wrap:wrap;gap:.4rem}
+.tabs button{font:inherit;font-size:.85rem;padding:.3rem .75rem;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer}
+.tabs button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.tabs button:focus-visible{outline:2px solid var(--step4);outline-offset:2px}
+.legend{display:flex;flex-wrap:wrap;gap:1rem;font-size:.82rem;color:var(--muted)}
+svg{display:block;width:100%;height:auto}svg text{fill:var(--muted);font-family:var(--f-mono);font-size:11px}
+ul.find{margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:.6rem}
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}@media (max-width:720px){.two{grid-template-columns:1fr}}
+code{font-family:var(--f-mono);font-size:.85em;background:var(--grid);padding:.1em .35em;border-radius:4px}
+</style>
+
+<style>*,*::before,*::after{box-sizing:border-box}body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
+<main>
+<header class="col" style="display:flex;flex-direction:column;gap:1rem">
+  <span class="eyebrow">やまびこ1号 ・ 実機評価 ・ 2026-11-24</span>
+  <h1>古典制御と NN の step を実機で比べる</h1>
+  <p class="lead">NN を使わない古典制御（PID・観測器）と、step3〜7 を同じ日に同じ 3 曲で吹かせました。いちばん安定したのは、<b style="color:var(--classic_ear)">古典制御に耳の NN だけを組み合わせた版</b>でした。全部 NN の <b style="color:var(--step7)">step7</b> は半音階で全体の最高を出しましたが、曲による差が大きく残っています。</p>
+</header>
+
+<section>
+  <div class="headline">
+    <div><span class="lab">音階で鳴った割合（耳を YIN → NN）</span><span class="big"><span style="color:var(--classic)">71</span> → <span style="color:var(--classic_ear)">99</span><small>%</small></span><span class="lab">classic → classic_ear</span></div>
+    <div><span class="lab">半音階の ±25 cent 以内</span><span class="big" style="color:var(--step7)">86<small>%</small></span><span class="lab">step7（ツインなしの NN）。全版で最高</span></div>
+    <div><span class="lab">PWM の反転（音階、1 曲あたり）</span><span class="big"><span style="color:var(--classic_ear)">104</span> / <span style="color:var(--step7)">61</span><small>回</small></span><span class="lab">古典制御は細かく上下する</span></div>
+  </div>
+  <p class="note">100 cent が半音。音程は、その演奏で吹いた調に合わせてから比べています。各曲 2 回ずつの平均。</p>
+</section>
+
+<section class="col">
+  <h2>比べた版</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>耳</th><th>アクチュエータ</th><th>弁</th><th>ツインの式を演奏中に</th></tr></thead>
+    <tbody id="cfg"></tbody>
+  </table></div>
+  <p>step6 は step5 にお手本の記憶を足した版で、楽譜を渡して吹く今回の評価では step5 と同じ動きになるので省きました。ファン 80 %、版ごとにキャリブレーションし直し（ホーム音はどれも 429〜430 Hz）。classic・step3〜5 と、step7・classic_ear は同じ日の続けた 2 回の評価です。</p>
+</section>
+
+<section>
+  <div class="col" style="display:flex;flex-direction:column;gap:.5rem">
+    <h2>曲ごとの成績</h2>
+    <p>棒が 2 回の平均、点が 1 回ずつ。指標を切り替えられます。</p>
+  </div>
+  <div class="panel">
+    <div class="tabs" id="metricTabs" role="group" aria-label="指標"></div>
+    <div id="barChart"></div>
+    <div class="legend" id="legend"></div>
+    <p class="note" id="metricNote"></p>
+  </div>
+</section>
+
+<section>
+  <div class="col" style="display:flex;flex-direction:column;gap:.5rem">
+    <h2>耳が決め手だった</h2>
+    <p>楽譜の音が鳴っている時間のうち、耳が音程を出せた割合を音域別に見ると、YIN の classic だけが上の音域（800 cent 以上）で半分を取りこぼしています。
+    取りこぼすと観測器が位置を見失い、音階の 2 回目は大きく崩れました（鳴った割合 56 %）。耳だけを NN に替えた classic_ear は、同じ制御のまま高音を 100 % 聞き取り、音階の誤差が 68 → 20 cent になりました。</p>
+  </div>
+  <div class="two">
+    <div class="panel"><h3>音階</h3><div id="band_f80_scale"></div></div>
+    <div class="panel"><h3>半音階</h3><div id="band_f80_chromatic"></div></div>
+  </div>
+  <div class="legend"><span>低：400 cent 未満</span><span>中：400〜800 cent</span><span>高：800 cent 以上（2 回の合計）</span></div>
+</section>
+
+<section>
+  <div class="col" style="display:flex;flex-direction:column;gap:.5rem">
+    <h2>シミュレーターと実機</h2>
+    <p>同じ曲を、ツイン（<code>twin_y1f80_04</code>）の周りの 32 台のシミュレーターでも吹かせた値と並べました（±25 cent 以内）。シミュレーターは耳を模擬しないので classic_ear は classic と同じです。</p>
+  </div>
+  <div class="tablewrap"><table id="simTable"></table></div>
+  <p class="col note">シミュレーターの順位（classic ＞ step7 ＞ step4・5 ＞ step3）は、実機ではドレミで崩れました。step4・5 はシミュレーターで step3 より大きく良かったのに、実機では半音階でかえって下がっています。ツインが実機を再現しきれていない部分が残っています。</p>
+</section>
+
+<section>
+  <div class="col" style="display:flex;flex-direction:column;gap:.5rem">
+    <h2>演奏の中身</h2>
+    <p>各版の 2 回目の演奏です。黒い線が楽譜、点が耳の聞いた音、薄い帯が弁を閉じていた時間、下の細い線が PWM（±1）。</p>
+  </div>
+  <div class="panel">
+    <div class="tabs" id="songTabs" role="group" aria-label="曲"></div>
+    <div id="series"><p class="note">読み込み中…</p></div>
+  </div>
+  <p class="col note">音階の classic は、上の音で点（聞こえた音）が消え、そのあと大きく外れています。classic と classic_ear の PWM は、音の間も細かく上下を続けています（保持帯で止めても、静止摩擦で出直す）。NN の版は PWM がなめらかです。</p>
+</section>
+
+<section class="col">
+  <h2>分かったこと</h2>
+  <ul class="find">
+    <li><b>耳の NN が一番効いた。</b> 同じ古典制御でも、耳を YIN から NN に替えるだけで音階が崩れなくなった。モーター音とファンの中で、高い音まで聞き取れることが効いている。</li>
+    <li><b>決定論の制御は、合っているときは正確だが、よく動く。</b> classic_ear はドレミ 84 %・音階 74 %・半音階 75 % と 3 曲とも安定。ただし PWM の反転が 1 曲 50〜104 回と、NN の版（30〜60 回）の 2 倍近く。</li>
+    <li><b>全部 NN の step7 は振れ幅が大きい。</b> 半音階 86 %（全体の最高）、音階 60 %（NN の版で最高）の一方、ドレミは 50 % と NN の版で最低。ツインの推定を外しても動くことは分かったが、まだ曲によって当たり外れがある。</li>
+    <li><b>シミュレーターと実機のずれ。</b> シミュレーターの改善（step3 → step4 で +20 ポイント）が実機ではほぼ出ていない。今日の実機の演奏（8 版 × 3 曲 × 2 回）を足してツインを当てはめ直すのが次の材料になる。</li>
+    <li>最近のフィジカル AI の多くが「決定論の制御 ＋ 専用の NN（知覚）」を組み合わせているのと同じ結論が、この小さな機体でも出た。</li>
+  </ul>
+  <h3 style="margin-top:.5rem">次にやること</h3>
+  <ul class="find">
+    <li>今日の演奏でツインを当てはめ直し、step7 を学び直す（ドレミの弱さを直す）</li>
+    <li>練習でうまくなる NN（曲の記憶）の学習結果を確かめ、ボタン 2 回押しの練習で実機の上達を測る</li>
+    <li>実用版として classic_ear（決定論 ＋ 耳の NN）を口笛コピーの既定にすることを検討する</li>
+  </ul>
+</section>
+
+<section>
+  <h2 class="col">全部の数値（実機）</h2>
+  <div class="tablewrap"><table id="fullTable"></table></div>
+  <p class="note col">音程の誤差：楽譜の音の上での |聞いた音 − 楽譜| の平均（調を合わせて）。音の間隔の誤差：隣り合う音の差の誤差。±25 cent 以内・滑る音（50 cent 以上外れ）は聞こえた時間に対する割合、鳴った割合は楽譜の音の時間に対する割合、反転は PWM の向きが変わった回数。<code>scripts/yamabiko_step_eval.py</code>、記録は <code>runs/real/eval/20261124_181419_*</code> と <code>20261124_182302_*</code>。</p>
+</section>
+</main>
+
+<script>
+const STEPS=["classic","classic_ear","step3","step4","step5","step7"];
+const COL=Object.fromEntries(STEPS.map(s=>[s,`var(--${s})`]));
+const CFG={classic:["YIN","PID＋観測器","規則","使う（推測航法・逆算）"],classic_ear:["NN（ear_04）","PID＋観測器","規則","使う"],
+  step3:["NN（ear_01）","NN","NN","使う（推定位置を入力に）"],step4:["NN（ear_01）","NN（新しいツインで学び直し）","NN","使う"],
+  step5:["NN（ear_04、口笛も）","NN（step4 と同じ）","NN","使う"],step7:["NN（ear_04）","NN（ツインの入力なし）","NN（ツインの入力なし）","使わない"]};
+const SONGS=[["f80_doremi","ドレミファミレド"],["f80_scale","音階"],["f80_chromatic","半音階"]];
+const SIM={classic:[90.6,82.9,88.5],classic_ear:[90.6,82.9,88.5],step3:[58.2,43.7,65.8],step4:[80.3,63.1,70.8],step5:[80.3,63.1,70.8],step7:[84.6,73.1,77.1]};
+const METRICS=[
+  {i:2,name:"±25 cent 以内",unit:"%",pct:true,lower:false,note:"大きいほど良い。聞こえた時間のうち楽譜から 25 cent 以内だった割合。"},
+  {i:0,name:"音程の誤差",unit:"cent",lower:true,note:"小さいほど良い。classic の音階は 2 回目に高音を見失い 107 cent まで崩れた。"},
+  {i:1,name:"音の間隔の誤差",unit:"cent",lower:true,note:"小さいほど良い。古典制御は音と音の間隔が正確。"},
+  {i:3,name:"滑る音",unit:"%",pct:true,lower:true,note:"小さいほど良い。50 cent 以上外れていた割合。"},
+  {i:4,name:"鳴った割合",unit:"%",pct:true,lower:false,note:"大きいほど良い。耳が音程を出せた割合。"},
+  {i:5,name:"PWM の反転",unit:"回",lower:true,note:"小さいほど滑らか。古典制御は NN の 2 倍近く上下する。"}];
+const NS="http://www.w3.org/2000/svg";
+const el=(t,a={},p)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e};
+const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
+const fmt=(v,m)=>m.pct?(v*100).toFixed(0):(m.i===5?v.toFixed(0):v.toFixed(1));
+const chip=s=>`<span class="chip"><i style="background:${COL[s]}"></i>${s}</span>`;
+document.getElementById("cfg").innerHTML=STEPS.map(s=>`<tr><td>${chip(s)}</td>${CFG[s].map(x=>`<td>${x}</td>`).join("")}</tr>`).join("");
+document.getElementById("legend").innerHTML=STEPS.map(chip).join("")+"<span>○ 1 回ずつ</span>";
+let DATA=null,metric=METRICS[0],song="f80_scale";
+
+function niceMax(m){const p=Math.pow(10,Math.floor(Math.log10(m)));for(const f of [1,1.5,2,2.5,3,4,5,6,8,10])if(f*p>=m*1.08)return f*p;return 10*p}
+function drawBars(){
+  const S=DATA.summary,W=900,H=300,L=46,R=10,T=16,B=34,host=document.getElementById("barChart");host.innerHTML="";
+  const svg=el("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":metric.name},host);
+  let mx=0;for(const s of STEPS)for(const [g] of SONGS)for(const r of S[s][g])mx=Math.max(mx,r[metric.i]);
+  const top=metric.pct?1:niceMax(mx),y=v=>T+(H-T-B)*(1-Math.min(v,top)/top);
+  for(let k=0;k<=5;k++){const v=top*k/5;el("line",{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:"var(--grid)"},svg);const t=el("text",{x:L-6,y:y(v)+4,"text-anchor":"end"},svg);t.textContent=metric.pct?Math.round(v*100):Math.round(v)}
+  const gw=(W-L-R)/SONGS.length,bw=Math.min(36,gw/(STEPS.length+2));
+  SONGS.forEach(([g,label],gi)=>{const cx=L+gw*(gi+.5);
+    const t=el("text",{x:cx,y:H-10,"text-anchor":"middle"},svg);t.textContent=label;t.style.fill="var(--fg)";t.style.fontFamily="var(--f-body)";t.style.fontSize="13px";
+    const vals=STEPS.map(s=>mean(S[s][g].map(r=>r[metric.i])));const best=metric.lower?Math.min(...vals):Math.max(...vals);
+    STEPS.forEach((s,si)=>{const x=cx+(si-(STEPS.length-1)/2)*(bw+6)-bw/2,v=vals[si];
+      el("rect",{x,y:y(v),width:bw,height:y(0)-y(v),fill:COL[s],opacity:v===best?1:.6,rx:2},svg);
+      const lt=el("text",{x:x+bw/2,y:y(v)-5,"text-anchor":"middle"},svg);lt.textContent=fmt(v,metric);lt.style.fill="var(--fg)";lt.style.fontSize="10px";if(v===best)lt.style.fontWeight="700";
+      S[s][g].forEach((r,k)=>el("circle",{cx:x+bw/2+(k?5:-5),cy:y(r[metric.i]),r:2.6,fill:"var(--surface)",stroke:"var(--fg)","stroke-width":1},svg))})});
+  const ut=el("text",{x:L-6,y:T-4,"text-anchor":"end"},svg);ut.textContent=metric.unit;
+  document.getElementById("metricNote").textContent=metric.note+"（濃い棒がその曲でいちばん良い版）"}
+function drawBand(g){
+  const W=440,H=200,L=34,R=8,T=12,B=28,host=document.getElementById("band_"+g);host.innerHTML="";
+  const svg=el("svg",{viewBox:`0 0 ${W} ${H}`,role:"img"},host),y=v=>T+(H-T-B)*(1-v);
+  [0,.25,.5,.75,1].forEach(v=>{el("line",{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:"var(--grid)"},svg);const t=el("text",{x:L-5,y:y(v)+4,"text-anchor":"end"},svg);t.textContent=v*100});
+  const bands=[["low","低"],["mid","中"],["high","高"]],gw=(W-L-R)/3,bw=10;
+  bands.forEach(([b,lab],bi)=>{const cx=L+gw*(bi+.5);const t=el("text",{x:cx,y:H-8,"text-anchor":"middle"},svg);t.textContent=lab;t.style.fill="var(--fg)";t.style.fontFamily="var(--f-body)";t.style.fontSize="13px";
+    STEPS.forEach((s,si)=>{const v=DATA.bands[s+"/"+g][b];if(v===null)return;const x=cx+(si-(STEPS.length-1)/2)*(bw+3)-bw/2;
+      el("rect",{x,y:y(v),width:bw,height:y(0)-y(v),fill:COL[s],rx:1.5},svg);
+      if(b==="high"&&s==="classic"){const lt=el("text",{x:x+bw/2,y:y(v)-5,"text-anchor":"middle"},svg);lt.textContent=Math.round(v*100);lt.style.fill="var(--fg)"}})});
+  const ut=el("text",{x:L-5,y:T-2,"text-anchor":"end"},svg);ut.textContent="%"}
+function drawSeries(){
+  const host=document.getElementById("series");host.innerHTML="";
+  const W=900,PH=130,SH=28,gap=14,L=46,R=10,T=6,H=T+STEPS.length*(PH+SH+gap)+16;
+  const svg=el("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":"音程の推移"},host);
+  const n=Math.max(...STEPS.map(s=>DATA.series[s+"/"+song].target.length)),tmax=n*.01,x=i=>L+(W-L-R)*(i*.01/tmax);
+  STEPS.forEach((s,si)=>{const d=DATA.series[s+"/"+song],y0=T+si*(PH+SH+gap),y=c=>y0+PH*(1-(c+150)/1450);
+    let st=null;for(let i=0;i<=d.valve.length;i++){const closed=i<d.valve.length&&d.valve[i]===0;if(closed&&st===null)st=i;if(!closed&&st!==null){el("rect",{x:x(st),y:y0,width:x(i)-x(st),height:PH,fill:"var(--valve)"},svg);st=null}}
+    [0,400,800,1200].forEach(c=>{el("line",{x1:L,x2:W-R,y1:y(c),y2:y(c),stroke:"var(--grid)"},svg);const t=el("text",{x:L-6,y:y(c)+4,"text-anchor":"end"},svg);t.textContent=c});
+    el("rect",{x:L,y:y0,width:W-L-R,height:PH,fill:"none",stroke:"var(--line)"},svg);
+    let p="",pen=false;d.target.forEach((c,i)=>{if(c===null){pen=false;return}p+=(pen?"L":"M")+x(i).toFixed(1)+" "+y(c).toFixed(1);pen=true});
+    el("path",{d:p,fill:"none",stroke:"var(--target)","stroke-width":2},svg);
+    const g=el("g",{fill:COL[s]},svg);d.heard.forEach((c,i)=>{if(c===null||c<-150||c>1300)return;el("circle",{cx:x(i).toFixed(1),cy:y(c).toFixed(1),r:1.5},g)});
+    const lab=el("text",{x:L+8,y:y0+15},svg);lab.textContent=s;lab.style.fill=COL[s];lab.style.fontWeight="700";lab.style.fontSize="13px";
+    const m=DATA.summary[s][song][1];const st2=el("text",{x:W-R-8,y:y0+15,"text-anchor":"end"},svg);st2.textContent=`±25c ${Math.round(m[2]*100)}% ・ 誤差 ${m[0].toFixed(0)} cent ・ 鳴った ${Math.round(m[4]*100)}% ・ 反転 ${m[5]}`;st2.style.fontFamily="var(--f-body)";
+    const py0=y0+PH+3,py=v=>py0+SH/2-v*SH/2;el("line",{x1:L,x2:W-R,y1:py(0),y2:py(0),stroke:"var(--grid)"},svg);
+    let q="";d.pwm.forEach((v,i)=>{if(v!==null)q+=(q?"L":"M")+x(i).toFixed(1)+" "+py(v).toFixed(1)});el("path",{d:q,fill:"none",stroke:COL[s],"stroke-width":1,opacity:.8},svg)});
+  for(let k=0;k<=Math.floor(tmax);k+=2){const t=el("text",{x:x(k/.01),y:H-2,"text-anchor":"middle"},svg);t.textContent=k+" s"}}
+function tables(){
+  const S=DATA.summary;
+  let h="<thead><tr><th>曲</th><th>版</th>"+METRICS.map(m=>`<th style="text-align:right">${m.name}${m.unit==="回"?"":"（"+m.unit+"）"}</th>`).join("")+"</tr></thead><tbody>";
+  SONGS.forEach(([g,l])=>{const means=STEPS.map(s=>METRICS.map(m=>mean(S[s][g].map(r=>r[m.i]))));
+    STEPS.forEach((s,si)=>{h+=`<tr><td>${si===0?l:""}</td><td>${chip(s)}</td>`;METRICS.forEach((m,mi)=>{const col=means.map(r=>r[mi]);const best=m.lower?Math.min(...col):Math.max(...col);h+=`<td class="n${col[si]===best?" best":""}">${fmt(col[si],m)}</td>`});h+="</tr>"})});
+  document.getElementById("fullTable").innerHTML=h+"</tbody>";
+  let t="<thead><tr><th>版</th>"+SONGS.map(([,l])=>`<th style="text-align:right">${l} シミュ</th><th style="text-align:right">${l} 実機</th>`).join("")+"</tr></thead><tbody>";
+  STEPS.forEach(s=>{t+=`<tr><td>${chip(s)}</td>`;SONGS.forEach(([g],gi)=>{const real=mean(S[s][g].map(r=>r[2]))*100;t+=`<td class="n">${SIM[s][gi].toFixed(0)} %</td><td class="n"><b>${real.toFixed(0)} %</b></td>`});t+="</tr>"});
+  document.getElementById("simTable").innerHTML=t+"</tbody>"}
+const mt=document.getElementById("metricTabs");
+METRICS.forEach(m=>{const b=document.createElement("button");b.type="button";b.textContent=m.name;b.setAttribute("aria-pressed",m===metric);b.onclick=()=>{metric=m;[...mt.children].forEach(c=>c.setAttribute("aria-pressed",c===b));drawBars()};mt.appendChild(b)});
+const stb=document.getElementById("songTabs");
+SONGS.forEach(([g,l])=>{const b=document.createElement("button");b.type="button";b.textContent=l;b.setAttribute("aria-pressed",g===song);b.onclick=()=>{song=g;[...stb.children].forEach(c=>c.setAttribute("aria-pressed",c===b));if(DATA)drawSeries()};stb.appendChild(b)});
+fetch("data.json").then(r=>r.json()).then(j=>{DATA=j;drawBars();drawBand("f80_scale");drawBand("f80_chromatic");drawSeries();tables()})
+  .catch(()=>{document.getElementById("series").innerHTML='<p class="note">データを読み込めませんでした。</p>'});
+</script>
+
+</body>
+</html>

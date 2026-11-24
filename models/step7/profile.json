@@ -1,0 +1,21 @@
+{
+  "name": "step7",
+  "title": "step7: ツインに頼らない演奏（アクチュエータと弁の NN がツインの推定位置を使わない）",
+  "ear": "nn",
+  "ear_runtime": "ear_04_runtime.npz",
+  "doc": "docs/step7.md",
+  "runtime": "nn_f80_t7_init_runtime.npz",
+  "valve_runtime": "valve_t7_free_runtime.npz",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  },
+  "common_ear": true,
+  "memory_runtime": "mem_03_k4096_h15_runtime.npz"
+}
