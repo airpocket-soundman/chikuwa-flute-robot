@@ -12,6 +12,7 @@
 > - 練習：サーバーが同じ曲の演奏器を次の演奏まで持ち続ける（`cmd_play` の `practice`）。曲の記憶（`song_slot`）を持つ版なら、前の演奏で書いた記憶を読んで上達する。持たない版は毎回同じに吹く。
 > - 画面の「録音」「練習：もう一度」「止める」はボタンと同じ働き。基板のボタンが押されると、画面の同じボタンが光る（状態の `press`）。
 > - 手で起動し直す：UNO Q の `bash /home/arduino/yamabiko/restart.sh`（`scripts/uno_q_restart.sh`）。`--no-calibrate-at-start --no-button` で音を出さない起動。
+> - **録音だけ（データ集め）**：画面上の切り替えで、ボタン 1 回で録音開始・もう 1 回で保存（笛は鳴らない）。残り時間をバーで表示、1 本 10〜30 秒、種類（口笛・無音・話し声など）を選べる。UNO Q の `runs/real/whistle_data/<日時>_<種類>.npz`（`pcm`・`sr`・`kind`）に保存。耳（step5）と記憶（step6）の学び直しに使う。
 > - PC で画面だけ試す：`python scripts/yamabiko_web_dev.py --port 8081`（偽の MCU、音は出ない。`POST /dev/press`、`{"n": 2}` で 2 回押し）。
 
 A・B 基板を UNO Q に載せて初めて通電し、PC から命令で動かせるところまで来た。その時点の引き継ぎ。

@@ -237,6 +237,11 @@ def common_ear(profile):
     if profile.get("common_ear") and profile.get("ear") == "nn":
         return {"ear": "nn", "ear_runtime": profile["ear_runtime_path"]}
     return {}
+def np_load(path):
+    import numpy as np
+    return np.load(path)
+
+
 def wav_bytes(pcm, sr):
     import io
     import wave
@@ -256,6 +261,8 @@ class Stopped(Exception):
 
 
 MAX_RECORD_S = 30.0       # a recording ends at the second press, or here
+COLLECT_DIR = pathlib.Path(__file__).resolve().parents[1] / "runs" / "real" / "whistle_data"   # recordings only
+COLLECT_KINDS = {"whistle": "口笛", "quiet": "無音・部屋の音", "other": "話し声など"}
 STEP_FILE = pathlib.Path(__file__).resolve().parents[1] / "runs" / "web_step.txt"   # the step chosen last
 
 
@@ -292,6 +299,9 @@ class WhistleJob:
         self.song = None          # the last recorded song: step, target path, the page's tracks
         self.practice = []        # relative error of every play of that song (practice play 1, 2, ...)
         self.presses = 0
+        self.collect = False      # the data collection mode: record only, no calibration, no play
+        self.collect_kind, self.collect_seconds = "whistle", MAX_RECORD_S
+        self.takes = self._load_takes()
 
     # ----- the chosen step ---------------------------------------------------------------------------
     def _saved_step(self):
@@ -359,6 +369,17 @@ class WhistleJob:
     def press(self, presses=1):
         """The board button: ``presses`` within DOUBLE_S of each other (1 or 2)."""
         phase = self.state.get("phase")
+        if self.collect:                               # data collection: every press starts or ends a take
+            if not self.busy():
+                self._pressed("record", 1)
+                try:
+                    self.start_take()
+                except ValueError as exc:
+                    self._set(phase="idle", message=str(exc))
+            elif phase == "record":
+                self._pressed("finish", 1)
+                self.finish()
+            return
         if not self.busy():
             action = "replay" if presses >= 2 else "record"
             self._pressed(action, presses)
@@ -372,6 +393,89 @@ class WhistleJob:
         else:
             self._pressed("stop", presses)
             self.stop()
+
+    # ----- data collection --------------------------------------------------------------------------
+    def _load_takes(self):
+        takes = []
+        for f in sorted(COLLECT_DIR.glob("*.npz")) if COLLECT_DIR.exists() else []:
+            try:
+                with np_load(f) as d:
+                    takes.append({"name": f.stem, "kind": str(d["kind"]) if "kind" in d.files else "whistle",
+                                  "seconds": round(len(d["pcm"]) / int(d["sr"]), 1)})
+            except Exception:                          # noqa: BLE001
+                continue
+        return takes
+
+    def set_mode(self, collect=None, kind=None, seconds=None):
+        if self.busy():
+            raise ValueError("動いている間は切り替えられません")
+        if collect is not None:
+            self.collect = bool(collect)
+        if kind is not None:
+            if kind not in COLLECT_KINDS:
+                raise ValueError(f"{kind} は選べません")
+            self.collect_kind = kind
+        if seconds is not None:
+            self.collect_seconds = float(min(max(float(seconds), 5.0), MAX_RECORD_S))
+        self._set(phase="idle", message="ボタンを押すと録音が始まります（録音だけ。笛は鳴りません）" if self.collect
+                  else "ボタンを押すと録音が始まります")
+        return {"collect": self.collect, "kind": self.collect_kind, "seconds": self.collect_seconds}
+
+    def start_take(self):
+        return self._launch(self._take, self.collect_kind, self.collect_seconds, first="録音の準備")
+
+    def delete_last(self):
+        if self.busy():
+            raise ValueError("動いている間は消せません")
+        if not self.takes:
+            raise ValueError("消す録音がありません")
+        take = self.takes.pop()
+        try:
+            (COLLECT_DIR / f"{take['name']}.npz").unlink()
+        except OSError:
+            pass
+        self.wavs.pop("take", None)
+        self._set(phase="idle", message=f"{take['name']} を消しました", take=None)
+        return {"deleted": take["name"]}
+
+    def _take(self, kind, seconds):
+        import numpy as np
+        from flute_rl.yamabiko.whistle import whistle_track
+        rig = None
+        try:
+            with self.bench.lock:
+                self.bench._drop()
+            rig = Remote(port=self.server_port, forward=False)
+            rig.stop(force=True)                       # fan off, valve shut: only the room in the mic
+            time.sleep(.3)                             # the click of the button
+            start = rig.audio_mark()
+            began = time.monotonic()
+            self._set(phase="record", message=f"{COLLECT_KINDS[kind]}を録音中。終わったらボタンを押してください",
+                      record_began=began, max_seconds=seconds)
+            self.end_recording.wait(seconds)
+            self._check()
+            pcm, sr, _ = rig.audio_since(start)
+            if len(pcm) > sr:
+                pcm = pcm[:-int(.25 * sr)]
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            COLLECT_DIR.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(COLLECT_DIR / f"{stamp}_{kind}.npz", pcm=pcm, sr=sr, kind=kind)
+            take = {"name": f"{stamp}_{kind}", "kind": kind, "seconds": round(len(pcm) / sr, 1)}
+            self.takes.append(take)
+            self.wavs["take"] = wav_bytes(pcm, sr)
+            x = pcm / 32768.0
+            level = 20 * np.log10(max(float(np.sqrt(np.mean(x ** 2))), 1e-9)) if len(x) else -120.0
+            track = whistle_track(pcm, sr)
+            heard = float(np.mean(np.isfinite(track))) if len(track) else 0.0
+            self._set(phase="saved", message=f"保存しました（{take['seconds']:.1f} 秒）。ボタンで次を録音します",
+                      take=dict(take, level_db=round(level, 1), voiced=round(heard, 2),
+                                track=[None if not np.isfinite(v) else round(float(v), 1) for v in track[::2]]))
+        except Stopped as exc:
+            self._set(phase="idle", message=str(exc))
+        except Exception as exc:                       # noqa: BLE001
+            self._set(phase="error", message=str(exc))
+        finally:
+            self._release(rig)
 
     def replay(self, step=None):
         """Play the last recorded song again, without recording (practice)."""
@@ -450,6 +554,12 @@ class WhistleJob:
         with self.lock:
             return dict(self.state, tuning=self.tunings.get(self.step), has_audio=sorted(self.wavs), step=self.step,
                         busy=self.busy(), practice=list(self.practice),
+                        collect=self.collect, collect_kind=self.collect_kind, collect_seconds=self.collect_seconds,
+                        takes=self.takes[-12:], take_count=len(self.takes),
+                        take_seconds=round(sum(t["seconds"] for t in self.takes if t["kind"] == "whistle"), 1),
+                        record_elapsed=(time.monotonic() - self.state["record_began"]
+                                        if self.state.get("phase") == "record" and self.state.get("record_began")
+                                        else None),
                         song_step=self.song["step"] if self.song else None,
                         steps=[{"name": n, "title": p.get("title", n), "ear": p.get("ear", "yin"),
                                 "memory": bool(p.get("memory_runtime")), "valve_nn": bool(p.get("valve_runtime"))}
@@ -579,7 +689,7 @@ class WhistleJob:
             start = rig.audio_mark()
             began = time.monotonic()
             self._set(phase="record", message="口笛をどうぞ。吹き終わったらボタンを押してください",
-                      record_started=time.time(), max_seconds=MAX_RECORD_S)
+                      record_began=time.monotonic(), max_seconds=MAX_RECORD_S)
             self.end_recording.wait(MAX_RECORD_S)
             self._check()
             pcm, sr, _ = rig.audio_since(start)
@@ -638,6 +748,7 @@ MAIN_PAGE = r"""<!doctype html>
 @media (prefers-color-scheme:dark){:root{--bg:#121816;--card:#1a221f;--fg:#e6ece9;--mute:#9aa8a2;--line:#2b3531;--acc:#4fc3ad;--acc2:#1f2e2a;--rec:#fb923c;--warn:#f87171;--ok:#4ade80;
 --c1:#6b7773;--c2:#4fc3ad;--c3:#e6ece9;--c4:#fb923c;--onacc:#0f1513}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif}
+[hidden]{display:none!important}
 main{max-width:960px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:14px}
 header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}h1{font-size:24px;margin:0;letter-spacing:.02em}
 .mute{color:var(--mute);font-size:14px}a{color:var(--acc)}
@@ -660,10 +771,22 @@ button{font:inherit;border:0;border-radius:12px;cursor:pointer}
 button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 .act{font-size:19px;font-weight:700;padding:14px 22px;color:var(--onacc);display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:200px;transition:transform .08s}
 .act small{font-size:12px;font-weight:500;opacity:.85}
-#rec{background:var(--acc)}#rec.record{background:var(--rec)}#again{background:var(--c2);filter:saturate(.7)}#stop{background:var(--warn)}
+#rec,#take{background:var(--acc)}#rec.record,#take.record{background:var(--rec)}#again{background:var(--c2);filter:saturate(.7)}#stop{background:var(--warn)}
 .act:active,.act.flash{transform:scale(.95);box-shadow:0 0 0 6px var(--acc2),0 0 0 8px var(--acc)}
 .act.flash{animation:flash .7s}@keyframes flash{0%{filter:brightness(1.6)}100%{filter:none}}
 @media (prefers-reduced-motion:reduce){.act.flash{animation:none}}
+.modes{display:inline-flex;border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px;background:var(--bg)}
+.modes button{padding:8px 16px;background:transparent;color:var(--mute);font-weight:700}
+.modes button[aria-pressed="true"]{background:var(--card);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.remain{display:flex;flex-direction:column;gap:6px}
+.remain .track{position:relative;height:34px;border-radius:17px;background:var(--acc2);overflow:hidden}
+.remain .fill{position:absolute;inset:0 auto 0 0;background:var(--rec);border-radius:17px;transition:width .25s linear}
+.remain .knob{position:absolute;top:3px;width:28px;height:28px;border-radius:50%;background:var(--card);box-shadow:0 1px 4px rgba(0,0,0,.35);transform:translateX(-50%);transition:left .25s linear}
+.remain .nums{display:flex;justify-content:space-between;font-size:14px;color:var(--mute);font-variant-numeric:tabular-nums}
+.remain .nums b{font-size:26px;color:var(--fg)}
+.goal{height:10px;border-radius:5px;background:var(--acc2);overflow:hidden}.goal i{display:block;height:100%;background:var(--acc)}
+.takes{display:flex;flex-direction:column;gap:4px;font-size:14px;font-variant-numeric:tabular-nums}
+.takes div{display:flex;gap:12px;color:var(--mute)}.takes div b{color:var(--fg);font-weight:500}
 .practice{display:flex;gap:10px;align-items:flex-end;min-height:84px;flex-wrap:wrap}
 .practice div{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;color:var(--mute)}
 .practice i{display:block;width:34px;background:var(--c4);border-radius:4px 4px 0 0}
@@ -681,12 +804,16 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
 .num{font-variant-numeric:tabular-nums}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}@media (max-width:760px){.grid2{grid-template-columns:1fr}}
 </style></head><body><main>
-<header><h1>やまびこ1号</h1><span class="mute">口笛を聞いて、スライドホイッスルでまねて吹きます</span></header>
+<header><h1>やまびこ1号</h1><span class="mute">口笛を聞いて、スライドホイッスルでまねて吹きます</span>
+<span class="modes" role="group" aria-label="モード" style="margin-left:auto"><button id="mPlay" aria-pressed="true">演奏</button><button id="mCollect" aria-pressed="false">録音だけ（データ集め）</button></span></header>
 
 <section class="hero">
   <div class="phase"><i class="dot" id="dot"></i><span id="phase">接続中</span><span class="mute" id="stepnow"></span></div>
   <div id="msg"></div>
-  <div class="bar" id="bar" hidden><i id="barfill"></i></div>
+  <div class="remain" id="remain" hidden>
+    <div class="nums"><span>残り <b id="remainS">30</b> 秒</span><span id="remainOf"></span></div>
+    <div class="track"><div class="fill" id="remainFill"></div><div class="knob" id="remainKnob"></div></div>
+  </div>
   <div class="flow" id="flow">
     <div data-p="idle"><b>① 1 回押す</b>録音が始まります（新しい曲）</div>
     <div data-p="record"><b>② 吹き終わったら 1 回押す</b>録音を終えて、聞き取りと演奏へ</div>
@@ -697,14 +824,31 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
     <button id="again" class="act">練習：もう一度<small>基板のボタン 2 回</small></button>
     <button id="stop" class="act">止める<small>動いている間に 1 回</small></button>
   </div>
-  <div class="row">
+  <div id="collectBox" hidden style="display:flex;flex-direction:column;gap:10px">
+    <div class="row">
+      <button id="take" class="act">録音<small>基板のボタン 1 回</small></button>
+      <button id="del" class="sub">最後の録音を消す</button>
+      <label>種類 <select id="kind"><option value="whistle">口笛</option><option value="quiet">無音・部屋の音</option><option value="other">話し声など</option></select></label>
+      <label>1 本の長さ <select id="secs"><option>10</option><option>20</option><option selected>30</option></select> 秒まで</label>
+    </div>
+    <div><div class="nums mute" style="display:flex;justify-content:space-between"><span id="goalText"></span><span>目標 20 分</span></div><div class="goal"><i id="goalFill" style="width:0"></i></div></div>
+  </div>
+  <div class="row" id="playControls2">
     <button id="cal" class="sub">キャリブレーション</button>
     <label><input type="checkbox" id="quant"> 半音にそろえる</label>
   </div>
   <div class="mute" id="hint"></div>
 </section>
 
-<section>
+<section id="takeBox" hidden>
+  <h2>直前の録音</h2>
+  <svg id="g4" viewBox="0 0 860 200"></svg><div class="mute num" id="info4">まだ録音がありません</div>
+  <div class="row" style="margin-top:8px"><button class="sub" id="pt" disabled>▶ 聞く</button></div>
+  <h2 style="margin-top:14px">最近の録音</h2><div class="takes" id="takes"></div>
+  <p class="mute">録音は UNO Q の runs/real/whistle_data/ に保存されます（耳と記憶の学び直しに使います）。</p>
+</section>
+
+<section id="stepBox">
   <h2>使う版</h2>
   <div class="steps" id="steps"></div>
   <div class="mute" style="margin-top:8px">選んだ版は覚えておき、次に起動したときも使います。</div>
@@ -733,7 +877,7 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
 </main><script>
 const $=id=>document.getElementById(id);
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
-const PHASE={idle:"待機中",prepare:"準備中",tune:"キャリブレーション中",record:"録音中",analyse:"聞き取り中",play:"演奏中",done:"完了",error:"エラー"};
+const PHASE={idle:"待機中",prepare:"準備中",tune:"キャリブレーション中",record:"録音中",analyse:"聞き取り中",play:"演奏中",done:"完了",saved:"保存しました",error:"エラー"};
 function plot(svg,series,H){
   H=H||260;const W=860,L=56,R=10,T=10,B=30;let lo=Infinity,hi=-Infinity,n=1;
   for(const s of series){n=Math.max(n,s.y.length);for(const v of s.y){if(v!==null){lo=Math.min(lo,v);hi=Math.max(hi,v)}}}
@@ -751,7 +895,13 @@ function plot(svg,series,H){
   svg.innerHTML=g}
 async function api(path,body){const r=await fetch("/api/whistle/"+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
   if(!r.ok){$("msg").textContent=(await r.json()).error}return r.ok}
-let S={},shownTune=null,shownStamp=null,stepsKey="",lastPress=null,shownPractice="";
+let S={},shownTune=null,shownStamp=null,stepsKey="",lastPress=null,shownPractice="",shownTake="",polledAt=0;
+const KIND={whistle:"口笛",quiet:"無音・部屋の音",other:"話し声など"};
+function remainNow(){if(S.phase!=="record"||S.record_elapsed==null)return null;const el=S.record_elapsed+(Date.now()-polledAt)/1000;return Math.max(0,S.max_seconds-el)}
+function drawRemain(){const r=remainNow();const box=$("remain");if(r===null){box.hidden=true;return}
+  box.hidden=false;const f=r/S.max_seconds*100;$("remainFill").style.width=f+"%";$("remainKnob").style.left=`calc(14px + (100% - 28px) * ${f/100})`;
+  $("remainS").textContent=Math.ceil(r);$("remainOf").textContent=`最長 ${S.max_seconds.toFixed(0)} 秒`}
+setInterval(drawRemain,200);
 function renderSteps(s){
   const key=JSON.stringify(s.steps)+s.step+s.busy;if(key===stepsKey)return;stepsKey=key;
   $("steps").innerHTML=s.steps.map(p=>{const t=[p.ear==="nn"?"耳 NN":"耳 YIN",p.valve_nn?"弁 NN":"弁 規則",...(p.memory?["記憶"]:[])];
@@ -760,19 +910,34 @@ function renderSteps(s){
   for(const b of document.querySelectorAll(".step"))b.onclick=()=>api("step",{step:b.dataset.s})}
 async function poll(){
   let s;try{s=await (await fetch("/api/whistle/status")).json()}catch(e){$("phase").textContent="接続できません";setTimeout(poll,1500);return}
-  S=s;const ph=s.phase||"idle";
+  S=s;polledAt=Date.now();const ph=s.phase||"idle";
+  const col=!!s.collect;$("mPlay").setAttribute("aria-pressed",!col);$("mCollect").setAttribute("aria-pressed",col);
+  for(const id of ["mPlay","mCollect"])$(id).disabled=s.busy;
+  $("collectBox").hidden=!col;$("takeBox").hidden=!col;$("stepBox").hidden=col;$("flow").hidden=col;
+  for(const id of ["rec","again","stop"])$(id).hidden=col;$("playControls2").hidden=col;
+  for(const sec of document.querySelectorAll(".grid2"))sec.hidden=col;
+  if(col){const t=$("take");t.firstChild.textContent=ph==="record"?"録音終了して保存":"録音";t.classList.toggle("record",ph==="record");
+    t.disabled=s.busy&&ph!=="record";$("del").disabled=s.busy||!s.take_count;
+    if(document.activeElement!==$("kind"))$("kind").value=s.collect_kind;if(document.activeElement!==$("secs"))$("secs").value=String(Math.round(s.collect_seconds));
+    $("kind").disabled=$("secs").disabled=s.busy;
+    const mins=s.take_seconds/60;$("goalText").textContent=`口笛 ${mins.toFixed(1)} 分（全部で ${s.take_count} 本）`;$("goalFill").style.width=Math.min(100,mins/20*100)+"%";
+    $("takes").innerHTML=(s.takes||[]).slice().reverse().map(t=>`<div><b>${t.name}</b><span>${KIND[t.kind]||t.kind}</span><span>${t.seconds.toFixed(1)} 秒</span></div>`).join("")||'<span class="mute">まだありません</span>';
+    const tk=s.take;const key=tk?tk.name:"";if(key!==shownTake){shownTake=key;
+      if(tk){plot($("g4"),[{y:tk.track,c:css("--c2"),dots:true}],200);$("info4").textContent=`${tk.name}：${tk.seconds.toFixed(1)} 秒、音量 ${tk.level_db.toFixed(0)} dB、音程が取れた割合 ${(tk.voiced*100).toFixed(0)} %（横軸は 0.02 秒刻み）`}
+      else{$("g4").innerHTML="";$("info4").textContent="まだ録音がありません"}}
+    $("pt").disabled=s.busy||!(s.has_audio||[]).includes("take")}
   $("dot").className="dot "+ph;$("phase").textContent=PHASE[ph]||ph;$("stepnow").textContent=s.step?"・"+s.step:"";
   $("msg").textContent=s.message||"";$("msg").style.color=ph==="error"?css("--warn"):"";
   const stage=ph==="record"?"record":(s.practice||[]).length&&!s.busy?"again":"idle";
   for(const d of $("flow").children)d.classList.toggle("on",d.dataset.p===stage);
-  if(ph==="record"&&s.record_started){$("bar").hidden=false;$("barfill").style.width=Math.min(100,(Date.now()/1000-s.record_started)/s.max_seconds*100)+"%"}else{$("bar").hidden=true}
+  drawRemain();
   const rec=$("rec"),serverBusy=s.busy&&["tune","play"].includes(ph);
   rec.firstChild.textContent=ph==="record"?"録音終了して演奏":"録音";rec.classList.toggle("record",ph==="record");
   rec.disabled=s.busy&&ph!=="record";
   $("again").disabled=s.busy||!s.song_step||s.song_step!==s.step;
   $("stop").disabled=!s.busy||ph==="record"||serverBusy;
   $("hint").textContent=serverBusy?"いまは基板の EXEC ボタンで止められます（画面からは届きません）。":"基板の EXEC ボタンと、この画面のボタンは同じ働きです。版の選択だけはこの画面で行います。";
-  if(s.press&&s.press.n!==lastPress){if(lastPress!==null){const b=$({record:"rec",finish:"rec",replay:"again",stop:"stop"}[s.press.action]);
+  if(s.press&&s.press.n!==lastPress){if(lastPress!==null){const b=$(s.collect?"take":{record:"rec",finish:"rec",replay:"again",stop:"stop"}[s.press.action]);
       if(b){b.classList.remove("flash");void b.offsetWidth;b.classList.add("flash");setTimeout(()=>b.classList.remove("flash"),700)}}lastPress=s.press.n}
   const pr=s.practice||[];const key2=JSON.stringify(pr);
   if(key2!==shownPractice){shownPractice=key2;
@@ -797,6 +962,10 @@ async function poll(){
   setTimeout(poll,s.busy?250:1000)}
 $("rec").onclick=()=>{if(S.phase==="record")api("finish");else api("start",{quantize:$("quant").checked})};
 $("again").onclick=()=>api("replay");$("stop").onclick=()=>api("stop");
+$("mPlay").onclick=()=>api("mode",{collect:false});$("mCollect").onclick=()=>api("mode",{collect:true});
+$("take").onclick=()=>{if(S.phase==="record")api("finish");else api("take")};$("del").onclick=()=>api("delete_last");
+$("kind").onchange=()=>api("mode",{kind:$("kind").value});$("secs").onchange=()=>api("mode",{seconds:+$("secs").value});
+$("pt").onclick=()=>listen("take");
 $("cal").onclick=()=>api("calibrate");
 function listen(name){const a=$("au");a.src=`/api/whistle/${name}.wav?t=${Date.now()}`;a.play()}
 $("pw").onclick=()=>listen("whistle");$("pf").onclick=()=>listen("flute");
@@ -831,7 +1000,7 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
                 self._run(bench.status)
             elif self.path == "/api/whistle/status":
                 self._json(200, whistle.status())
-            elif self.path.split("?")[0] in ("/api/whistle/whistle.wav", "/api/whistle/flute.wav"):
+            elif self.path.split("?")[0] in ("/api/whistle/whistle.wav", "/api/whistle/flute.wav", "/api/whistle/take.wav"):
                 name = self.path.split("?")[0].rsplit("/", 1)[1][:-4]
                 data = whistle.wavs.get(name)
                 if data is None:
@@ -856,6 +1025,9 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
                 "/api/whistle/start": lambda: whistle.start(req.get("quantize", False), req.get("step")),
                 "/api/whistle/finish": whistle.finish,
                 "/api/whistle/replay": lambda: whistle.replay(),
+                "/api/whistle/mode": lambda: whistle.set_mode(req.get("collect"), req.get("kind"), req.get("seconds")),
+                "/api/whistle/take": whistle.start_take,
+                "/api/whistle/delete_last": whistle.delete_last,
                 "/api/whistle/stop": whistle.stop,
                 "/api/whistle/step": lambda: whistle.choose(req["step"]),
                 "/api/whistle/calibrate": lambda: whistle.calibrate(req.get("step")),
