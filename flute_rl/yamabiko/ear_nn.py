@@ -61,13 +61,18 @@ def torch_model(config: EarConfig = EarConfig()):
             x = x - x.mean(1, keepdim=True)
             return x / (x.pow(2).mean(1, keepdim=True).sqrt() + 1e-4)
 
-        def forward(self, x):
-            """x: (B, 320) float samples in [-1, 1).  Returns (pitch logits (B, bins), voicing logit (B,))."""
+        def embed(self, x):
+            """The ear's own code of a frame: the hidden layer before the pitch bins (B, hidden).  step6's score
+            memory writes this, not the pitch."""
             z = self.conv(self.normalize(x)[:, None]).flatten(1)
             if self.config.level:
                 rms = (x - x.mean(1, keepdim=True)).pow(2).mean(1, keepdim=True).sqrt()
                 z = torch.cat([z, (20.0 * torch.log10(rms.clamp_min(1e-6)) + 40.0) / 20.0], 1)
-            out = self.fc(z)
+            return self.fc[1](self.fc[0](z))
+
+        def forward(self, x):
+            """x: (B, 320) float samples in [-1, 1).  Returns (pitch logits (B, bins), voicing logit (B,))."""
+            out = self.fc[2](self.embed(x))
             return out[:, :self.config.bins], out[:, self.config.bins]
 
         def checkpoint(self, **metadata):
@@ -124,6 +129,13 @@ class Ear:
         self.threshold = voiced_threshold
 
     def forward(self, x):
+        return self._run(x)[0]
+
+    def embed(self, x):
+        """The hidden layer before the pitch bins (the ear's own code of the frame, for step6's memory)."""
+        return self._run(x)[1]
+
+    def _run(self, x):
         x = np.asarray(x, np.float32)
         x = x - x.mean()
         rms = float(np.sqrt(np.mean(x * x)))
@@ -139,11 +151,13 @@ class Ear:
         z = h.reshape(-1)
         if self.level:
             z = np.append(z, np.float32(level_feature(rms)))
+        hidden = None
         for i, name in enumerate(self.fcs):
             z = self.a[f"ear.{name}.w"] @ z + self.a[f"ear.{name}.b"]
             if i < len(self.fcs) - 1:
                 z = np.maximum(z, 0.0)
-        return z[:self.bins], z[self.bins]
+                hidden = z
+        return (z[:self.bins], z[self.bins]), hidden
 
     def hear(self, samples):
         """samples: the last 320 samples as floats in [-1, 1) (or int16)."""
