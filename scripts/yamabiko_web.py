@@ -293,10 +293,11 @@ class WhistleJob:
         self.thread = None
         self.end_recording = threading.Event()
         self.stopped = False
-        self.tunings = {}         # per step, the last calibration: shift_cents, home / top pitch, the sweep
+        self.tuning = None        # the last calibration of the rig (any step): home / top pitch, the sweep
+        self.twin_home = {}       # per step, the home pitch its twin expects (shift = measured home - this)
         self.wavs = {}            # "whistle" / "flute": WAV bytes of the last copy
         self.button_base = None   # the press count after a tune / play (the server consumed those presses)
-        self.song = None          # the last recorded song: step, target path, the page's tracks
+        self.song = None          # the last recorded song: its samples, and the step, target path it was analysed for
         self.practice = []        # relative error of every play of that song (practice play 1, 2, ...)
         self.plays = []           # every play of that song for the page: n, heard (as the target), error
         self.presses = 0
@@ -484,8 +485,6 @@ class WhistleJob:
         """Play the last recorded song again, without recording (practice)."""
         if self.song is None:
             raise ValueError("まだ録音がありません。1 回押して録音してください")
-        if self.song["step"] != self.step:
-            raise ValueError(f"最後の録音は {self.song['step']} のものです。1 回押して録音し直してください")
         return self._launch(self._replay, self.profiles[self.step], first="もう一度（練習）")
 
     def calibrate_at_start(self, wait_s=180.0):
@@ -555,7 +554,8 @@ class WhistleJob:
 
     def status(self):
         with self.lock:
-            return dict(self.state, tuning=self.tunings.get(self.step), has_audio=sorted(self.wavs), step=self.step,
+            tuning = dict(self.tuning, shift_cents=self.shift_for(self.profiles[self.step])) if self.tuning else None
+            return dict(self.state, tuning=tuning, has_audio=sorted(self.wavs), step=self.step,
                         busy=self.busy(), practice=list(self.practice),
                         collect=self.collect, collect_kind=self.collect_kind, collect_seconds=self.collect_seconds,
                         takes=self.takes[-12:], take_count=len(self.takes),
@@ -589,9 +589,18 @@ class WhistleJob:
             raise
         finally:
             self._note_buttons(rig)
-        tuning = {k: result[k] for k in ("shift_cents", "home_cents", "top_cents", "sweep_max_cents", "heard", "phase")}
+        tuning = {k: result[k] for k in ("home_cents", "top_cents", "sweep_max_cents", "heard", "phase")}
         tuning["time"] = time.strftime("%H:%M")
-        self.tunings[profile["name"]] = tuning
+        self.tuning = tuning                           # the rig's, for every step
+
+    def shift_for(self, profile):
+        """Today's offset for a step: the measured home pitch minus the home its twin expects (as cmd_tune)."""
+        import numpy as np
+        from flute_rl.yamabiko.residual_numpy import runtime_for
+        name = profile["name"]
+        if name not in self.twin_home:
+            self.twin_home[name] = float(runtime_for(dict(np.load(profile["runtime_path"]))).cents_at(0.0))
+        return float(np.clip(self.tuning["home_cents"] - self.twin_home[name], -150, 150))
 
     def _note_buttons(self, rig):
         """After a tune or a play: the press count now, so the watcher does not act on the presses the server
@@ -627,10 +636,10 @@ class WhistleJob:
         song = self.song
         n = len(self.practice) + 1
         self._set(phase="play", message=f"演奏中（練習 {n} 回目、ボタンで止められます）", heard=None, relative_mae=None)
-        out = WHISTLE_DIR / f"{song['stamp']}_play{n}.npz"
+        out = WHISTLE_DIR / f"{song['stamp']}_{profile['name']}_play{n}.npz"
         try:
             result = rig.play(profile["runtime_path"], song["path"], out=str(out), repeats=1, fan=profile["fan"],
-                              shift_cents=self.tunings[profile["name"]]["shift_cents"], warmup_s=2.0,
+                              shift_cents=self.shift_for(profile), warmup_s=2.0,
                               ear=profile.get("ear", "yin"), stop_on_button=True, practice=True,
                               valve_runtime=profile.get("valve_runtime_path"),
                               ear_runtime=profile.get("ear_runtime_path"))
@@ -656,15 +665,18 @@ class WhistleJob:
             self.plays = (self.plays + [{"n": n, "heard": heard, "error": None if rel is None else round(rel, 1)}])[-8:]
         self._set(phase="done", message=message, heard=[round(float(x - shift), 1) if ok else None for x, ok in zip(h, v)],
                   key=key, relative_mae=rel, shift=shift, stamp=song["stamp"], plays_n=len(self.plays),
-                  plays_id=f"{song['stamp']}:{n}")
+                  plays_id=f"{song['stamp']}:{profile['name']}:{n}", plays_step=profile["name"])
 
     def _replay(self, profile):
         rig = None
         try:
             rig = self._connect(profile)
-            if profile["name"] not in self.tunings:
+            if self.tuning is None:
                 self._tune(rig, profile)
             self._check()
+            if self.song["step"] != profile["name"]:   # another step: hear the same recording again with it
+                self._set(phase="analyse", message=f"同じ録音を {profile['name']} で聞き取り中")
+                self._analyse(self.song["pcm"], self.song["sr"], profile, self.song["quantize"], self.song["stamp"])
             self._play(rig, profile)
         except Stopped as exc:
             self._set(phase="idle", message=str(exc))
@@ -688,7 +700,7 @@ class WhistleJob:
         rig = None
         try:
             rig = self._connect(profile)
-            if profile["name"] not in self.tunings:   # not calibrated since the page started
+            if self.tuning is None:                    # not calibrated since the page started
                 self._tune(rig, profile)
             self._check()
             rig.stop(force=True)                       # fan off, valve shut: only the whistle in the mic
@@ -709,6 +721,20 @@ class WhistleJob:
             WHISTLE_DIR.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(WHISTLE_DIR / f"{stamp}_whistle.npz", pcm=pcm, sr=sr)   # data for the ear (step5)
             self._set(phase="analyse", message=f"聞き取り中（{time.monotonic() - began:.1f} 秒の録音）")
+            self._analyse(pcm, sr, profile, quantize, stamp)
+            self._play(rig, profile)
+        except Stopped as exc:
+            self._set(phase="idle", message=str(exc))
+        except Exception as exc:                       # noqa: BLE001  (shown on the page)
+            self._set(phase="error", message=str(exc))
+        finally:
+            self._release(rig)
+
+    def _analyse(self, pcm, sr, profile, quantize, stamp):
+        """The recording heard and made a target with this step; it becomes the song (practice starts over)."""
+        import numpy as np
+        from flute_rl.yamabiko.whistle import clean_track, to_target, whistle_track
+        if True:
             try:
                 if profile.get("memory_runtime_path"):      # step6: written into the memory, read back from it
                     from flute_rl.yamabiko.ear_nn import Ear
@@ -729,23 +755,17 @@ class WhistleJob:
                 level = 20 * np.log10(max(float(np.sqrt(np.mean((pcm / 32768.0) ** 2))), 1e-9))
                 raise ValueError(f"口笛が聞こえませんでした（録音の大きさ {level:.0f} dB）。マイクの近くで吹いてください")
             self._check()
-            path = WHISTLE_DIR / f"{stamp}_target.npz"
+            path = WHISTLE_DIR / f"{stamp}_{profile['name']}_target.npz"
             np.savez(path, cents=target, voice=voice, whistle_cents=raw)
 
             def listed(a):
                 return [None if not np.isfinite(v) else round(float(v), 1) for v in a]
-            self.song = {"step": profile["name"], "path": str(path), "voice": voice, "stamp": stamp}
+            self.song = {"step": profile["name"], "path": str(path), "voice": voice, "stamp": stamp,
+                         "pcm": pcm, "sr": sr, "quantize": quantize}
             self.practice = []
             self.plays = []
             self._set(whistle=listed(raw), cleaned=listed(cents), target=[round(float(v), 1) for v in target],
-                      voice=[bool(v) for v in voice], report=report)
-            self._play(rig, profile)
-        except Stopped as exc:
-            self._set(phase="idle", message=str(exc))
-        except Exception as exc:                       # noqa: BLE001  (shown on the page)
-            self._set(phase="error", message=str(exc))
-        finally:
-            self._release(rig)
+                      voice=[bool(v) for v in voice], report=report, plays_n=0, plays_id=None)
 
 
 MAIN_PAGE = r"""<!doctype html>
@@ -969,7 +989,8 @@ async function poll(){
   const rec=$("rec"),serverBusy=s.busy&&["tune","play"].includes(ph);
   rec.firstChild.textContent=ph==="record"?"録音終了して演奏":"録音";rec.classList.toggle("record",ph==="record");
   rec.disabled=s.busy&&ph!=="record";
-  $("again").disabled=s.busy||!s.song_step||s.song_step!==s.step;
+  $("again").disabled=s.busy||!s.song_step;
+  $("again").firstChild.textContent=s.song_step&&s.song_step!==s.step?`同じ録音を ${s.step} で`:"練習：もう一度";
   $("stop").disabled=!s.busy||ph==="record"||serverBusy;
   $("hint").textContent=serverBusy?"いまは基板の EXEC ボタンで止められます（画面からは届きません）。":"基板の EXEC ボタンと、この画面のボタンは同じ働きです。版の選択だけはこの画面で行います。";
   if(s.press&&s.press.n!==lastPress){if(lastPress!==null){const b=$(s.collect?"take":{record:"rec",finish:"rec",replay:"again",stop:"stop"}[s.press.action]);
@@ -991,8 +1012,8 @@ async function poll(){
       plot($("g2"),[{y:tgt,c:css("--c3"),w:3},...(s.heard?[{y:s.heard.map((v,i)=>s.voice[i]?v:null),c:css("--c4"),dots:true}]:[])])}
     $("info2").textContent=s.relative_mae!=null?`最後の回：調のずれ ${s.key>=0?"+":""}${s.key.toFixed(0)} セント／それを除いた平均の誤差 ${s.relative_mae.toFixed(0)} セント`:""}
   else{$("g2").innerHTML="";$("info2").textContent="";$("playChips").innerHTML="";$("multiBox").hidden=true;P={plays:[]};playsId=null}
-  const tu=s.tuning;if(!tu){shownTune=null;$("g3").innerHTML="";$("info3").textContent="この版ではまだ測っていません（最初の録音の前に測ります）"}
-  if(tu&&tu.time!==shownTune){shownTune=tu.time;plot($("g3"),[{y:tu.heard,c:css("--c2"),dots:true}],200);
+  const tu=s.tuning;if(!tu){shownTune=null;$("g3").innerHTML="";$("info3").textContent="まだ測っていません（最初の録音の前に一度だけ測ります）"}
+  if(tu&&tu.time+":"+s.step!==shownTune){shownTune=tu.time+":"+s.step;plot($("g3"),[{y:tu.heard,c:css("--c2"),dots:true}],200);
     const hz=c=>(440*Math.pow(2,c/1200)).toFixed(0);
     $("info3").textContent=`${tu.time} に測定：縮み切り ${hz(tu.home_cents)} Hz、いちばん高い音 ${tu.sweep_max_cents!=null?hz(tu.sweep_max_cents):"-"} Hz、ツインとのずれ ${tu.shift_cents>=0?"+":""}${tu.shift_cents.toFixed(0)} セント`}
   const ha=s.has_audio||[];$("pw").disabled=s.busy||!ha.includes("whistle");$("pf").disabled=s.busy||!ha.includes("flute");
