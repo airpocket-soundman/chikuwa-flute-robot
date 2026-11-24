@@ -2,7 +2,7 @@
   "name": "step5",
   "title": "step5: 共通の耳（笛も口笛も、キャリブレーションも同じ耳の NN で聞く）",
   "ear": "nn",
-  "ear_runtime": "ear_04_runtime.npz",
+  "ear_runtime": "ear_06_runtime.npz",
   "doc": "docs/step5.md",
   "runtime": "nn_f80_t4_s06_runtime.npz",
   "valve_runtime": "valve_t4_01_runtime.npz",

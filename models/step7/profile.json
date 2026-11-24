@@ -2,7 +2,7 @@
   "name": "step7",
   "title": "step7: ツインに頼らない演奏（アクチュエータと弁の NN がツインの推定位置を使わない）",
   "ear": "nn",
-  "ear_runtime": "ear_04_runtime.npz",
+  "ear_runtime": "ear_06_runtime.npz",
   "doc": "docs/step7.md",
   "runtime": "nn_f80_t7_init_runtime.npz",
   "valve_runtime": "valve_t7_free_runtime.npz",

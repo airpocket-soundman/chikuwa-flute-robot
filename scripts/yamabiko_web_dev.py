@@ -25,6 +25,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8080)
     args = ap.parse_args()
+    dev = ROOT / "runs" / "dev"                       # the fake rig's recordings stay out of the real data
+    web.WHISTLE_DIR, web.COLLECT_DIR, web.STEP_FILE = dev / "whistle", dev / "whistle_data", dev / "web_step.txt"
     link = FakeLink()
     srv = Server(link, port=0, max_pwm=1.0, lease=2.0, log=lambda s: print("server:", s, flush=True))
     threading.Thread(target=srv.serve, daemon=True).start()

@@ -2,7 +2,7 @@
   "name": "step6",
   "title": "step6: お手本の記憶（口笛を重みに書き込み、演奏で思い出す）",
   "ear": "nn",
-  "ear_runtime": "ear_04_runtime.npz",
+  "ear_runtime": "ear_06_runtime.npz",
   "doc": "docs/step6.md",
   "runtime": "nn_f80_t4_s06_runtime.npz",
   "valve_runtime": "valve_t4_01_runtime.npz",

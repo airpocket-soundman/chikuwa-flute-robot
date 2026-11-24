@@ -66,6 +66,23 @@ ear_02 は、口笛の合間のほとんど無音（−56〜−69 dB）で 3 kHz
 
 耳 1 回あたり ear_01 が 5.12 ms、ear_04 と同じ大きさの ear_02 が 5.24 ms（NumPy）。演奏の 10 ms の周期の約半分。口笛 10 秒の解析に約 5 秒かかる。
 
+## 2026-11-24 追記：実機で録った口笛で学び直した（ear_06）
+
+画面の「録音だけ（データ集め）」で録った口笛 3.5 分・話し声など 5.5 分・無音 2 分と、口笛コピーで録った口笛 4 本を足して学び直した
+（`--recorded runs/real/whistle_data runs/real/whistle`、実機の口笛は 4 回繰り返して使う）。口笛 2 本・話し声 1 本・無音 1 本は評価用に外した。
+
+| 学習に使っていない実機の録音 | ear_06 | ear_04 | YIN |
+|---|---|---|---|
+| 口笛の ±25 cent 以内 | **93.5 %** | 91.1 % | 91.7 % |
+| 話し声・無音を「鳴っている」と誤る | **1.2 %** | 12.8 % | 1.6 % |
+| 笛（実機の録音） | 99.2 % | 99.4 % | 96.7 % |
+
+step5・step6・step7・step7_practice・classic_ear の耳を ear_06 に替えた（2026-11-24。それより前の実機評価は ear_04）。
+
+```bash
+python scripts/yamabiko_ear_train.py --wide --level --synth 300000 --noise 60000 --recorded runs/real/whistle_data runs/real/whistle     --recorded-test 20261124_111404_whistle 20261124_111830_whistle 20261124_113803_other 20261124_112741_quiet     --compare models/step5/ear_04_runtime.npz --demo runs/ear/demo --out runs/ear/ear_06
+```
+
 ## 残っている課題
 
 - **本物の口笛のデータがない**。デモ動画（スマホ）では YIN にわずかに届かない。実機のマイクで口笛を 10〜20 分録り（口笛コピーの画面が音声を残すようになった）、`scripts/yamabiko_ear_data.py` で正解を付けて学び直す
