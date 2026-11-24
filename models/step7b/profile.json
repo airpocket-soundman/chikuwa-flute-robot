@@ -1,0 +1,21 @@
+{
+  "name": "step7b",
+  "title": "step7b: step7 のタンギングを楽譜どおりに（速い曲でも休符ごとに開け閉め）",
+  "ear": "nn",
+  "ear_runtime": "ear_06_runtime.npz",
+  "doc": "docs/step7.md",
+  "runtime": "nn_f80_t7_init_runtime.npz",
+  "valve_runtime": "valve_t7_score_runtime.npz",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  },
+  "common_ear": true,
+  "memory_runtime": "mem_04_runtime.npz"
+}

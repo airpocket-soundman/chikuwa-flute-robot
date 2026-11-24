@@ -1,0 +1,148 @@
+{
+  "twin": "runs/real/twin_y1f80_04.json",
+  "actuator": "models/step7/nn_f80_t7_init.pt",
+  "rule": {
+    "on_target": 0.7611140608787537,
+    "glide": 0.18324272334575653,
+    "coverage": 0.9585896134376526,
+    "whistle_on_target": 0.49815309047698975,
+    "whistle_glide": 0.31900933384895325,
+    "whistle_coverage": 0.9185141921043396
+  },
+  "kept": {
+    "step": 150,
+    "score": 0.6326303631067276,
+    "on_target": 0.7589825391769409,
+    "glide": 0.18289348483085632,
+    "coverage": 0.9972097277641296,
+    "whistle_on_target": 0.4889751076698303,
+    "whistle_glide": 0.326355904340744,
+    "whistle_coverage": 0.9948523044586182
+  },
+  "history": [
+    {
+      "step": 25,
+      "on_target": 0.7442449927330017,
+      "glide": 0.21790993213653564,
+      "coverage": 1.0,
+      "whistle_on_target": 0.4594323933124542,
+      "whistle_glide": 0.38286420702934265,
+      "whistle_coverage": 0.9935068488121033
+    },
+    {
+      "step": 50,
+      "on_target": 0.7555456757545471,
+      "glide": 0.1890432983636856,
+      "coverage": 0.9920096397399902,
+      "whistle_on_target": 0.4889572858810425,
+      "whistle_glide": 0.32724443078041077,
+      "whistle_coverage": 0.969406247138977
+    },
+    {
+      "step": 75,
+      "on_target": 0.7583960890769958,
+      "glide": 0.18327482044696808,
+      "coverage": 0.9932145476341248,
+      "whistle_on_target": 0.4849831163883209,
+      "whistle_glide": 0.32960668206214905,
+      "whistle_coverage": 0.9874817132949829
+    },
+    {
+      "step": 100,
+      "on_target": 0.7591120004653931,
+      "glide": 0.18281279504299164,
+      "coverage": 0.9969560503959656,
+      "whistle_on_target": 0.49067485332489014,
+      "whistle_glide": 0.32820871472358704,
+      "whistle_coverage": 0.9942673444747925
+    },
+    {
+      "step": 125,
+      "on_target": 0.7590460777282715,
+      "glide": 0.18289348483085632,
+      "coverage": 0.9972097277641296,
+      "whistle_on_target": 0.4893254339694977,
+      "whistle_glide": 0.3267836272716522,
+      "whistle_coverage": 0.99461829662323
+    },
+    {
+      "step": 150,
+      "on_target": 0.7589825391769409,
+      "glide": 0.18289348483085632,
+      "coverage": 0.9972097277641296,
+      "whistle_on_target": 0.4889751076698303,
+      "whistle_glide": 0.326355904340744,
+      "whistle_coverage": 0.9948523044586182
+    },
+    {
+      "step": 175,
+      "on_target": 0.7589977979660034,
+      "glide": 0.18294544517993927,
+      "coverage": 0.9972731471061707,
+      "whistle_on_target": 0.4881575107574463,
+      "whistle_glide": 0.3264096677303314,
+      "whistle_coverage": 0.9953202605247498
+    },
+    {
+      "step": 200,
+      "on_target": 0.7589496374130249,
+      "glide": 0.18299739062786102,
+      "coverage": 0.9973365664482117,
+      "whistle_on_target": 0.4880399703979492,
+      "whistle_glide": 0.3258216083049774,
+      "whistle_coverage": 0.9953202605247498
+    },
+    {
+      "step": 225,
+      "on_target": 0.7589496374130249,
+      "glide": 0.18299739062786102,
+      "coverage": 0.9973365664482117,
+      "whistle_on_target": 0.4880399703979492,
+      "whistle_glide": 0.32585853338241577,
+      "whistle_coverage": 0.9953202605247498
+    },
+    {
+      "step": 250,
+      "on_target": 0.7589496374130249,
+      "glide": 0.18299739062786102,
+      "coverage": 0.9973365664482117,
+      "whistle_on_target": 0.4880714416503906,
+      "whistle_glide": 0.32587897777557373,
+      "whistle_coverage": 0.9954957365989685
+    },
+    {
+      "step": 275,
+      "on_target": 0.7589496374130249,
+      "glide": 0.18299739062786102,
+      "coverage": 0.9973365664482117,
+      "whistle_on_target": 0.48774755001068115,
+      "whistle_glide": 0.3258380889892578,
+      "whistle_coverage": 0.9954372644424438
+    },
+    {
+      "step": 300,
+      "on_target": 0.7589496374130249,
+      "glide": 0.18299739062786102,
+      "coverage": 0.9973365664482117,
+      "whistle_on_target": 0.4878951609134674,
+      "whistle_glide": 0.3258189558982849,
+      "whistle_coverage": 0.9954957365989685
+    }
+  ],
+  "out": "runs/real/valve_t7_score",
+  "tol": 40.0,
+  "min_leap": 150.0,
+  "cap": 40,
+  "whistle_songs": 0.5,
+  "target": "score",
+  "twin_free": true,
+  "steps": 300,
+  "batch": 32,
+  "song_steps": 400,
+  "lr": 0.002,
+  "chatter": 0.05,
+  "eval_every": 25,
+  "spread": 0.12,
+  "seed": 20261123,
+  "device": "cuda"
+}
