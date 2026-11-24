@@ -79,6 +79,8 @@ def main():
     ap.add_argument("--all-nn", action="store_true",
                     help="every actuator command from the network: valve output, motor current input, self homing")
     ap.add_argument("--valve-weight", type=float, default=1.0, help="weight of the valve-follows-the-score cost")
+    ap.add_argument("--twin-free", action="store_true",
+                    help="step7: drop the twin's position / velocity / positions inputs (from --init by name)")
     ap.add_argument("--init", default=None, help="start from this NN checkpoint (then imitation is skipped)")
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--smooth", type=float, default=.3)
@@ -99,11 +101,14 @@ def main():
                                                     plant, device).eval()
     if args.init:
         upgrade = dict(valve=True, current=True, self_home=True) if args.all_nn else {}
+        if args.twin_free:
+            upgrade.update(twin_free=True, positions=False)
         model = NNTwinPerformer.from_checkpoint(torch.load(args.init, map_location=device, weights_only=False),
                                                 plant, device, **upgrade)
         args.imitate_steps = 0
     else:
-        model = NNTwinPerformer(plant, NNConfig(positions=args.positions)).to(device)
+        model = NNTwinPerformer(plant, NNConfig(positions=args.positions and not args.twin_free,
+                                                twin_free=args.twin_free)).to(device)
     generator = torch.Generator(device).manual_seed(args.seed)
     eval_rigs = rigs_around(twin, 48, args.spread, torch.Generator(device).manual_seed(7777))
     eval_twin = repeat(twin, 48)

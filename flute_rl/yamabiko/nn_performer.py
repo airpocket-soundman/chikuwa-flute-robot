@@ -45,11 +45,26 @@ class NNConfig:
     valve: bool = False
     current: bool = False
     self_home: bool = False
+    # step7: no input from the twin's physics (no open-loop position / velocity of its motor model, and no
+    # ``positions``): the recurrent state has to keep track of where the plunger is from what it hears
+    twin_free: bool = False
 
     @property
     def features(self) -> int:
-        return (FEATURES + (2 if self.positions else 0) + len(SONG_LOOKAHEAD) * self.song_slot
-                + (1 if self.current else 0))
+        return len(self.layout())
+
+    def layout(self) -> list:
+        """The names of the inputs, in order (checkpoints with another layout are mapped by name)."""
+        names = [f"cents+{k}" for k in WINDOW] + [f"voice+{k}" for k in WINDOW] + ["heard", "valid", "gap", "prev_pwm"]
+        if not self.twin_free:
+            names += ["twin_position", "twin_velocity"]
+        names.append("voice_now")
+        if self.positions and not self.twin_free:
+            names += ["aim_position", "heard_position"]
+        names += [f"song{k}.{i}" for k in SONG_LOOKAHEAD for i in range(self.song_slot)]
+        if self.current:
+            names.append("current")
+        return names
 
     @property
     def outputs(self) -> int:
@@ -75,10 +90,11 @@ class NNTwinPerformer(nn.Module):
         dtype = cents.dtype
         heard_n = torch.where(valid, normalize(heard), torch.zeros_like(heard))
         gap = torch.where(valid, normalize(cents[:, t]) - heard_n, torch.zeros_like(heard))
-        parts = [normalize(cents[:, ids]), voice[:, ids].to(dtype),
-                 torch.stack([heard_n, valid.to(dtype), gap, prev_pwm, estimate.position,
-                              estimate.velocity, voice[:, t].to(dtype)], 1)]
-        if self.config.positions:
+        now = [heard_n, valid.to(dtype), gap, prev_pwm]
+        if not self.config.twin_free:
+            now += [estimate.position, estimate.velocity]
+        parts = [normalize(cents[:, ids]), voice[:, ids].to(dtype), torch.stack(now + [voice[:, t].to(dtype)], 1)]
+        if self.config.positions and not self.config.twin_free:
             aim = self.plant.position_for_cents(cents[:, t], twin)
             at = torch.where(valid, self.plant.position_for_cents(heard, twin), torch.zeros_like(heard))
             parts.append(torch.stack([aim, at], 1))
@@ -204,6 +220,14 @@ class NNTwinPerformer(nn.Module):
         config = NNConfig(**{**checkpoint["config"], **upgrade})
         model = cls(plant, config).to(device)
         state = dict(checkpoint["state_dict"])
+        old = NNConfig(**checkpoint["config"]).layout()
+        if old != config.layout()[:len(old)]:                             # inputs dropped or moved: map by name
+            w = state["inp.weight"]
+            moved = torch.zeros(w.shape[0], config.features, dtype=w.dtype, device=w.device)
+            for j, name in enumerate(config.layout()):
+                if name in old:
+                    moved[:, j] = w[:, old.index(name)]
+            state["inp.weight"] = moved
         last = f"head.{len(model.head) - 1}"
         if state[f"{last}.weight"].shape[0] < config.outputs:             # a new output (the valve) at zero
             w, b = state[f"{last}.weight"], state[f"{last}.bias"]

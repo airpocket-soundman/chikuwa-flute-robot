@@ -61,3 +61,26 @@ def test_perform_and_imitate_run_and_have_gradients():
     assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters())
     pred = model.imitate(cents, voice, cents, voice, torch.zeros_like(cents), twin)
     assert pred.shape == cents.shape
+
+
+def test_twin_free_layout_drops_the_twin_inputs_and_loads_by_name():
+    import numpy as np
+    import torch
+    from flute_rl.yamabiko.nn_performer import NNConfig, NNTwinPerformer
+    from flute_rl.yamabiko.physical_plant import DifferentiableMotorFlute, PhysicalPlantConfig
+    from flute_rl.yamabiko.residual_numpy import export_nn, runtime_for
+    plant = DifferentiableMotorFlute(PhysicalPlantConfig.yamabiko1_fan80())
+    torch.manual_seed(0)
+    full = NNTwinPerformer(plant, NNConfig(positions=True))
+    free = NNTwinPerformer.from_checkpoint(full.checkpoint(), plant, twin_free=True, positions=False)
+    names = free.config.layout()
+    assert "twin_position" not in names and "aim_position" not in names and free.config.features == 25
+    old = full.config.layout()
+    for j, name in enumerate(names):                                  # the kept inputs keep their weights
+        assert torch.equal(free.inp.weight[:, j], full.inp.weight[:, old.index(name)])
+    twin = plant.parameters(1, "cpu")
+    rt = runtime_for(export_nn(free, twin))
+    assert rt.nn_twin_free and not rt.nn_positions
+    rt.prepare(np.linspace(0, 600, 30), np.ones(30, bool))
+    for t in range(30):
+        rt.command(t); rt.observe(0.0, False)

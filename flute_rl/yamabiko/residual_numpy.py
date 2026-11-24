@@ -259,6 +259,7 @@ def export_nn(model, twin, row=0):
         arrays.update(_linear("nn.writer.gate", model.writer.gate))
         arrays["nn.song"] = np.array([model.config.song_slot, model.config.song_rate], np.float64)
     arrays["nn.flags"] = np.array([model.config.valve, model.config.current, model.config.self_home], np.float64)
+    arrays["nn.inputs"] = np.array([model.config.positions, model.config.twin_free], np.float64)
     return arrays
 
 
@@ -272,8 +273,13 @@ class NNRuntime(Runtime):
                                       else (0, 0.0))
         flags = self.a["nn.flags"] if "nn.flags" in self.a else np.zeros(3)
         self.nn_valve, self.nn_current, self.self_home = (bool(f) for f in flags)
-        self.nn_positions = (self.a["nn.inp.w"].shape[1] - len(SONG_LOOKAHEAD) * self.nn_slot
-                             - (1 if self.nn_current else 0)) == 2 * len(WINDOW) + 9
+        if "nn.inputs" in self.a:                  # written since step7
+            self.nn_positions, self.nn_twin_free = bool(self.a["nn.inputs"][0]), bool(self.a["nn.inputs"][1])
+            self.nn_positions = self.nn_positions and not self.nn_twin_free
+        else:
+            self.nn_positions = (self.a["nn.inp.w"].shape[1] - len(SONG_LOOKAHEAD) * self.nn_slot
+                                 - (1 if self.nn_current else 0)) == 2 * len(WINDOW) + 9
+            self.nn_twin_free = False
         self.current = 0.0
         self.song = None
 
@@ -292,9 +298,9 @@ class NNRuntime(Runtime):
         ids = [min(t + k, steps - 1) for k in WINDOW]
         heard_n = (self.heard - self.center) / self.scale if self.valid else 0.0
         gap = ((self.cents[t] - self.center) / self.scale - heard_n) if self.valid else 0.0
+        now = [heard_n, float(self.valid), gap, self.pwm] + ([] if self.nn_twin_free else [self.position, self.velocity])
         x = np.concatenate([(self.cents[ids] - self.center) / self.scale, self.voice[ids].astype(np.float64),
-                            [heard_n, float(self.valid), gap, self.pwm, self.position, self.velocity,
-                             float(self.voice[t])]]
+                            now + [float(self.voice[t])]]
                            + ([[self.position_for(self.cents[t]),
                                 self.position_for(self.heard) if self.valid else 0.0]] if self.nn_positions else [])
                            + ([self.song[[min(t + k, steps - 1) for k in SONG_LOOKAHEAD]].reshape(-1)] if self.nn_slot else [])
