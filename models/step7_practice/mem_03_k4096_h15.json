@@ -1,0 +1,84 @@
+{
+  "config": {
+    "ear": "models/step5/ear_04.pt",
+    "out": "runs/memory/mem_03_k4096_h15",
+    "songs": 1200,
+    "steps": 30000,
+    "batch": 16,
+    "lr": 0.001,
+    "keys": 4096,
+    "max_hz": 15.0,
+    "demo": "runs/ear/demo",
+    "play": "runs/real/twin_y1f80_04.json",
+    "actuator": "models/step4/nn_f80_t4_s06.pt",
+    "seed": 11,
+    "device": "cuda"
+  },
+  "by_length": {
+    "5s": {
+      "mae_cents": 37.41764450073242,
+      "within_25c": 0.5348008531479058,
+      "mae_after_offset": 17.43219757080078,
+      "voice_agree": 0.9837800601202404,
+      "songs": 32
+    },
+    "10s": {
+      "mae_cents": 29.14152717590332,
+      "within_25c": 0.5217369991691703,
+      "mae_after_offset": 17.02890396118164,
+      "voice_agree": 0.9831706706706708,
+      "songs": 32
+    },
+    "20s": {
+      "mae_cents": 45.79008483886719,
+      "within_25c": 0.3532531772753972,
+      "mae_after_offset": 20.8114070892334,
+      "voice_agree": 0.9815532766383191,
+      "songs": 32
+    },
+    "30s": {
+      "mae_cents": 43.31980895996094,
+      "within_25c": 0.4399450920853283,
+      "mae_after_offset": 24.266504287719727,
+      "voice_agree": 0.9812958486162053,
+      "songs": 32
+    }
+  },
+  "demo": {
+    "デモ1カエルの合唱": {
+      "mae_cents": 105.12091064453125,
+      "within_25c": 0.017316017316017316,
+      "mae_after_offset": 20.436721801757812,
+      "voice_agree": 0.8502340093603744,
+      "songs": 1
+    },
+    "デモ2うぐいす": {
+      "mae_cents": 114.65725708007812,
+      "within_25c": 0.03723404255319149,
+      "mae_after_offset": 28.546337127685547,
+      "voice_agree": 0.8422619047619048,
+      "songs": 1
+    },
+    "デモ3スーパーマリオ": {
+      "mae_cents": 343.95281982421875,
+      "within_25c": 0.005747126436781609,
+      "mae_after_offset": 121.9129867553711,
+      "voice_agree": 0.8911798396334479,
+      "songs": 1
+    }
+  },
+  "play_10s": {
+    "rule": 0.6094170318836276,
+    "memory": 0.3477344946393115,
+    "rule_in_key": 0.6269990261595567,
+    "memory_in_key": 0.4464478618974534,
+    "songs": 12
+  },
+  "play_demo": {
+    "rule": 0.5623624915052666,
+    "memory": 0.010034403669724771,
+    "rule_in_key": 0.8133574371389738,
+    "memory_in_key": 0.716212198436969,
+    "songs": 3
+  }
+}

@@ -135,6 +135,17 @@ code{font-family:var(--f-mono);font-size:.85em;background:var(--grid);padding:.1
   <p class="col note">音階の classic は、上の音で点（聞こえた音）が消え、そのあと大きく外れています。classic と classic_ear の PWM は、音の間も細かく上下を続けています（保持帯で止めても、静止摩擦で出直す）。NN の版は PWM がなめらかです。</p>
 </section>
 
+<section>
+  <div class="col" style="display:flex;flex-direction:column;gap:.5rem">
+    <h2>練習の実機テスト（同じ曲を 5 回続けて）</h2>
+    <p>step7 に「前回の演奏の記録（どこでどれだけ外れたか・聞こえたか・出した PWM）を少し先まで読んで直す」入力を足し、同じ曲を 4 回ずつ吹く練習で学ばせた <b style="color:var(--step7)">step7_practice</b> を、step7 と並べて 5 回ずつ吹かせました（±25 cent 以内）。</p>
+  </div>
+  <div class="panel"><div id="practiceChart"></div>
+    <div class="legend"><span class="chip"><i style="background:var(--step7);opacity:.45"></i>step7（練習なし）</span><span class="chip"><i style="background:var(--step7)"></i>step7_practice</span><span>実線：ドレミファミレド　破線：音階</span></div></div>
+  <p class="col">step7_practice は 1 回目から step7 より良い（ドレミ 75 % 対 61 %）が、これは学習を重ねた分。<b>回を重ねての上達ははっきりしない</b>（音階は 66 → 69〜70 % とわずかに上がり、ドレミは上がらない）。
+  シミュレーターで調べると、同じ機体・同じ曲の外れ方は毎回ほぼ同じ（2 回の誤差の相関 0.998）なのに、目標を前回の外れの分だけずらす素朴な繰り返し学習制御（ILC）でも誤差は 49 → 48 cent までしか下がらなかった。静止摩擦で止まれる位置がとびとびになるため、少しずつ直す方式が効きにくい。練習でうまくなるには、音の頭（動き出しの時刻と速さ）を前回の記録で変える学び方が要る。</p>
+</section>
+
 <section class="col">
   <h2>分かったこと</h2>
   <ul class="find">
@@ -240,6 +251,19 @@ const mt=document.getElementById("metricTabs");
 METRICS.forEach(m=>{const b=document.createElement("button");b.type="button";b.textContent=m.name;b.setAttribute("aria-pressed",m===metric);b.onclick=()=>{metric=m;[...mt.children].forEach(c=>c.setAttribute("aria-pressed",c===b));drawBars()};mt.appendChild(b)});
 const stb=document.getElementById("songTabs");
 SONGS.forEach(([g,l])=>{const b=document.createElement("button");b.type="button";b.textContent=l;b.setAttribute("aria-pressed",g===song);b.onclick=()=>{song=g;[...stb.children].forEach(c=>c.setAttribute("aria-pressed",c===b));if(DATA)drawSeries()};stb.appendChild(b)});
+(function(){
+  const P={step7:{doremi:[61,61,70,50,62],scale:[63,64,58,59,60]},step7_practice:{doremi:[75,75,72,75,68],scale:[66,69,70,69,66]}};
+  const W=900,H=240,L=46,R=16,T=12,B=30,host=document.getElementById("practiceChart");
+  const svg=el("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":"練習の回ごとの成績"},host);
+  const lo=40,hi=80,y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo)),x=i=>L+(W-L-R)*i/4;
+  for(let v=lo;v<=hi;v+=10){el("line",{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:"var(--grid)"},svg);const t=el("text",{x:L-6,y:y(v)+4,"text-anchor":"end"},svg);t.textContent=v}
+  for(let i=0;i<5;i++){const t=el("text",{x:x(i),y:H-8,"text-anchor":"middle"},svg);t.textContent=(i+1)+" 回目"}
+  const u=el("text",{x:L-6,y:T-2,"text-anchor":"end"},svg);u.textContent="%";
+  for(const [s,op] of [["step7",.45],["step7_practice",1]])for(const [song,dash] of [["doremi",""],["scale","6 4"]]){
+    const d=P[s][song].map((v,i)=>(i?"L":"M")+x(i)+" "+y(v)).join("");
+    el("path",{d,fill:"none",stroke:"var(--step7)","stroke-width":2.5,"stroke-dasharray":dash,opacity:op},svg);
+    P[s][song].forEach((v,i)=>el("circle",{cx:x(i),cy:y(v),r:3.5,fill:"var(--step7)",opacity:op},svg))}
+})();
 fetch("data.json").then(r=>r.json()).then(j=>{DATA=j;drawBars();drawBand("f80_scale");drawBand("f80_chromatic");drawSeries();tables()})
   .catch(()=>{document.getElementById("series").innerHTML='<p class="note">データを読み込めませんでした。</p>'});
 </script>

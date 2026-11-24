@@ -23,11 +23,10 @@ from torch import nn
 
 from .adaptive_memory import AdaptiveMemoryConfig, Writer
 from .deterministic_pipeline import EncoderlessDeterministicPerformer
-from .features import SONG_LOOKAHEAD, WINDOW
+from .features import PREV_LOOK, SONG_LOOKAHEAD, WINDOW
 from .physical_plant import AudibleListener, DifferentiableMotorFlute
 
 FEATURES = 2 * len(WINDOW) + 7     # window, heard (3), previous pwm, twin position / velocity, voice now
-PREV_LOOK = (0, 3, 6, 10, 15, 20, 30)  # steps ahead read from the record of the previous play (practice)
 
 
 @dataclass(frozen=True)

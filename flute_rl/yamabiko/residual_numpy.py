@@ -332,7 +332,7 @@ class NNRuntime(Runtime):
         return self.pwm, valve
 
     def _prev_features(self, t):
-        from .nn_performer import PREV_LOOK
+        from .features import PREV_LOOK
         steps = len(self.cents)
         look = [min(t + k, steps - 1) for k in PREV_LOOK]
         return [self.prev["err"][look], self.prev["valid"][look], self.prev["pwm"][look], [self.prev_has]]
