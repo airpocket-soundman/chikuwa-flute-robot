@@ -304,6 +304,7 @@ class WhistleJob:
         self.collect = False      # the data collection mode: record only, no calibration, no play
         self.collect_kind, self.collect_seconds = "whistle", MAX_RECORD_S
         self.takes = self._load_takes()
+        self._restore_song()
 
     # ----- the chosen step ---------------------------------------------------------------------------
     def _saved_step(self):
@@ -397,6 +398,21 @@ class WhistleJob:
         else:
             self._pressed("stop", presses)
             self.stop()
+
+    def _restore_song(self):
+        """After a restart, the last whistle recorded is the song again: any step can play it (it is heard again
+        with that step on the first play)."""
+        import numpy as np
+        try:
+            last = max(WHISTLE_DIR.glob("*_whistle.npz"))
+            with np.load(last) as d:
+                pcm, sr = d["pcm"].copy(), int(d["sr"])
+        except (ValueError, OSError, KeyError):
+            return
+        stamp = last.stem[:-len("_whistle")]
+        self.song = {"step": None, "path": None, "voice": None, "stamp": stamp, "pcm": pcm, "sr": sr, "quantize": False}
+        self.wavs["whistle"] = wav_bytes(pcm, sr)
+        self._set(message=f"最後の録音（{stamp}）を読み込みました。2 回押すと、選んだ版で吹きます")
 
     # ----- data collection --------------------------------------------------------------------------
     def _load_takes(self):
@@ -563,7 +579,7 @@ class WhistleJob:
                         record_elapsed=(time.monotonic() - self.state["record_began"]
                                         if self.state.get("phase") == "record" and self.state.get("record_began")
                                         else None),
-                        song_step=self.song["step"] if self.song else None,
+                        song_step=self.song["step"] if self.song else None, has_song=self.song is not None,
                         steps=[{"name": n, "title": p.get("title", n), "ear": p.get("ear", "yin"),
                                 "memory": bool(p.get("memory_runtime")), "valve_nn": bool(p.get("valve_runtime"))}
                                for n, p in self.profiles.items()])
@@ -989,8 +1005,8 @@ async function poll(){
   const rec=$("rec"),serverBusy=s.busy&&["tune","play"].includes(ph);
   rec.firstChild.textContent=ph==="record"?"録音終了して演奏":"録音";rec.classList.toggle("record",ph==="record");
   rec.disabled=s.busy&&ph!=="record";
-  $("again").disabled=s.busy||!s.song_step;
-  $("again").firstChild.textContent=s.song_step&&s.song_step!==s.step?`同じ録音を ${s.step} で`:"練習：もう一度";
+  $("again").disabled=s.busy||!s.has_song;
+  $("again").firstChild.textContent=s.has_song&&s.song_step!==s.step?`同じ録音を ${s.step} で`:"練習：もう一度";
   $("stop").disabled=!s.busy||ph==="record"||serverBusy;
   $("hint").textContent=serverBusy?"いまは基板の EXEC ボタンで止められます（画面からは届きません）。":"基板の EXEC ボタンと、この画面のボタンは同じ働きです。版の選択だけはこの画面で行います。";
   if(s.press&&s.press.n!==lastPress){if(lastPress!==null){const b=$(s.collect?"take":{record:"rec",finish:"rec",replay:"again",stop:"stop"}[s.press.action]);
