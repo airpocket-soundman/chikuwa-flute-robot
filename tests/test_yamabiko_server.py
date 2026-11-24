@@ -22,6 +22,7 @@ class FakeLink:
         self.status, self.sent = None, []
         self.pwm, self.valve, self.fan_state, self.max_pwm = 0, False, (False, 0.0), 1.0
         self.t0, self.made = time.monotonic(), 0
+        self.buttons = 7          # the board button's press count
 
     def send(self, data):
         self.sent.append(data)
@@ -46,7 +47,7 @@ class FakeLink:
             self.made = due
         flags = (2 if self.valve else 0) | (4 if self.fan_state[0] else 0) | 16
         self.status = Status(int(1000 * (time.monotonic() - self.t0)), 0, 3, 5, 1200 if self.fan_state[0] else 0,
-                             7, flags, self.pwm, -1, 0, time.monotonic())
+                             self.buttons, flags, self.pwm, -1, 0, time.monotonic())
 
     def drain(self, s): self.poll(s)
 

@@ -4,6 +4,13 @@
 > [nn-e2e-plan.md](nn-e2e-plan.md) にまとめた。比較用の古典制御（PID、NN なし）は [classic.md](classic.md)。
 > 実機で再開するときの手順は nn-e2e-plan.md の 6 章。以下は機体・基板・UNO Q の記録。
 
+> **2026-11-24 追記（画面とボタン）:** UNO Q の `http://<UNO Q>:8080/` が演奏の画面になった（`scripts/yamabiko_web.py`。手動テストは `/bench`）。
+> classic・step1〜（`models/*/profile.json` があるもの全部）を画面で選び、選んだ版は `runs/web_step.txt` に残る。
+> 基板の EXEC ボタン：待機中に押すと録音開始（その版で未測定ならキャリブレーションから）→ もう一度押すと録音を終えて聞き取り・演奏 → キャリブレーション・演奏中に押すと止まる（サーバーが `stop_on_button` でボタンを見る）。録音は最長 30 秒。
+> 起動時は crontab の `@reboot` でサーバー（15 秒後）と画面（45 秒後、`--no-calibrate-at-start`）が立ち上がる。起動時に笛は鳴らない。
+> 手で起動し直すときは UNO Q の `bash /home/arduino/yamabiko/restart.sh`（`--no-button` を付けるとボタンを受け付けない）。
+> PC で画面だけ試すときは `python scripts/yamabiko_web_dev.py --port 8081`（偽の MCU、音は出ない。`POST /dev/press` がボタン）。
+
 A・B 基板を UNO Q に載せて初めて通電し、PC から命令で動かせるところまで来た。その時点の引き継ぎ。
 前の版（2026-09-18、基板設計の前段）は git の履歴にある（`git log -- docs/handoff.md`）。
 

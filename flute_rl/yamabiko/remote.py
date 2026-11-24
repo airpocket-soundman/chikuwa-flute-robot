@@ -125,6 +125,15 @@ class Remote:
         reply = self.call("record", timeout=seconds + 10, seconds=float(seconds))
         return np.frombuffer(base64.b64decode(reply["pcm16_b64"]), "<i2").copy(), int(reply["sr"])
 
+    def audio_mark(self):
+        """The microphone's sample index now (server cmd_audio_mark)."""
+        return int(self.call("audio_mark")["index"])
+
+    def audio_since(self, start, stop=None):
+        """(int16 samples, sample rate, stop index) from ``start`` (an audio_mark) to ``stop`` or now."""
+        reply = self.call("audio_span", start=int(start), stop=stop)
+        return np.frombuffer(base64.b64decode(reply["pcm16_b64"]), "<i2").copy(), int(reply["sr"]), int(reply["stop"])
+
     def calibrate(self, out=f"{REMOTE_DIR}/runs/real/calibration.npz", **kw):
         """Calibration run on the UNO Q; the record stays there (adb pull it).  kw: max_pwm, sweep, fan, flip."""
         return self.call("calibrate", timeout=60, out=out, **kw)

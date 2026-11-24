@@ -221,6 +221,24 @@ class Server:
         self.jobs.append((client, req.get("id"), "record", (start, start + int(round(seconds * SR)))))
         return None                                       # answered by the loop when the audio is in
 
+    def cmd_audio_mark(self, client, req):
+        """The microphone's sample index now: ``audio_span`` from it later reads what came since."""
+        return {"index": int(self.link.audio.end), "sr": SR}
+
+    def cmd_audio_span(self, client, req):
+        """Samples from ``start`` (an ``audio_mark`` index) to ``stop`` (default: now), at most 60 s."""
+        start = int(req["start"])
+        stop = int(req.get("stop") or self.link.audio.end)
+        if not 0 <= stop - start <= 60 * SR:
+            raise ValueError("a span of 0..60 s")
+        pcm = self.link.audio.span(start, stop)
+        return {"pcm16_b64": base64.b64encode(pcm.astype("<i2").tobytes()).decode(), "sr": SR, "stop": stop}
+
+    def buttons(self):
+        """The board button's press count (None before the first status from the MCU)."""
+        st = self.link.status
+        return None if st is None else int(st.buttons)
+
     def cmd_calibrate(self, client, req):
         from .calibration import calibrate_real
         self.take(client)
@@ -276,7 +294,11 @@ class Server:
                 lead = int(round(float(req.get("lead_seconds", 1.6)) / STEP_S))
                 cents = np.r_[np.full(lead, cents[0]), cents]
                 voice = np.r_[np.zeros(lead, bool), voice]
+            pressed = self.buttons() if req.get("stop_on_button") else None
+            stopped = False
             for play in range(int(req.get("repeats", 1))):
+                if stopped:
+                    break
                 rig.resync()
                 if not self_home:
                     for _ in range(int(round(float(req.get("homing_seconds", 1.3)) / STEP_S))):
@@ -298,6 +320,10 @@ class Server:
                 pwm_log, heard_log, valid_log, valve_log = [], [], [], []
                 audio_start = self.link.audio.end
                 for t in range(len(cents)):
+                    if pressed is not None and self.buttons() not in (None, pressed):   # the board button
+                        stopped = True
+                        self.log("play stopped by the button")
+                        break
                     pwm, valve = runtime.command(t)
                     h = float(rig.step(pwm, valve)["heard"][0]); ok = bool(np.isfinite(h)) and h <= max_cents
                     if self_home:
@@ -307,12 +333,13 @@ class Server:
                     valve_log.append(bool(valve))
                     pwm_log.append(pwm); heard_log.append(h if ok else 0.0); valid_log.append(ok)
                 heard, valid = np.array(heard_log), np.array(valid_log)
-                mask = valid & voice
-                errors.append(float(np.abs(heard[mask] - cents[mask]).mean()) if mask.any() else None)
+                n = len(heard)                                  # shorter when the button stopped it
+                mask = valid & voice[:n]
+                errors.append(float(np.abs(heard[mask] - cents[:n][mask]).mean()) if mask.any() else None)
                 records.update({f"{play}/pwm": np.array(pwm_log, np.float32)[None],
                                 f"{play}/heard": heard.astype(np.float32)[None], f"{play}/valid": valid[None],
                                 f"{play}/valve": np.array(valve_log, np.float32)[None],
-                                f"{play}/target_cents": cents.astype(np.float32)[None], f"{play}/target_voice": voice[None],
+                                f"{play}/target_cents": cents[:n].astype(np.float32)[None], f"{play}/target_voice": voice[:n][None],
                                 f"{play}/pcm": self.link.audio.span(audio_start, self.link.audio.end)})
         finally:
             self.safe("play done")
@@ -320,7 +347,8 @@ class Server:
         if out:
             pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(out, count=len(errors), shift_cents=shift, sr=SR, **records)
-        return {"heard_error_cents": errors, "late_steps": rig.late_steps, "out": out, "shift_cents": shift}
+        return {"heard_error_cents": errors, "late_steps": rig.late_steps, "out": out, "shift_cents": shift,
+                "stopped": stopped}
 
     def cmd_tune(self, client, req):
         """Today's flute: the home note and one sweep out to the far end and back at ``pwm`` (the end switch
@@ -335,7 +363,11 @@ class Server:
         pwm = float(req.get("pwm", .6))
         heard, phase = [], []
 
+        pressed = self.buttons() if req.get("stop_on_button") else None
+
         def step(command, valve, name):
+            if pressed is not None and self.buttons() not in (None, pressed):
+                raise RuntimeError("stopped with the button")
             h = float(rig.step(command, valve)["heard"][0])
             heard.append(h if np.isfinite(h) else None); phase.append(name)
             return rig.log["isense_peak_mv"][-1]
