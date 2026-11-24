@@ -89,6 +89,10 @@ def main():
     ap.add_argument("--eval-plays", type=int, default=5)
     ap.add_argument("--rig-memory", type=int, default=0,
                     help="step7: a rig memory of this size kept across different songs on the same rig (from --init)")
+    ap.add_argument("--rig-aux", type=float, default=0.0,
+                    help="--rig-memory: weight of guessing the rig from the memory after each song (training only)")
+    ap.add_argument("--rig-rate", type=float, default=None, help="--rig-memory: the memory's write rate")
+    ap.add_argument("--new-lr", type=float, default=10.0, help="learning-rate factor for the newly added parts")
     ap.add_argument("--songs-per-rig", type=int, default=3,
                     help="--rig-memory: different songs played one after another on the same rigs per episode")
     ap.add_argument("--twin-free", action="store_true",
@@ -121,6 +125,8 @@ def main():
             upgrade.update(prev_play=True)
         if args.rig_memory:
             upgrade.update(rig_memory=args.rig_memory)
+            if args.rig_rate is not None:
+                upgrade.update(rig_rate=args.rig_rate)
         model = NNTwinPerformer.from_checkpoint(torch.load(args.init, map_location=device, weights_only=False),
                                                 plant, device, **upgrade)
         args.imitate_steps = 0
@@ -201,7 +207,10 @@ def main():
     best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
     history.append({"step": 0, "mae": mae, "dpwm": tv})
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr * .3, weight_decay=1e-5)
+    new = [p for n, p in model.named_parameters() if n.startswith(("rigmem.", "rig_aux."))]
+    rest = [p for n, p in model.named_parameters() if not n.startswith(("rigmem.", "rig_aux."))]
+    optimizer = torch.optim.AdamW([{"params": rest, "lr": args.lr * .3},
+                                   {"params": new, "lr": args.lr * .3 * args.new_lr}], weight_decay=1e-5)
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.steps, eta_min=args.lr * .03)
     for step in range(1, args.steps + 1):
         rigs = rigs_around(twin, args.batch, args.spread, generator)
@@ -215,6 +224,9 @@ def main():
                 miss = valve_miss(result, voice)
                 loss = loss + float(weight) * (F.smooth_l1_loss(error[voice] / 100, torch.zeros_like(error[voice]), beta=.2)
                                                + args.smooth * tv + args.valve_weight * miss)
+                if args.rig_aux:
+                    answer = model.rig_answer(rigs, batch_twin)
+                    loss = loss + args.rig_aux * F.mse_loss(model.rig_aux(rig), answer)
                 cents, voice = with_lead(*songs(rng, args.batch, args.song_steps, device, plant.config), rng, lead)
             loss = loss / float(weights.sum())
         song, weights = None, (np.linspace(.3, 1.0, args.plays) if args.plays > 1 else np.ones(1))

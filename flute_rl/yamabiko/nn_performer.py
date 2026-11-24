@@ -26,6 +26,7 @@ from .deterministic_pipeline import EncoderlessDeterministicPerformer
 from .features import PREV_LOOK, SONG_LOOKAHEAD, WINDOW
 from .physical_plant import AudibleListener, DifferentiableMotorFlute
 
+RIG_AUX = ("torque_gain", "max_velocity_strokes_s", "deadband", "flute_offset_cents", "tube_offset_m")
 FEATURES = 2 * len(WINDOW) + 7     # window, heard (3), previous pwm, twin position / velocity, voice now
 
 
@@ -95,6 +96,8 @@ class NNTwinPerformer(nn.Module):
             self.writer = Writer(AdaptiveMemoryConfig(fast_hidden=config.hidden), config.song_slot, config.song_rate)
         if config.rig_memory:
             self.rigmem = Writer(AdaptiveMemoryConfig(fast_hidden=config.hidden), config.rig_memory, config.rig_rate)
+            # training only (not exported): guess the rig from the memory, so the memory learns to hold it
+            self.rig_aux = nn.Linear(config.rig_memory, len(RIG_AUX))
 
     # ----- one step --------------------------------------------------------------------------------
     def features(self, cents, voice, t, heard, valid, prev_pwm, estimate, twin=None, song=None, current=None,
@@ -124,6 +127,16 @@ class NNTwinPerformer(nn.Module):
             parts.append(rig if rig is not None else torch.zeros(cents.shape[0], self.config.rig_memory,
                                                                  device=cents.device, dtype=dtype))
         return torch.cat(parts, 1)
+
+    @staticmethod
+    def rig_answer(parameters, twin):
+        """What the rig memory should be able to tell (training only): the rig against the twin, scaled to ~1."""
+        log = lambda a, b: torch.log(a / b)
+        return torch.stack([log(parameters.torque_gain, twin.torque_gain) / .25,
+                            log(parameters.max_velocity_strokes_s, twin.max_velocity_strokes_s) / .25,
+                            (parameters.deadband - twin.deadband) / .1,
+                            (parameters.flute_offset_cents - twin.flute_offset_cents) / 30.0,
+                            (parameters.tube_offset_m - twin.tube_offset_m) / .003], 1)
 
     def write_rig(self, rig, cents, voice, t, heard, valid, estimate, pwm, fast):
         """The rig memory learns from two steps ago (the heard pitch has caught up), only while it hears."""
@@ -289,5 +302,5 @@ class NNTwinPerformer(nn.Module):
             grown[:, :w.shape[1]] = w
             state["inp.weight"] = grown
         missing, unexpected = model.load_state_dict(state, strict=False)
-        assert not unexpected and all(k.startswith(("writer.", "rigmem.")) for k in missing), (missing, unexpected)
+        assert not unexpected and all(k.startswith(("writer.", "rigmem.", "rig_aux.")) for k in missing), (missing, unexpected)
         return model
