@@ -71,6 +71,23 @@ def travel_target(plant, twin, cents, voice, speed_share=.8, cap=40, min_leap=15
     return torch.as_tensor(w, device=voice.device)
 
 
+def whistle_songs(rng, count, steps, device):
+    """Targets as the whistle copy makes them (synthetic whistles, flute_rl.yamabiko.score_memory.teacher):
+    fast notes, glides and short gaps, padded / cut to ``steps``."""
+    from flute_rl.yamabiko.ear_synth import phrase
+    from flute_rl.yamabiko.score_memory import MemoryConfig, teacher
+    cfg = MemoryConfig()
+    cs, vs = [], []
+    while len(cs) < count:
+        _, c, _ = phrase(rng, steps / 100 + 1)
+        t = teacher(c, cfg, {"max_gap_steps": 2})
+        if t is None:
+            continue
+        tc, tv = t
+        cs.append(np.r_[tc, np.full(steps, tc[-1])][:steps]); vs.append(np.r_[tv, np.zeros(steps, bool)][:steps])
+    return (torch.tensor(np.stack(cs), device=device, dtype=torch.float32), torch.tensor(np.stack(vs), device=device))
+
+
 def scores(emitted, sounding, cents, voice):
     error = (emitted - cents).abs()
     s, v = sounding & voice, voice
@@ -86,7 +103,11 @@ def main():
     ap.add_argument("--actuator", required=True, help="the frozen actuator network (NNTwinPerformer .pt)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--tol", type=float, default=40.0, help="--target heard: open only within this many cent")
-    ap.add_argument("--target", choices=["travel", "heard"], default="travel",
+    ap.add_argument("--min-leap", type=float, default=150.0, help="--target travel: shut only for leaps over this [cent]")
+    ap.add_argument("--cap", type=int, default=40, help="--target travel: shut at most this many steps")
+    ap.add_argument("--whistle-songs", type=float, default=0.0,
+                    help="share of training songs made from synthetic whistles by the rule pipeline (fast, gappy)")
+    ap.add_argument("--target", choices=["travel", "heard", "score"], default="travel",
                     help="travel: shut for rests, re-articulation and the travel of a leap (score and twin only); "
                          "heard: open only where the flute sounds within --tol (it learns to stay shut)")
     ap.add_argument("--twin-free", action="store_true", help="step7: no twin position / velocity inputs")
@@ -112,13 +133,18 @@ def main():
     eval_rigs = rigs_around(twin, 48, args.spread, torch.Generator(device).manual_seed(7777))
     eval_twin = repeat(twin, 48)
     eval_cents, eval_voice = songs(np.random.default_rng(900), 48, 500, device, plant.config)
+    whistle_cents, whistle_voice = whistle_songs(np.random.default_rng(901), 48, 500, device)
     batch_twin = repeat(twin, args.batch)
 
     def evaluate(model):
-        with torch.no_grad():
-            emitted, air, sounding, cmd = play_with_valve(actuator, model, plant, eval_cents, eval_voice, eval_rigs,
-                                                          eval_twin, torch.Generator(device).manual_seed(0))
-        return scores(emitted, sounding, eval_cents, eval_voice)
+        """Scores on the usual songs, and (as whistle_*) on whistle-copy scores."""
+        out = {}
+        for prefix, c, v in (("", eval_cents, eval_voice), ("whistle_", whistle_cents, whistle_voice)):
+            with torch.no_grad():
+                emitted, air, sounding, cmd = play_with_valve(actuator, model, plant, c, v, eval_rigs, eval_twin,
+                                                              torch.Generator(device).manual_seed(0))
+            out.update({prefix + k: x for k, x in scores(emitted, sounding, c, v).items()})
+        return out
 
     rule = evaluate(RuleValve(plant.config.normalize).to(device))
     print("rule  (open on the score's notes): " + json.dumps({k: round(v, 3) for k, v in rule.items()}), flush=True)
@@ -128,9 +154,15 @@ def main():
     for step in range(1, args.steps + 1):
         rigs = rigs_around(twin, args.batch, args.spread, generator)
         cents, voice = songs(rng, args.batch, args.song_steps, device, plant.config)
+        if args.whistle_songs:
+            k = int(round(args.batch * args.whistle_songs))
+            wc, wv = whistle_songs(rng, k, args.song_steps, device)
+            cents, voice = torch.cat([cents[:args.batch - k], wc]), torch.cat([voice[:args.batch - k], wv])
         emitted, air, sounding, cmd = play_with_valve(actuator, valve, plant, cents, voice, rigs, batch_twin, generator)
         if args.target == "travel":
-            want = travel_target(plant, batch_twin, cents, voice).to(air.dtype)
+            want = travel_target(plant, batch_twin, cents, voice, cap=args.cap, min_leap=args.min_leap).to(air.dtype)
+        elif args.target == "score":                   # tongue exactly as the score: open on its notes
+            want = voice.to(air.dtype)
         else:
             want = (voice & ((emitted - cents).abs() < args.tol)).to(air.dtype)
         d = plant.config.valve_delay_steps
@@ -142,7 +174,8 @@ def main():
             print(f"step {step:4d} loss {float(loss):.4f}  {time.time() - started:6.0f}s", flush=True)
         if step % args.eval_every == 0 or step == args.steps:
             m = evaluate(valve)
-            score = m["glide"] + (1 - m["coverage"]) * .5 + (1 - m["on_target"])
+            score = sum(m[p + "glide"] + (1 - m[p + "coverage"]) * .5 + (1 - m[p + "on_target"])
+                        for p in ("", "whistle_")) / 2
             history.append({"step": step, **m})
             print(f"eval {step}: " + json.dumps({k: round(v, 3) for k, v in m.items()}) + f" score {score:.3f}", flush=True)
             if best is None or score < best["score"]:
