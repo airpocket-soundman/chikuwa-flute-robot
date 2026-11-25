@@ -116,15 +116,34 @@
       </select>
     </div>
     <div class="note" style="margin-top:6px">選んだ 1 台の音を、出た音程（または目標）から合成して鳴らします。</div>
+    <div id="allGraphs" hidden>
+      <h2 id="allTitle">全台のグラフ</h2>
+      <div class="chips" id="channels">
+        <button data-ch="pitch" aria-pressed="true">音程</button><button data-ch="error">音程の誤差</button>
+        <button data-ch="pwm">PWM</button><button data-ch="position">台車の位置</button>
+        <button data-ch="valve">弁</button><button data-ch="heard">聞こえた音</button><button data-ch="fan">ファン</button>
+      </div>
+      <div class="legend" id="allLegend"></div>
+      <canvas id="gAll" class="chart" height="600"></canvas>
+      <div class="note">マスを押すとその台を選びます。マスの地の色は、その台の ±25 cent 以内の割合（緑ほど良い）。</div>
+    </div>
+    <div id="oneGraphs">
+    <h2 id="oneTitle" style="margin-top:14px">選んだ台のグラフ</h2>
     <h2>音程（cent、A4 = 0）</h2>
     <div class="legend"><span><i style="background:var(--target)"></i>目標</span><span><i style="background:var(--played)"></i>出た音</span><span><i style="background:var(--heard)"></i>聞こえた音</span></div>
     <canvas id="gPitch" class="chart" height="230"></canvas>
     <h2>PWM（アクチュエータへの指令）</h2>
     <canvas id="gPwm" class="chart" height="90"></canvas>
-    <h2>台車の位置と弁</h2>
-    <div class="legend"><span><i style="background:#c9ccd1"></i>位置（0 = 原点、1 = 押し込み）</span><span><i style="background:var(--air)"></i>弁 開</span><span><i style="background:#4a4f58"></i>楽譜で鳴らす所</span></div>
-    <canvas id="gPos" class="chart" height="110"></canvas>
-    <div class="note">学習の 1 回は、32 台にそれぞれ 4 秒の曲を同時に吹かせ、その誤差で NN の重みを少し直します。ここに出しているのは、その回の 32 台の演奏そのもの（シミュレーター上の記録）です。</div>
+    <h2>台車の位置（シミュレーターの位置、0 = 原点、1 = 押し込み）</h2>
+    <canvas id="gPos" class="chart" height="90"></canvas>
+    <h2>弁と音</h2>
+    <div class="legend"><span><i style="background:#4a4f58"></i>楽譜で鳴らす所</span><span><i style="background:var(--air)"></i>弁 開</span><span><i style="background:var(--played)"></i>笛が鳴った</span><span><i style="background:var(--heard)"></i>聞こえた</span></div>
+    <canvas id="gValve" class="chart" height="70"></canvas>
+    <h2>ファン（強さ）</h2>
+    <canvas id="gFan" class="chart" height="50"></canvas>
+    <div class="note">このシミュレーターではファンは制御の対象ではなく、80 % で回りっぱなし（実機も今は規則で 80 % 固定）。</div>
+    </div>
+    <div class="note">学習の 1 回は、全台にそれぞれ 4 秒の曲を同時に吹かせ、その誤差で NN の重みを少し直します。ここに出しているのは、その回の全台の演奏そのもの（シミュレーター上の記録）です。</div>
   </aside>
 </main>
 
@@ -409,7 +428,8 @@ function selectRig(i) {
   placeHero();
   $("where").textContent = `#${i + 1} を選択中`;
   if (S.mode === "one") goOne(i);
-  drawGraphs();
+  $("oneTitle").textContent = `#${i + 1} のグラフ`;
+  showRight();
 }
 
 // ---------- right: the chosen rig's graphs ---------------------------------------------------------
@@ -446,23 +466,134 @@ function drawGraphs() {
     r.pwm.forEach((v, k) => k ? g.lineTo(X(k), Y(v / 1000)) : g.moveTo(X(k), Y(v / 1000))); g.stroke();
     graphs.pwm = { c, img: g.getImageData(0, 0, c.width, c.height), X };
   }
-  // position, valve, score
+  // position
   {
     const c = $("gPos"), [g, w, h] = setupCanvas(c);
-    const X = k => 36 + (w - 42) * k / (T - 1), Y = v => 6 + (h - 34) * (1 - v);
+    const X = k => 36 + (w - 42) * k / (T - 1), Y = v => 6 + (h - 12) * (1 - v);
     g.font = "10px sans-serif"; g.fillStyle = css("--muted"); g.strokeStyle = "#2b2f36";
-    for (const v of [0, 1]) { g.beginPath(); g.moveTo(36, Y(v)); g.lineTo(w - 6, Y(v)); g.stroke(); g.fillText(v, 18, Y(v) + 3); }
-    for (let k = 0; k < T; k++) {
-      if (r.voice[k]) { g.fillStyle = "#4a4f58"; g.fillRect(X(k), h - 24, (w - 42) / T + .5, 8); }
-      if (r.air[k]) { g.fillStyle = css("--air"); g.fillRect(X(k), h - 13, (w - 42) / T + .5, 8); }
-    }
-    g.fillStyle = css("--muted"); g.fillText("楽譜", 4, h - 17); g.fillText("弁", 12, h - 6);
+    for (const v of [0, .5, 1]) { g.beginPath(); g.moveTo(36, Y(v)); g.lineTo(w - 6, Y(v)); g.stroke(); g.fillText(v, 14, Y(v) + 3); }
     g.strokeStyle = "#c9ccd1"; g.lineWidth = 1.4; g.beginPath();
     r.position.forEach((v, k) => k ? g.lineTo(X(k), Y(v / 1000)) : g.moveTo(X(k), Y(v / 1000))); g.stroke();
     graphs.pos = { c, img: g.getImageData(0, 0, c.width, c.height), X };
   }
+  // valve and sound: four on / off strips
+  {
+    const c = $("gValve"), [g, w, h] = setupCanvas(c);
+    const X = k => 36 + (w - 42) * k / (T - 1), bw = (w - 42) / T + .5;
+    const rows = [["楽譜", r.voice, "#4a4f58"], ["弁", r.air, css("--air")], ["鳴った", r.sounding, css("--played")], ["聞こえ", r.valid, css("--heard")]];
+    const rh = (h - 8) / rows.length;
+    g.font = "10px sans-serif";
+    rows.forEach(([label, on, color], j) => {
+      const y = 4 + j * rh;
+      g.fillStyle = "#23272d"; g.fillRect(36, y, w - 42, rh - 3);
+      g.fillStyle = color;
+      for (let k = 0; k < T; k++) if (on[k]) g.fillRect(X(k), y, bw, rh - 3);
+      g.fillStyle = css("--muted"); g.fillText(label, 2, y + rh - 6);
+    });
+    graphs.valve = { c, img: g.getImageData(0, 0, c.width, c.height), X };
+  }
+  // fan: 80 % all through in this simulator
+  {
+    const c = $("gFan"), [g, w, h] = setupCanvas(c);
+    const X = k => 36 + (w - 42) * k / (T - 1), Y = v => 5 + (h - 10) * (1 - v);
+    g.font = "10px sans-serif"; g.fillStyle = css("--muted"); g.strokeStyle = "#2b2f36";
+    for (const v of [0, 1]) { g.beginPath(); g.moveTo(36, Y(v)); g.lineTo(w - 6, Y(v)); g.stroke(); g.fillText(v * 100 + "%", 4, Y(v) + 3); }
+    g.strokeStyle = "#7dd3fc"; g.lineWidth = 1.6; g.beginPath(); g.moveTo(X(0), Y(FAN_DUTY)); g.lineTo(X(T - 1), Y(FAN_DUTY)); g.stroke();
+    graphs.fan = { c, img: g.getImageData(0, 0, c.width, c.height), X };
+  }
 }
+
+// ---------- right, all rigs: one small graph per rig, of one quantity --------------------------------
+const FAN_DUTY = .8;
+const CHANNELS = {
+  pitch: { legend: [["目標", "--target"], ["出た音", "--played"]] },
+  error: { legend: [["出た音 − 目標（±100 cent）", "--played"]] },
+  pwm: { legend: [["PWM（−1 〜 1）", "#c792ea"]] },
+  position: { legend: [["台車の位置（0 〜 1）", "#c9ccd1"]] },
+  valve: { legend: [["楽譜で鳴らす所", "#4a4f58"], ["弁 開", "--air"]] },
+  heard: { legend: [["目標", "--target"], ["聞こえた音", "--heard"]] },
+  fan: { legend: [["ファンの強さ（80 % 固定）", "#7dd3fc"]] },
+};
+let channel = "pitch", allGraph = null;
+const color = (c) => c.startsWith("--") ? css(c) : c;
+function drawAll() {
+  const c = $("gAll");
+  const cellH = N > 32 ? 30 : 54, rowsN = Math.ceil(N / COLS);
+  c.setAttribute("height", rowsN * cellH + 4);
+  const [g, w] = setupCanvas(c), T = S.data.steps, cw = (w - 4) / COLS;
+  $("allLegend").innerHTML = CHANNELS[channel].legend.map(([t, col]) => `<span><i style="background:${color(col)}"></i>${t}</span>`).join("");
+  $("allTitle").textContent = `全 ${N} 台のグラフ`;
+  const cells = [];
+  for (let i = 0; i < N; i++) {
+    const r = S.data.rigs[i], x0 = 2 + (i % COLS) * cw, y0 = 2 + Math.floor(i / COLS) * cellH, ww = cw - 3, hh = cellH - 3;
+    const bg = new THREE.Color(hitColor(r.hit)).multiplyScalar(.28);
+    g.fillStyle = "#" + bg.getHexString(); g.fillRect(x0, y0, ww, hh);
+    const X = k => x0 + 2 + (ww - 4) * k / (T - 1);
+    g.save(); g.beginPath(); g.rect(x0, y0, ww, hh); g.clip();          // nothing out of its own cell
+    const line = (vals, on, Y, col, lw = 1) => {
+      g.strokeStyle = color(col); g.lineWidth = lw; g.beginPath(); let pen = false;
+      for (let k = 0; k < T; k++) { if (on && !on[k]) { pen = false; continue; } const y = Y(vals[k]); pen ? g.lineTo(X(k), y) : g.moveTo(X(k), y); pen = true; }
+      g.stroke();
+    };
+    const span = (lo, hi) => v => y0 + 2 + (hh - 4) * (1 - (v - lo) / (hi - lo));
+    if (channel === "pitch" || channel === "heard") {
+      const vals = r.cents.filter((_, k) => r.voice[k]);
+      const lo = Math.min(...vals) - 80, hi = Math.max(...vals) + 80, Y = span(lo, hi);
+      line(r.cents, r.voice, Y, "--target", 2);
+      if (channel === "pitch") line(r.pitch, r.sounding, Y, "--played", 1);
+      else { g.fillStyle = css("--heard"); for (let k = 0; k < T; k++) if (r.valid[k]) g.fillRect(X(k), Y(r.heard[k]), 1, 1); }
+    } else if (channel === "error") {
+      const Y = span(-100, 100);
+      g.strokeStyle = "#3a3f47"; g.beginPath(); g.moveTo(x0, Y(0)); g.lineTo(x0 + ww, Y(0)); g.stroke();
+      const on = r.voice.map((v, k) => v && r.sounding[k]);
+      line(r.pitch.map((p, k) => Math.max(-100, Math.min(100, p - r.cents[k]))), on, Y, "--played", 1);
+    } else if (channel === "pwm") {
+      const Y = span(-1, 1);
+      g.strokeStyle = "#3a3f47"; g.beginPath(); g.moveTo(x0, Y(0)); g.lineTo(x0 + ww, Y(0)); g.stroke();
+      line(r.pwm.map(v => v / 1000), null, Y, "#c792ea", 1);
+    } else if (channel === "position") {
+      line(r.position.map(v => v / 1000), null, span(-.05, 1.05), "#c9ccd1", 1.2);
+    } else if (channel === "valve") {
+      const bw = (ww - 4) / T + .4, half = (hh - 6) / 2;
+      for (let k = 0; k < T; k++) {
+        if (r.voice[k]) { g.fillStyle = "#4a4f58"; g.fillRect(X(k), y0 + 2, bw, half); }
+        if (r.air[k]) { g.fillStyle = css("--air"); g.fillRect(X(k), y0 + 4 + half, bw, half); }
+      }
+    } else if (channel === "fan") {
+      const Y = span(0, 1); g.strokeStyle = "#7dd3fc"; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(X(0), Y(FAN_DUTY)); g.lineTo(X(T - 1), Y(FAN_DUTY)); g.stroke();
+    }
+    g.restore();
+    g.fillStyle = "rgba(232,230,225,.75)"; g.font = "9px sans-serif"; g.fillText(i + 1, x0 + 2, y0 + 9);
+    if (i === S.sel) { g.strokeStyle = css("--accent"); g.lineWidth = 1.5; g.strokeRect(x0 + .5, y0 + .5, ww - 1, hh - 1); }
+    cells.push({ x0, y0, ww, hh, X });
+  }
+  allGraph = { c, img: g.getImageData(0, 0, c.width, c.height), cells };
+  c.onclick = (e) => {
+    const i = allGraph.cells.findIndex(q => e.offsetX >= q.x0 && e.offsetX < q.x0 + q.ww && e.offsetY >= q.y0 && e.offsetY < q.y0 + q.hh);
+    if (i >= 0) selectRig(i);
+  };
+}
+function showRight() {
+  const all = S.mode === "all";
+  $("allGraphs").hidden = !all; $("oneGraphs").hidden = all;
+  if (S.data) { if (all) drawAll(); else drawGraphs(); }
+}
+$("channels").querySelectorAll("button").forEach(b => b.onclick = () => {
+  channel = b.dataset.ch;
+  $("channels").querySelectorAll("button").forEach(q => q.setAttribute("aria-pressed", q === b));
+  drawAll();
+});
 function drawPlayheads() {
+  if (S.mode === "all") {
+    if (!allGraph) return;
+    const g = allGraph.c.getContext("2d");
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.putImageData(allGraph.img, 0, 0); g.restore();
+    g.strokeStyle = css("--accent"); g.lineWidth = 1; g.beginPath();
+    for (const q of allGraph.cells) { const x = q.X(S.t); g.moveTo(x, q.y0); g.lineTo(x, q.y0 + q.hh); }
+    g.stroke();
+    return;
+  }
   for (const gr of Object.values(graphs)) {
     const g = gr.c.getContext("2d");
     g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.putImageData(gr.img, 0, 0); g.restore();
@@ -573,7 +704,7 @@ function frame(now) {
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
-  if (S.data) { drawCurve(); drawGraphs(); }
+  if (S.data) { drawCurve(); showRight(); }
 }
 addEventListener("resize", resize);
 
@@ -588,8 +719,8 @@ $("speed").onchange = (e) => { S.speed = +e.target.value; };
 $("loop").onclick = () => { S.loop = !S.loop; $("loop").setAttribute("aria-pressed", S.loop); };
 $("sound").onclick = () => soundOn(!audio.on);
 $("run").onchange = (e) => loadRun(e.target.value);
-$("modeAll").onclick = () => { S.mode = "all"; showLook(); $("modeAll").setAttribute("aria-pressed", true); $("modeOne").setAttribute("aria-pressed", false); goFleet(); };
-$("modeOne").onclick = () => { S.mode = "one"; showLook(); $("modeOne").setAttribute("aria-pressed", true); $("modeAll").setAttribute("aria-pressed", false); goOne(S.sel); };
+$("modeAll").onclick = () => { S.mode = "all"; showLook(); showRight(); $("modeAll").setAttribute("aria-pressed", true); $("modeOne").setAttribute("aria-pressed", false); goFleet(); };
+$("modeOne").onclick = () => { S.mode = "one"; showLook(); showRight(); $("modeOne").setAttribute("aria-pressed", true); $("modeAll").setAttribute("aria-pressed", false); goOne(S.sel); };
 addEventListener("keydown", (e) => { if (e.code === "Space" && e.target.tagName !== "SELECT") { e.preventDefault(); setPlaying(!S.playing); } });
 // click a rig in the scene to choose it
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
