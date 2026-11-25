@@ -11,7 +11,8 @@
 // The page is made by flute_rl/yamabiko/panel.py (read by page.h).  The buttons do what the board button
 // and the web page (http://<UNO Q>:8080/) do; the web page and this panel show the same state.
 //
-// Build: Arduino IDE / arduino-cli, board "M5Tab5" (m5stack:esp32:m5stack_tab5), libraries M5Unified, M5GFX.
+// Build: Arduino IDE / arduino-cli, board "M5Tab5" (m5stack:esp32:m5stack_tab5), libraries M5Unified and M5GFX
+// 0.3.0 or later (0.2.9 knows only the ILI9881C panel: a Tab5 with the newer ST7123 panel stays black).
 #include <M5Unified.h>
 #include "page.h"
 
@@ -360,7 +361,11 @@ void setup() {
   C_ORANGE2 = C(0xF2B38A); C_WHITE = C(0xFFFFFF);
   cv.setColorDepth(16);
   cv.setPsram(true);
-  cv.createSprite(M5.Display.width(), M5.Display.height());
+  bool made = cv.createSprite(M5.Display.width(), M5.Display.height()) != nullptr;
+  Serial.begin(115200);
+  Serial.printf("yamabiko_panel: board %d, display %d x %d, rotation %d, canvas %s, psram %u free of %u\n",
+                (int)M5.getBoard(), (int)M5.Display.width(), (int)M5.Display.height(), (int)M5.Display.getRotation(),
+                made ? "ok" : "FAILED", (unsigned)ESP.getFreePsram(), (unsigned)ESP.getPsramSize());
   layout();
   M5.Ex_I2C.begin();
   draw();

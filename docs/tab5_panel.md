@@ -63,7 +63,10 @@ UNO Q からの応答が 3 秒途切れると「UNO Q と通信できません�
 
 ## 4. 書き込みと起動
 
-**Tab5**（PC の Arduino IDE か arduino-cli。ボード「M5Tab5」、ライブラリ M5Unified 0.2.7・M5GFX 0.2.9 で確認）:
+**Tab5**（PC の Arduino IDE か arduino-cli。ボード「M5Tab5」、**ライブラリ M5Unified 0.3.0・M5GFX 0.3.0 以上**）:
+
+> M5GFX 0.2.9 までは Tab5 の液晶として ILI9881C しか知らず、新しい製造分の Tab5（液晶 ST7123）では、起動もタッチも I2C も動くのに**画面が真っ黒**になる（2026-11-25 に実機で起きた）。0.3.0 で ST7123 に対応している。起動時に USB のシリアル（115200）へ、ボードの種類・画面の大きさ・キャンバスを確保できたか・PSRAM を出す。
+
 
 ```
 arduino-cli compile --upload -p <Tab5 の COM ポート> tab5/yamabiko_panel
