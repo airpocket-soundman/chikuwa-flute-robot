@@ -206,13 +206,7 @@ fanRotor.add(rotor.mesh([.5, 0, .5]));
 fanRotor.position.set(4, 0, -38);
 scene.add(fanRotor);
 
-// servo horn on top (it turns the valve inside the box)
-const horn = new Voxels();
-horn.box(-1, 1, 0, 1, -1, 4, C.white, .02);
-const servoHorn = new THREE.Group();
-servoHorn.add(horn.mesh([0, 0, 0]));
-servoHorn.position.set(4, 21, -16);
-scene.add(servoHorn);
+// (the servo horn and the valve it turns are inside the box, not shown)
 
 
 // the slide: rod in the tube, out to the carriage the actuator rod pushes
@@ -277,8 +271,6 @@ function demo(time) {
   const pos = (slider.userData.pos ?? 0) + (target - (slider.userData.pos ?? 0)) * .08;
   slider.userData.pos = pos;
   slider.position.x = 48 + pos * STROKE;                           // the slide follows, a little late
-  const open = (t % .6) < .5;                                      // tongue between notes
-  servoHorn.rotation.y = open ? 0 : -Math.PI / 2.5;
 }
 
 function resize() {
