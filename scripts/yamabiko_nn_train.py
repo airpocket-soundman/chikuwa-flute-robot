@@ -67,6 +67,26 @@ def with_lead(cents, voice, rng, lead):
     return torch.cat([first, cents], 1), torch.cat([rest, voice], 1)
 
 
+def dump_step(folder, step, cents, voice, result, trace, rigs, twin, loss, mae):
+    """One training step's batch for the twin viewer: the songs, and every rig's play and its parameters
+    (as the ratio to the twin, or the shift from it)."""
+    folder = pathlib.Path(folder); folder.mkdir(parents=True, exist_ok=True)
+    c = lambda t: t.detach().float().cpu().numpy()
+    params = {}
+    for name, value in vars(rigs).items():
+        if value is None:
+            continue
+        base = getattr(twin, name, None)
+        if base is None:
+            continue
+        params[name] = c(value.float())
+        params["twin_" + name] = c(base.float().reshape(-1))[:1]
+    np.savez_compressed(folder / f"step_{step}.npz", step=step, loss=loss, mae=mae,
+                        cents=c(cents), voice=c(voice).astype(bool), pitch=c(result["pitch_cents"]),
+                        pwm=c(result["pwm"]), **{k: c(v) for k, v in trace.items()},
+                        **{"rig_" + k: v for k, v in params.items()})
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("twin")
@@ -87,6 +107,9 @@ def main():
                     help="practice: plays of the same song on the same rig per episode, the song memory kept "
                          "between them; later plays weigh more")
     ap.add_argument("--eval-plays", type=int, default=5)
+    ap.add_argument("--dump-steps", type=int, nargs="*", default=[],
+                    help="training steps whose batch (every rig's play) is saved for the twin viewer")
+    ap.add_argument("--dump-dir", default=None, help="where --dump-steps go (step_<n>.npz)")
     ap.add_argument("--rig-memory", type=int, default=0,
                     help="step7: a rig memory of this size kept across different songs on the same rig (from --init)")
     ap.add_argument("--rig-aux", type=float, default=0.0,
@@ -251,8 +274,10 @@ def main():
             weights = []
         else:
             loss = 0.0
+        trace = {} if step in args.dump_steps and args.dump_dir else None
         for weight in weights:                         # the same songs on the same rigs, the memory kept
-            result = model.perform(train_plant, cents, voice, rigs, batch_twin, generator, song=song)
+            result = model.perform(train_plant, cents, voice, rigs, batch_twin, generator, song=song,
+                                   trace=trace if weight == weights[-1] else None)
             song = result["song"]
             error, tv = measure(result, cents, voice)
             miss = valve_miss(result, voice)
@@ -260,6 +285,9 @@ def main():
                                            + args.smooth * tv + args.valve_weight * miss)
         if not rig_mode:
             loss = loss / float(np.sum(weights))
+        if trace:
+            dump_step(args.dump_dir, step, cents, voice, result, trace, rigs, twin, float(loss),
+                      float(error[voice].abs().mean()))
         optimizer.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step(); schedule.step()
         if step == 1 or step % 10 == 0:

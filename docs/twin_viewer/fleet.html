@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ツイン学習ビューア</title>
+<style>
+  :root {
+    --bg: #17191d; --panel: #1f2227; --line: #343840; --text: #e8e6e1; --muted: #9aa0a8; --accent: #f0b429;
+    --target: #8a9099; --played: #4fa3ff; --heard: #ff9a3c; --air: #2fd16a; --shut: #ff4a3a; --good: #2fd16a; --bad: #ff4a3a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", sans-serif; font-size: 13px; }
+  main { display: grid; grid-template-columns: 290px 1fr 400px; height: 100vh; }
+  aside { background: var(--panel); overflow-y: auto; padding: 14px 14px 24px; }
+  aside.left { border-right: 1px solid var(--line); }
+  aside.right { border-left: 1px solid var(--line); }
+  h1 { font-size: 15px; margin: 0 0 2px; }
+  h2 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 18px 0 6px; letter-spacing: .05em; }
+  .sub { color: var(--muted); font-size: 11px; line-height: 1.5; }
+  select, button { background: #2a2e35; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 10px; font: inherit; cursor: pointer; }
+  select { width: 100%; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chips button { padding: 3px 7px; font-size: 12px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .stat { background: #262a30; border-radius: 6px; padding: 6px 8px; }
+  .stat b { display: block; font-size: 16px; }
+  .stat span { color: var(--muted); font-size: 11px; }
+  #cells { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+  #cells div { aspect-ratio: 2.4; border-radius: 3px; cursor: pointer; font-size: 10px; display: flex;
+    align-items: center; justify-content: center; color: #111; font-weight: 700; }
+  #cells div.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 3px 0; border-bottom: 1px solid #2b2f36; }
+  td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .center { position: relative; overflow: hidden; }
+  #view { position: absolute; inset: 0; }
+  .topbar { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; gap: 6px; align-items: center; pointer-events: none; }
+  .topbar > * { pointer-events: auto; }
+  .topbar .title { margin-left: 8px; color: var(--muted); pointer-events: none; }
+  .transport { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; gap: 8px; align-items: center;
+    background: rgba(23, 25, 29, .85); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  .transport input[type=range] { flex: 1; accent-color: var(--accent); }
+  .transport .time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 92px; text-align: right; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  .tag { position: absolute; transform: translate(-50%, -100%); font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    background: rgba(23, 25, 29, .8); border: 1px solid var(--line); white-space: nowrap; }
+  .tag.sel { border-color: var(--accent); color: var(--accent); }
+  canvas.chart { width: 100%; display: block; background: #1a1d21; border-radius: 6px; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 11px; margin: 4px 0; }
+  .legend i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .note { color: var(--muted); font-size: 11px; margin-top: 10px; line-height: 1.6; }
+  @media (max-width: 1000px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; height: auto; }
+    .center { order: -1; height: 60vh; }
+    aside.left, aside.right { border: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <aside class="left">
+    <h1>ツイン学習ビューア</h1>
+    <div class="sub">学習中に保存した回の、32 台ぶんの演奏を再生します。各台はツインの値を少しずつ変えた機体で、それぞれ違う曲を吹いています。</div>
+    <div class="sub" style="margin-top:4px"><a href="index.html" style="color:var(--accent)">1 台の模型を見る</a></div>
+    <h2>学習の記録</h2>
+    <select id="run"></select>
+    <h2>学習の進み（1 回ごとの誤差）</h2>
+    <canvas id="curve" class="chart" height="120"></canvas>
+    <h2>保存した回</h2>
+    <div id="steps" class="chips"></div>
+    <h2>この回の 32 台</h2>
+    <div class="stats">
+      <div class="stat"><b id="sMae">–</b><span>誤差 cent</span></div>
+      <div class="stat"><b id="sHit">–</b><span>±25 cent 以内</span></div>
+      <div class="stat"><b id="sLoss">–</b><span>損失</span></div>
+    </div>
+    <div style="height:8px"></div>
+    <div id="cells"></div>
+    <div class="sub" style="margin-top:4px">色は ±25 cent 以内の割合（緑ほど良い）。押すとその台を選びます。</div>
+    <h2 id="rigTitle">選んだ機体</h2>
+    <table id="params"></table>
+  </aside>
+
+  <section class="center">
+    <div id="view"></div>
+    <div id="labels"></div>
+    <div class="topbar">
+      <button id="modeAll" aria-pressed="true">32 台</button>
+      <button id="modeOne" aria-pressed="false">1 台</button>
+      <span class="title" id="where"></span>
+    </div>
+    <div class="transport">
+      <button id="play">▶ 再生</button>
+      <input id="seek" type="range" min="0" max="399" value="0" step="1">
+      <select id="speed" style="width:auto">
+        <option value="0.25">0.25 倍</option><option value="0.5">0.5 倍</option>
+        <option value="1" selected>1 倍</option><option value="2">2 倍</option>
+      </select>
+      <span class="time" id="time">0.00 / 0.00 s</span>
+    </div>
+  </section>
+
+  <aside class="right">
+    <h2 style="margin-top:0">音</h2>
+    <div class="row">
+      <button id="sound" aria-pressed="false">🔇 音 オフ</button>
+      <select id="voiceOf" style="width:auto">
+        <option value="played">出た音</option><option value="target">目標の音</option>
+      </select>
+    </div>
+    <div class="note" style="margin-top:6px">選んだ 1 台の音を、出た音程（または目標）から合成して鳴らします。</div>
+    <h2>音程（cent、A4 = 0）</h2>
+    <div class="legend"><span><i style="background:var(--target)"></i>目標</span><span><i style="background:var(--played)"></i>出た音</span><span><i style="background:var(--heard)"></i>聞こえた音</span></div>
+    <canvas id="gPitch" class="chart" height="230"></canvas>
+    <h2>PWM（アクチュエータへの指令）</h2>
+    <canvas id="gPwm" class="chart" height="90"></canvas>
+    <h2>台車の位置と弁</h2>
+    <div class="legend"><span><i style="background:#c9ccd1"></i>位置（0 = 原点、1 = 押し込み）</span><span><i style="background:var(--air)"></i>弁 開</span><span><i style="background:#4a4f58"></i>楽譜で鳴らす所</span></div>
+    <canvas id="gPos" class="chart" height="110"></canvas>
+    <div class="note">学習の 1 回は、32 台にそれぞれ 4 秒の曲を同時に吹かせ、その誤差で NN の重みを少し直します。ここに出しているのは、その回の 32 台の演奏そのもの（シミュレーター上の記録）です。</div>
+  </aside>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="rig.js"></script>
+<script>
+const R = window.YamabikoRig;
+const N = 32, COLS = 4, DX = 195, DZ = 92;
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+// ---------- the 32 rigs (each part one geometry drawn 32 times) ---------------------------------------
+const view = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x17191d);
+const camera = new THREE.PerspectiveCamera(30, 1, 5, 6000);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3028, .75));
+const sun = new THREE.DirectionalLight(0xffffff, .45); sun.position.set(-1, 2, 1.5); scene.add(sun);
+
+const origin = (i) => [(i % COLS) * DX, 0, Math.floor(i / COLS) * DZ];
+const parts = R.build();
+const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const fixedMesh = new THREE.InstancedMesh(parts.fixed.geometry(), mat, N);
+const slideMesh = new THREE.InstancedMesh(parts.slide.geometry(), mat, N);
+const rotorMesh = new THREE.InstancedMesh(parts.rotor.geometry([.5, 0, .5]), mat, N);
+const ledGeo = new THREE.BoxGeometry(1.6, 1, 1.6);
+const ledShut = new THREE.InstancedMesh(ledGeo, new THREE.MeshBasicMaterial(), N);
+const ledOpen = new THREE.InstancedMesh(ledGeo, new THREE.MeshBasicMaterial(), N);
+const M = new THREE.Matrix4(), Q = new THREE.Matrix4();
+for (let i = 0; i < N; i++) {
+  const [x, , z] = origin(i);
+  fixedMesh.setMatrixAt(i, M.makeTranslation(x, 0, z));
+  ledShut.setMatrixAt(i, M.makeTranslation(x + R.LEDS.shut, R.LEDS.y, z + R.LEDS.z));
+  ledOpen.setMatrixAt(i, M.makeTranslation(x + R.LEDS.open, R.LEDS.y, z + R.LEDS.z));
+}
+scene.add(fixedMesh, slideMesh, rotorMesh, ledShut, ledOpen);
+// desk under each row, and a highlight under the chosen rig
+const deskMat = new THREE.MeshLambertMaterial({ color: 0x5f4430 });
+for (let r = 0; r < N / COLS; r++) {
+  const desk = new THREE.Mesh(new THREE.BoxGeometry(COLS * DX - 14, 2, 74), deskMat);
+  desk.position.set((COLS - 1) * DX / 2 + 72, -3, r * DZ - 16);
+  scene.add(desk);
+}
+const mark = new THREE.Mesh(new THREE.BoxGeometry(186, 1, 76),
+  new THREE.MeshBasicMaterial({ color: 0xf0b429, transparent: true, opacity: .22 }));
+scene.add(mark);
+
+const CENTER = new THREE.Vector3((COLS - 1) * DX / 2 + 75, 0, (N / COLS - 1) * DZ / 2 - 10);
+const fleetView = { pos: new THREE.Vector3(CENTER.x, 760, CENTER.z + 700), target: CENTER.clone().add(new THREE.Vector3(0, 0, 30)) };
+let camGoal = null;
+function goFleet() { camGoal = { pos: fleetView.pos.clone(), target: fleetView.target.clone() }; }
+function goOne(i) {
+  const [x, , z] = origin(i);
+  const t = new THREE.Vector3(x + 74, 4, z - 10);
+  // far enough that the whole rig (about 190 cm with the fan) fits the width of the view
+  const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect);
+  const d = Math.max(110 / Math.tan(half), 200);
+  camGoal = { pos: t.clone().add(new THREE.Vector3(0, .5 * d, .87 * d)), target: t };
+}
+camera.position.copy(fleetView.pos); controls.target.copy(fleetView.target); controls.update();
+
+// labels over the rigs (number and this step's error)
+const labelBox = $("labels");
+const tags = Array.from({ length: N }, (_, i) => {
+  const d = document.createElement("div"); d.className = "tag"; labelBox.appendChild(d); return d;
+});
+
+// ---------- state ------------------------------------------------------------------------------------
+const S = { runs: [], run: null, index: null, cache: {}, data: null, step: null, sel: 0, t: 0, playing: false,
+  speed: 1, mode: "all" };
+
+async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new Error(url); return r.json(); }
+
+async function loadRuns() {
+  S.runs = await getJSON("data/runs.json");
+  $("run").innerHTML = S.runs.map(r => `<option value="${r.name}">${r.title || r.name}</option>`).join("");
+  await loadRun(S.runs[S.runs.length - 1].name);
+  $("run").value = S.run;
+}
+async function loadRun(name) {
+  S.run = name; S.cache = {};
+  S.index = await getJSON(`data/${name}/index.json`);
+  $("steps").innerHTML = S.index.saved.map(s => `<button data-step="${s.step}">${s.step} 回目</button>`).join("");
+  $("steps").querySelectorAll("button").forEach(b => b.onclick = () => loadStep(+b.dataset.step));
+  await loadStep(S.index.saved[0].step);
+}
+async function loadStep(step) {
+  const meta = S.index.saved.find(s => s.step === step);
+  S.cache[step] = S.cache[step] || await getJSON(`data/${S.run}/${meta.file}`);
+  S.data = S.cache[step]; S.step = step;
+  for (const r of S.data.rigs) for (const k of ["voice", "air", "sounding", "valid"]) if (typeof r[k] === "string")
+    r[k] = Uint8Array.from(r[k], c => c === "1");
+  $("steps").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", +b.dataset.step === step));
+  $("seek").max = S.data.steps - 1;
+  $("sMae").textContent = S.data.mae.toFixed(1);
+  $("sHit").textContent = Math.round(100 * meta.hit) + "%";
+  $("sLoss").textContent = S.data.loss.toFixed(3);
+  drawCells(); drawCurve(); selectRig(S.sel);
+}
+
+// ---------- left: the training ---------------------------------------------------------------------
+function hitColor(h) {
+  if (h == null) return "#444";
+  const a = new THREE.Color(css("--bad")), b = new THREE.Color(css("--good"));
+  return "#" + a.lerp(b, Math.min(Math.max((h - .3) / .6, 0), 1)).getHexString();
+}
+function drawCells() {
+  $("cells").innerHTML = S.data.rigs.map((r, i) =>
+    `<div data-i="${i}" style="background:${hitColor(r.hit)}" title="#${i + 1} 誤差 ${r.mae} cent">${i + 1}</div>`).join("");
+  $("cells").querySelectorAll("div").forEach(d => d.onclick = () => selectRig(+d.dataset.i));
+}
+function setupCanvas(c) {
+  const dpr = Math.min(devicePixelRatio, 2), w = c.clientWidth, h = +c.getAttribute("height");
+  c.width = w * dpr; c.height = h * dpr; c.style.height = h + "px";
+  const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); return [g, w, h];
+}
+function drawCurve() {
+  const c = $("curve"), [g, w, h] = setupCanvas(c);
+  const pts = S.index.curve.length ? S.index.curve : S.index.saved;
+  const maxStep = Math.max(...pts.map(p => p.step), ...S.index.saved.map(s => s.step));
+  const maes = pts.map(p => p.mae).concat(S.index.saved.map(s => s.mae));
+  const lo = Math.min(...maes) * .9, hi = Math.max(...maes) * 1.05;
+  const X = s => 30 + (w - 38) * s / maxStep, Y = m => 8 + (h - 26) * (1 - (m - lo) / (hi - lo));
+  g.strokeStyle = "#2b2f36"; g.fillStyle = css("--muted"); g.font = "10px sans-serif";
+  for (const m of [lo, (lo + hi) / 2, hi]) { g.beginPath(); g.moveTo(30, Y(m)); g.lineTo(w - 8, Y(m)); g.stroke(); g.fillText(Math.round(m), 4, Y(m) + 3); }
+  g.fillText("回", w - 18, h - 4); g.fillText("0", 28, h - 4); g.fillText(maxStep, w - 40, h - 4);
+  g.strokeStyle = "#6b7280"; g.lineWidth = 1; g.beginPath();
+  pts.forEach((p, k) => k ? g.lineTo(X(p.step), Y(p.mae)) : g.moveTo(X(p.step), Y(p.mae))); g.stroke();
+  for (const s of S.index.saved) {
+    g.fillStyle = s.step === S.step ? css("--accent") : "#c9ccd1";
+    g.beginPath(); g.arc(X(s.step), Y(s.mae), s.step === S.step ? 4.5 : 3, 0, 7); g.fill();
+  }
+  c.onclick = (e) => {
+    const x = e.offsetX; let best = null;
+    for (const s of S.index.saved) if (!best || Math.abs(X(s.step) - x) < Math.abs(X(best.step) - x)) best = s;
+    if (best) loadStep(best.step);
+  };
+}
+const PARAM_NAMES = {
+  torque_gain: ["モーターの力", "x"], coulomb_friction: ["静止摩擦", "x"], viscous_friction: ["粘性摩擦", "x"],
+  max_velocity_strokes_s: ["最高速度", "x"], torque_tau_s: ["力の立ち上がり時間", "x"], deadband: ["不感帯（PWM）", "+"],
+  flute_offset_cents: ["音程のずれ（cent）", "+"], tube_offset_m: ["管の長さのずれ（mm）", "+"], hearing_delay_steps: ["聞こえの遅れ（10 ms）", "+"],
+};
+function selectRig(i) {
+  S.sel = i;
+  const r = S.data.rigs[i];
+  $("rigTitle").textContent = `選んだ機体 #${i + 1}（ツインとの違い）`;
+  const rows = Object.entries(PARAM_NAMES).filter(([k]) => k in r.params).map(([k, [label, kind]]) => {
+    const v = r.params[k];
+    return `<tr><td>${label}</td><td>${kind === "x" ? "×" + v.toFixed(2) : (v >= 0 ? "+" : "") + (Math.abs(v) < 1 ? v.toFixed(3) : v.toFixed(1))}</td></tr>`;
+  });
+  rows.push(`<tr><td>この曲の誤差</td><td>${r.mae} cent</td></tr>`, `<tr><td>±25 cent 以内</td><td>${Math.round(100 * r.hit)}%</td></tr>`);
+  $("params").innerHTML = rows.join("");
+  $("cells").querySelectorAll("div").forEach(d => d.classList.toggle("sel", +d.dataset.i === i));
+  const [x, , z] = origin(i); mark.position.set(x + 74, -1.6, z - 16);
+  $("where").textContent = `#${i + 1} を選択中`;
+  if (S.mode === "one") goOne(i);
+  drawGraphs();
+}
+
+// ---------- right: the chosen rig's graphs ---------------------------------------------------------
+const graphs = {};
+function drawGraphs() {
+  const r = S.data.rigs[S.sel], T = S.data.steps;
+  // pitch
+  {
+    const c = $("gPitch"), [g, w, h] = setupCanvas(c);
+    const vals = r.cents.filter((_, k) => r.voice[k]).concat(r.pitch.filter((_, k) => r.sounding[k]));
+    const lo = Math.min(...vals) - 60, hi = Math.max(...vals) + 60;
+    const X = k => 36 + (w - 42) * k / (T - 1), Y = v => 6 + (h - 22) * (1 - (v - lo) / (hi - lo));
+    g.font = "10px sans-serif"; g.fillStyle = css("--muted"); g.strokeStyle = "#2b2f36";
+    for (let v = Math.ceil(lo / 100) * 100; v <= hi; v += 100) { g.beginPath(); g.moveTo(36, Y(v)); g.lineTo(w - 6, Y(v)); g.stroke(); g.fillText(v, 2, Y(v) + 3); }
+    for (let s = 0; s <= T / 100; s++) g.fillText(s + "s", X(s * 100) - 6, h - 3);
+    const seg = (arr, on, color, width) => {
+      g.strokeStyle = color; g.lineWidth = width; g.beginPath(); let pen = false;
+      for (let k = 0; k < T; k++) { if (!on[k]) { pen = false; continue; } pen ? g.lineTo(X(k), Y(arr[k])) : g.moveTo(X(k), Y(arr[k])); pen = true; }
+      g.stroke();
+    };
+    seg(r.cents, r.voice, css("--target"), 5);
+    g.fillStyle = css("--heard");
+    for (let k = 0; k < T; k++) if (r.valid[k]) g.fillRect(X(k) - 1, Y(r.heard[k]) - 1, 2, 2);
+    seg(r.pitch, r.sounding, css("--played"), 1.6);
+    graphs.pitch = { c, img: g.getImageData(0, 0, c.width, c.height), X };
+  }
+  // pwm
+  {
+    const c = $("gPwm"), [g, w, h] = setupCanvas(c);
+    const X = k => 36 + (w - 42) * k / (T - 1), Y = v => 6 + (h - 12) * (1 - (v + 1) / 2);
+    g.font = "10px sans-serif"; g.fillStyle = css("--muted"); g.strokeStyle = "#2b2f36";
+    for (const v of [-1, 0, 1]) { g.beginPath(); g.moveTo(36, Y(v)); g.lineTo(w - 6, Y(v)); g.stroke(); g.fillText(v, 14, Y(v) + 3); }
+    g.strokeStyle = "#c792ea"; g.lineWidth = 1.2; g.beginPath();
+    r.pwm.forEach((v, k) => k ? g.lineTo(X(k), Y(v / 1000)) : g.moveTo(X(k), Y(v / 1000))); g.stroke();
+    graphs.pwm = { c, img: g.getImageData(0, 0, c.width, c.height), X };
+  }
+  // position, valve, score
+  {
+    const c = $("gPos"), [g, w, h] = setupCanvas(c);
+    const X = k => 36 + (w - 42) * k / (T - 1), Y = v => 6 + (h - 34) * (1 - v);
+    g.font = "10px sans-serif"; g.fillStyle = css("--muted"); g.strokeStyle = "#2b2f36";
+    for (const v of [0, 1]) { g.beginPath(); g.moveTo(36, Y(v)); g.lineTo(w - 6, Y(v)); g.stroke(); g.fillText(v, 18, Y(v) + 3); }
+    for (let k = 0; k < T; k++) {
+      if (r.voice[k]) { g.fillStyle = "#4a4f58"; g.fillRect(X(k), h - 24, (w - 42) / T + .5, 8); }
+      if (r.air[k]) { g.fillStyle = css("--air"); g.fillRect(X(k), h - 13, (w - 42) / T + .5, 8); }
+    }
+    g.fillStyle = css("--muted"); g.fillText("楽譜", 4, h - 17); g.fillText("弁", 12, h - 6);
+    g.strokeStyle = "#c9ccd1"; g.lineWidth = 1.4; g.beginPath();
+    r.position.forEach((v, k) => k ? g.lineTo(X(k), Y(v / 1000)) : g.moveTo(X(k), Y(v / 1000))); g.stroke();
+    graphs.pos = { c, img: g.getImageData(0, 0, c.width, c.height), X };
+  }
+}
+function drawPlayheads() {
+  for (const gr of Object.values(graphs)) {
+    const g = gr.c.getContext("2d");
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.putImageData(gr.img, 0, 0); g.restore();
+    const x = gr.X(S.t);
+    g.strokeStyle = css("--accent"); g.lineWidth = 1; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, gr.c.height); g.stroke();
+  }
+}
+
+// ---------- sound (WebAudio, the chosen rig) -------------------------------------------------------
+const audio = { ctx: null, on: false };
+function soundOn(on) {
+  audio.on = on;
+  $("sound").setAttribute("aria-pressed", on); $("sound").textContent = on ? "🔊 音 オン" : "🔇 音 オフ";
+  if (on && !audio.ctx) {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const gain = ctx.createGain(); gain.gain.value = 0;
+    const tone = ctx.createOscillator(); tone.type = "triangle";
+    const over = ctx.createOscillator(); over.type = "sine";
+    const overGain = ctx.createGain(); overGain.gain.value = .25;
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3500;
+    tone.connect(gain); over.connect(overGain).connect(gain); gain.connect(lp).connect(ctx.destination);
+    tone.start(); over.start();
+    Object.assign(audio, { ctx, gain, tone, over });
+  }
+  if (audio.ctx) on ? audio.ctx.resume() : audio.gain.gain.setTargetAtTime(0, audio.ctx.currentTime, .02);
+}
+function updateSound(k) {
+  if (!audio.ctx || !audio.on) return;
+  const r = S.data.rigs[S.sel], target = $("voiceOf").value === "target";
+  const sounding = S.playing && (target ? r.voice[k] : r.sounding[k]);
+  const cents = target ? r.cents[k] : r.pitch[k];
+  const hz = 440 * Math.pow(2, cents / 1200), now = audio.ctx.currentTime;
+  audio.tone.frequency.setTargetAtTime(hz, now, .005);
+  audio.over.frequency.setTargetAtTime(hz * 2, now, .005);
+  audio.gain.gain.setTargetAtTime(sounding ? .12 : 0, now, .01);
+}
+
+// ---------- every frame ------------------------------------------------------------------------------
+let last = performance.now(), fanAngle = 0;
+const dim = { shut: new THREE.Color(0x4a1210), shutOn: new THREE.Color(0xff1a10),
+  open: new THREE.Color(0x103f1a), openOn: new THREE.Color(0x14e03a) };
+const v3 = new THREE.Vector3();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, .1); last = now;
+  if (S.data) {
+    if (S.playing) {
+      S.t += dt / S.data.dt * S.speed;
+      if (S.t >= S.data.steps - 1) { S.t = S.data.steps - 1; setPlaying(false); }
+      $("seek").value = Math.floor(S.t);
+    }
+    const k = Math.floor(S.t);
+    fanAngle -= dt * (S.playing ? 14 : 2);
+    for (let i = 0; i < N; i++) {
+      const r = S.data.rigs[i], [x, , z] = origin(i);
+      slideMesh.setMatrixAt(i, M.makeTranslation(x + R.slideX(r.position[k] / 1000), 0, z));
+      rotorMesh.setMatrixAt(i, M.makeTranslation(x + R.FAN[0], 0, z + R.FAN[2]).multiply(Q.makeRotationY(fanAngle + i)));
+      ledShut.setColorAt(i, r.air[k] ? dim.shut : dim.shutOn);
+      ledOpen.setColorAt(i, r.air[k] ? dim.openOn : dim.open);
+    }
+    for (const m of [slideMesh, rotorMesh]) m.instanceMatrix.needsUpdate = true;
+    for (const m of [ledShut, ledOpen]) m.instanceColor.needsUpdate = true;
+    $("time").textContent = `${(S.t * S.data.dt).toFixed(2)} / ${((S.data.steps - 1) * S.data.dt).toFixed(2)} s`;
+    drawPlayheads(); updateSound(k);
+    // labels
+    const w = view.clientWidth, h = view.clientHeight;
+    for (let i = 0; i < N; i++) {
+      const [x, , z] = origin(i); v3.set(x + 74, 28, z - 10).project(camera);
+      const on = v3.z < 1 && Math.abs(v3.x) < 1.1 && Math.abs(v3.y) < 1.1;
+      tags[i].style.display = on ? "" : "none";
+      if (!on) continue;
+      tags[i].style.left = `${(v3.x + 1) / 2 * w}px`; tags[i].style.top = `${(1 - v3.y) / 2 * h}px`;
+      const r = S.data.rigs[i], err = r.sounding[k] && r.voice[k] ? Math.round(r.pitch[k] - r.cents[k]) : null;
+      tags[i].textContent = `#${i + 1}` + (err == null ? "" : `  ${err >= 0 ? "+" : ""}${err}`);
+      tags[i].classList.toggle("sel", i === S.sel);
+    }
+  }
+  if (camGoal) {
+    camera.position.lerp(camGoal.pos, .12); controls.target.lerp(camGoal.target, .12);
+    if (camera.position.distanceTo(camGoal.pos) < 1) camGoal = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (S.data) { drawCurve(); drawGraphs(); }
+}
+addEventListener("resize", resize);
+
+// ---------- controls ---------------------------------------------------------------------------------
+function setPlaying(on) {
+  if (on && S.t >= S.data.steps - 1) S.t = 0;
+  S.playing = on; $("play").textContent = on ? "❚❚ 停止" : "▶ 再生";
+}
+$("play").onclick = () => setPlaying(!S.playing);
+$("seek").oninput = (e) => { S.t = +e.target.value; };
+$("speed").onchange = (e) => { S.speed = +e.target.value; };
+$("sound").onclick = () => soundOn(!audio.on);
+$("run").onchange = (e) => loadRun(e.target.value);
+$("modeAll").onclick = () => { S.mode = "all"; $("modeAll").setAttribute("aria-pressed", true); $("modeOne").setAttribute("aria-pressed", false); goFleet(); };
+$("modeOne").onclick = () => { S.mode = "one"; $("modeOne").setAttribute("aria-pressed", true); $("modeAll").setAttribute("aria-pressed", false); goOne(S.sel); };
+addEventListener("keydown", (e) => { if (e.code === "Space" && e.target.tagName !== "SELECT") { e.preventDefault(); setPlaying(!S.playing); } });
+// click a rig in the scene to choose it
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let down = null;
+renderer.domElement.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener("pointerup", (e) => {
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4 || !S.data) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObjects([fixedMesh, slideMesh])[0];
+  if (hit && hit.instanceId != null) selectRig(hit.instanceId);
+});
+
+resize();
+loadRuns().catch(err => { $("where").textContent = "データを読めませんでした: " + err.message; });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

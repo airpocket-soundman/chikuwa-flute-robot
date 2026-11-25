@@ -181,10 +181,12 @@ class NNTwinPerformer(nn.Module):
 
     # ----- closed loop on the simulator ------------------------------------------------------------
     def perform(self, plant, cents, voice, parameters, twin, generator=None, start_position=None, song=None,
-                rig=None, rig_write=True):
+                rig=None, rig_write=True, trace=None):
         """Play ``cents``/``voice`` (B, T) on the simulated rigs ``parameters``; ``twin`` is the fitted rig
         whose motor model gives the open-loop guess.  Returns pitch_cents (emitted) and pwm, (B, T), and the
-        song memory after the play (pass it back as ``song`` to play the same song again)."""
+        song memory after the play (pass it back as ``song`` to play the same song again).  ``trace``: a dict
+        that gets the plunger position, the air (valve), whether the flute sounded and what was heard, (B, T),
+        for the twin viewer (docs/twin_viewer)."""
         batch, steps = cents.shape; device, dtype = cents.device, cents.dtype
         listener = AudibleListener(plant.config)
         cfg = self.config
@@ -243,6 +245,14 @@ class NNTwinPerformer(nn.Module):
                 rec_err.append(torch.where(valid, normalize(heard) - normalize(cents[:, t]), torch.zeros_like(heard)))
                 rec_valid.append(valid.to(dtype))
             played.append(emitted); pwms.append(pwm)
+            if trace is not None:
+                for k, v in (("position", state.position), ("air", valve_now), ("sounding", sounding),
+                             ("heard", heard), ("valid", valid)):
+                    trace.setdefault(k, []).append(v.detach())
+        if trace is not None:
+            for k in list(trace):
+                if isinstance(trace[k], list):
+                    trace[k] = torch.stack(trace[k], 1)
         if cfg.prev_play:                                 # this play's record, for the next play (data, no grad)
             song = {"err": torch.stack(rec_err, 1).detach(), "valid": torch.stack(rec_valid, 1),
                     "pwm": torch.stack(pwms, 1).detach(), "has": torch.ones(batch, device=device, dtype=dtype)}
