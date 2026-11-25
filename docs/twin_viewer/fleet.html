@@ -163,6 +163,27 @@ const GEO = {
             rotor: parts.rotor.downsample(2).geometry([.25, 0, .25]) },
 };
 const fleet = { group: null, sets: {}, ledShut: null, ledOpen: null };
+// the desk's top as the voxel model's: 1 cm blocks with thin gaps, a shade of wood per 4 x 4 cm tile
+function deskTexture() {
+  const cells = 32, px = 8, c = document.createElement("canvas");
+  c.width = c.height = cells * px;
+  const g = c.getContext("2d");
+  const woods = ["#6b4a2f", "#664629", "#70503a", "#5f4128", "#6a4b33"];
+  g.fillStyle = "#3a2a1c"; g.fillRect(0, 0, c.width, c.height);              // the gaps between blocks
+  let seed = 7;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let x = 0; x < cells; x++) for (let y = 0; y < cells; y++) {
+    const base = new THREE.Color(woods[((Math.floor(x / 4) * 7 + Math.floor(y / 4) * 13) % 5 + 5) % 5]);
+    base.multiplyScalar(.95 + .1 * rand());
+    g.fillStyle = "#" + base.getHexString();
+    g.fillRect(x * px, y * px, px - 1, px - 1);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.NearestFilter; t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+const DESK_TEX = deskTexture();
 const mark = new THREE.Mesh(new THREE.BoxGeometry(186, 1, 76),
   new THREE.MeshBasicMaterial({ color: 0xf0b429, transparent: true, opacity: .22 }));
 scene.add(mark);
@@ -195,9 +216,12 @@ function buildFleet(n) {
     fleet.ledOpen.setMatrixAt(i, M.makeTranslation(x + R.LEDS.open, R.LEDS.y, z + R.LEDS.z));
   }
   group.add(fleet.ledShut, fleet.ledOpen);
-  const deskMat = new THREE.MeshLambertMaterial({ color: 0x5f4430 });
+  const deskW = COLS * DX - 14, deskD = 74;
+  const top = DESK_TEX.clone(); top.needsUpdate = true; top.repeat.set(deskW / 32, deskD / 32);
+  const side = new THREE.MeshLambertMaterial({ color: 0x4e3826 });
+  const deskMat = [side, side, new THREE.MeshLambertMaterial({ map: top }), side, side, side];
   for (let r = 0; r < N / COLS; r++) {
-    const desk = new THREE.Mesh(new THREE.BoxGeometry(COLS * DX - 14, 2, 74), deskMat);
+    const desk = new THREE.Mesh(new THREE.BoxGeometry(deskW, 2, deskD), deskMat);
     desk.position.set((COLS - 1) * DX / 2 + 72, -3, r * DZ - 16);
     group.add(desk);
   }
