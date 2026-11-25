@@ -146,15 +146,15 @@ clamp(118, 130, 12, -5, 5);         // the actuator's front block
 
 // slide whistle: white mouthpiece, blue tube, white collar at its end
 fixed.cylX(10, 22, 7.5, 0, 2.6, C.white, -1, .03);
-fixed.box(4, 10, 6, 10, -2, 2, C.white, .03);                 // the mouthpiece's flat lip
+fixed.box(9, 12, 5, 10, -3, 3, C.white, .03);                 // the mouthpiece's end, fed by the valve box
 fixed.cylX(22, 64, 7.5, 0, 2.6, C.blue, -1, .05);
+fixed.box(14, 18, 9, 10, -1, 1, C.black, .02);                // the window on the mouthpiece's top
 fixed.cylX(64, 67, 7.5, 0, 2.9, C.white, -1, .03);
 // tube holder's saddle around the tube (its top half)
 fixed.box(31, 41, 10, 12, -4, 4, C.white, .03);
 
-// the air path: valve box -> elbow -> mouthpiece
+// the air path: valve box -> mouthpiece
 fixed.box(-1, 9, 6, 15, -8, 1, C.white, .03);                // valve box
-fixed.box(-1, 5, 6, 9, 1, 4, C.white, .03);                   // elbow down to the lip
 
 // centrifugal blower behind the valve box
 fixed.cylY(0, 5, 22, -26, 15, C.white, -1, .03);              // round white base
