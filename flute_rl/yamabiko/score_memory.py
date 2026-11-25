@@ -190,6 +190,11 @@ class MemoryRuntime:
 
     def recall(self, step):
         """(target cents, voice probability) of the instant ``step`` (10 ms) of the song heard."""
+        return self.read(step)[:2]
+
+    def read(self, step):
+        """(target cents, voice probability, mass): ``mass`` is how much was written around ``step`` (the last
+        row of W read back), about the same inside the listening and near 0 past its end (step8's end)."""
         r = self.W @ position_code(np.array([step]), self.freqs)[0]
         g = self.G / max(self.A, 1e-3)
         if self.beta is not None:
@@ -197,7 +202,8 @@ class MemoryRuntime:
             g = np.r_[g, (self.hi - mass) / self.beta, -(self.lo - mass) / self.beta]
         out = self._mlp("dec", np.concatenate([r, g]).astype(np.float32))
         mid, half = (self.low + self.high) / 2, (self.high - self.low) / 2
-        return float(mid + half * out[0]), float(1 / (1 + np.exp(-np.clip(out[1], -50.0, 50.0))))
+        return (float(mid + half * out[0]), float(1 / (1 + np.exp(-np.clip(out[1], -50.0, 50.0)))),
+                float(r[-1]))
 
 
 def score_from_recording(pcm, ear, memory_arrays, lead_steps: int = 60, tail_steps: int = 60):

@@ -33,6 +33,8 @@ def load_profiles(root: pathlib.Path | str = MODELS) -> dict:
             profile["ear_runtime_path"] = str(path.parent / profile["ear_runtime"])
         if profile.get("memory_runtime"):                  # step6: the score kept in weights
             profile["memory_runtime_path"] = str(path.parent / profile["memory_runtime"])
+        if profile.get("heads"):                           # step8: the conductor and end networks
+            profile["heads_path"] = str(path.parent / profile["heads"])
         profile.setdefault("whistle", {})
         profile.setdefault("ear", "yin")
         out[profile["name"]] = profile

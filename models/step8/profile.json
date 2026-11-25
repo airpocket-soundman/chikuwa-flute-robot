@@ -1,0 +1,22 @@
+{
+  "name": "step8",
+  "title": "step8: 耳・記憶・演奏・弁と、ボタンで切り替える小さな NN と終わりの判定をつないだ 1 つの実行部（8a）",
+  "ear": "nn",
+  "ear_runtime": "ear_06_runtime.npz",
+  "doc": "docs/step8.md",
+  "runtime": "nn_f80_t7_tw05_runtime.npz",
+  "valve_runtime": "valve_t7_tw05_runtime.npz",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  },
+  "common_ear": true,
+  "memory_runtime": "mem_06_runtime.npz",
+  "heads": "step8_heads.npz"
+}
