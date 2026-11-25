@@ -26,7 +26,6 @@
 </head>
 <body>
 <div id="view"></div>
-<canvas id="sprite" style="position:fixed;inset:0;display:none;cursor:grab"></canvas>
 <div id="labels"></div>
 <header>
   <h1>やまびこ1号 — ボクセル模型</h1>
@@ -43,7 +42,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="rig.js?v=4"></script>
-<script src="sprite_stack.js?v=3"></script>
+<script src="sprite_stack.js?v=4"></script>
 <script>
 const R = window.YamabikoRig, { C, Voxels, STROKE, SLIDE_HOME } = R;
 const built = R.build();
@@ -140,46 +139,17 @@ wire([[16, 12, -36], [40, 4, -30], [70, 6, -28], [82, 9, -22]], 0x3d6fe0);
 wire([[7, 19, -16], [16, 10, -16], [50, 1, -16], [86, 9, -22]], 0xe07b2f);
 wire([[128, 9, 3], [116, 13, 4], [104, 10, 0], [96, 9, -14]], 0xd23b2f);
 
-// ---------- sprite stacking: the same model as piles of slices on a 2D canvas ---------------------------
-let MODE = "voxel", STACKS = null;
-const SC = document.getElementById("sprite"), SV = new SpriteStack.View(SC);
+// ---------- sprite stacking: the same model as piles of sliced pictures, drawn by the same camera ----------
+let MODE = "voxel", SPRITE = null;
 function setMode(m) {
   MODE = m;
-  if (m === "sprite" && !STACKS) STACKS = {
-    fixed: SpriteStack.build([{ voxels: desk, unit: 1 }, { voxels: built.fixed, unit: 1 }, { voxels: wireVoxels, unit: 1 }]),
-    slide: SpriteStack.build([{ voxels: built.slide, unit: 1 }]),
-    rotor: SpriteStack.build([{ voxels: built.rotor, unit: 1 }]),
-  };
-  renderer.domElement.style.display = m === "voxel" ? "" : "none";
-  controls.enabled = m === "voxel"; spriteControls.enabled = m === "sprite";
-  SC.style.display = m === "sprite" ? "" : "none";
+  if (m === "sprite" && !SPRITE) SPRITE = SpriteStack.rigScene({
+    fixedSets: [{ voxels: desk, unit: 1 }, { voxels: built.fixed, unit: 1 }, { voxels: wireVoxels, unit: 1 }],
+    slide: built.slide, rotor: built.rotor, FAN: R.FAN, LEDS: R.LEDS, background: 0x1b1d22,
+  });
   document.getElementById("modeVoxel").setAttribute("aria-pressed", m === "voxel");
   document.getElementById("modeSprite").setAttribute("aria-pressed", m === "sprite");
 }
-function drawSprites() {
-  spriteControls.update(); SV.follow(camera, controls.target);
-  SV.clear("#1b1d22");
-  const items = [];
-  for (const [name, q] of Object.entries(STACKS)) for (let i = 0; i < q.layers.length; i++) items.push([q.y0 + i * SpriteStack.RES, name, i]);
-  items.sort((a, b) => a[0] - b[0]);
-  for (const [, name, i] of items) {
-    if (name === "fixed") SV.layer(STACKS.fixed, i);
-    else if (name === "slide") SV.layer(STACKS.slide, i, slider.position.x, 0);
-    else SV.layer(STACKS.rotor, i, R.FAN[0], R.FAN[2], -fanRotor.rotation.y, 0, 0);
-  }
-  const g = SV.g; g.setTransform(1, 0, 0, 1, 0, 0);
-  for (const [x, on, lit, dim] of [[R.LEDS.shut, !valveOpen, "#ff2a1a", "#4a1210"], [R.LEDS.open, valveOpen, "#22ff55", "#103f1a"]]) {
-    const [px, py] = SV.project(x, R.LEDS.y + .6, R.LEDS.z), r = SV.scale * .8;
-    g.fillStyle = on ? lit : dim; g.fillRect(px - r, py - r * .7, 2 * r, 1.4 * r);
-    if (on) { g.fillStyle = lit + "44"; g.beginPath(); g.arc(px, py, r * 3, 0, 7); g.fill(); }
-  }
-}
-// the sprite view is turned by the same OrbitControls (the same camera) as the voxel view
-const spriteControls = new THREE.OrbitControls(camera, SC);
-spriteControls.target = controls.target;                 // one target for both
-spriteControls.enableDamping = true; spriteControls.minDistance = 2; spriteControls.maxDistance = 10000;
-spriteControls.maxPolarAngle = THREE.MathUtils.degToRad(70);   // not flatter than 20 degrees: the pile shows its slices
-spriteControls.enabled = false;
 document.getElementById("modeVoxel").onclick = () => setMode("voxel");
 document.getElementById("modeSprite").onclick = () => setMode("sprite");
 
@@ -194,11 +164,6 @@ function placeLabels() {
   const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
   parts.forEach(([, p], i) => {
     if (p) v.set(...p); else v.set(slider.position.x + 60, 14, 0);
-    if (MODE === "sprite") {
-      const [x, y] = SV.project(v.x, v.y, v.z), dpr = SC.width / innerWidth;
-      labels[i].style.left = `${x / dpr}px`; labels[i].style.top = `${y / dpr - 14}px`; labels[i].style.display = "";
-      return;
-    }
     v.project(camera);
     labels[i].style.left = `${(v.x + 1) / 2 * w}px`;
     labels[i].style.top = `${(1 - v.y) / 2 * h - 14}px`;
@@ -223,13 +188,13 @@ function demo(time) {
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
-  const dpr = Math.min(devicePixelRatio, 2); SC.width = innerWidth * dpr; SC.height = innerHeight * dpr;
-  SC.style.width = innerWidth + "px"; SC.style.height = innerHeight + "px";
 }
 addEventListener("resize", resize); resize();
 function frame(time) {
   if (moving) demo(time);
-  if (MODE === "voxel") { controls.update(); renderer.render(scene, camera); } else drawSprites();
+  controls.update();
+  if (MODE === "sprite") { SPRITE.update(slider.position.x, fanRotor.rotation.y, valveOpen); renderer.render(SPRITE.scene, camera); }
+  else renderer.render(scene, camera);
   placeLabels();
   requestAnimationFrame(frame);
 }

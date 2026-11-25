@@ -1,13 +1,14 @@
 // Sprite stacking: the voxel model drawn as a pile of flat pictures, one per 0.5 cm of height, each the
-// model's slice at that height seen from above.  Drawn bottom to top on a 2D canvas, each a little higher on
-// the screen and squashed by the view's tilt, the pile looks solid.  No 3D engine is needed to draw it.
-// Exposes window.SpriteStack.  Needs YamabikoRig's Voxels (rig.js) for the input.
+// model's slice at that height seen from above.  The pictures are thin sheets stacked in the 3D view and
+// drawn with the same perspective camera as the voxel model, so the pile looks solid and keeps the
+// perspective (near things bigger, far things smaller).
+// Exposes window.SpriteStack.  Needs three.js and YamabikoRig's Voxels (rig.js) for the input.
 (function () {
   const RES = .5;                                  // cm per pixel and per layer
+  const SHEETS = 3;                                // sheets per layer, so no gaps show between layers
 
-  // cells: [[x, y, z, color, jitter], ...] in units of `unit` cm.  Returns {layers: [canvas], x0, z0, y0}
+  // sets: [{voxels, unit}] (unit: the voxels' size in cm) -> {layers: [canvas], x0, y0, z0, w, d}
   function build(sets) {
-    // sets: [{voxels, unit}]  (voxels: a Voxels; unit: its size in cm)
     let xs = [Infinity, -Infinity], ys = [Infinity, -Infinity], zs = [Infinity, -Infinity];
     const cells = [];
     for (const { voxels, unit } of sets) {
@@ -38,49 +39,52 @@
     return { layers, x0: xs[0] * RES, z0: zs[0] * RES, y0: ys[0] * RES, w: W * RES, d: D * RES, h: H * RES };
   }
 
-  // a view: the screen point of the world point (cm), and the drawing of stacks
-  class View {
-    constructor(canvas) {
-      this.c = canvas; this.g = canvas.getContext("2d");
-      this.yaw = 0; this.pitch = THREE.MathUtils.degToRad(48); this.scale = 5; this.cx = 74; this.cz = -14; this.cy = 4;
-      this.drawn = 0;
-    }
-    // take the view from a perspective camera looking at `target`: its turn about the vertical, its
-    // height angle and how many pixels a centimetre is at the target, so both views move alike
-    follow(camera, target) {
-      const off = camera.position.clone().sub(target), r = off.length();
-      this.yaw = Math.atan2(off.x, off.z);
-      this.pitch = Math.min(Math.max(Math.asin(Math.min(Math.max(off.y / r, -1), 1)), THREE.MathUtils.degToRad(20)), Math.PI / 2);
-      this.scale = (this.c.height / 2) / (r * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
-      this.cx = target.x; this.cy = target.y; this.cz = target.z;
-    }
-    project(x, y, z) {
-      const dx = x - this.cx, dz = z - this.cz, c = Math.cos(this.yaw), s = Math.sin(this.yaw);
-      const u = dx * c - dz * s, w = dx * s + dz * c;
-      return [this.c.width / 2 + u * this.scale, this.c.height / 2 + (w * Math.sin(this.pitch) - (y - this.cy) * Math.cos(this.pitch)) * this.scale];
-    }
-    clear(color) {
-      const g = this.g; g.setTransform(1, 0, 0, 1, 0, 0); g.imageSmoothingEnabled = false;   // crisp blocks
-      g.fillStyle = color; g.fillRect(0, 0, this.c.width, this.c.height); this.drawn = 0;
-    }
-    // draw layer `i` of `stack`, its origin moved to (ox, oz) and turned by `angle` about (ax, az) (world cm)
-    layer(stack, i, ox = 0, oz = 0, angle = 0, ax = 0, az = 0) {
-      const g = this.g, y = stack.y0 + i * RES;
-      const sp = Math.sin(this.pitch), cp = Math.cos(this.pitch);
-      const step = RES * cp * this.scale, reps = Math.max(1, Math.ceil(step));
-      for (let r = 0; r < reps; r++) {
-        const lift = (y - this.cy) * cp * this.scale + step * r / reps;
-        g.setTransform(1, 0, 0, 1, 0, 0);
-        g.translate(this.c.width / 2, this.c.height / 2 - lift);
-        g.scale(this.scale, this.scale * sp);
-        g.rotate(this.yaw);
-        g.translate(-this.cx + ox, -this.cz + oz);
-        if (angle) { g.translate(ax, az); g.rotate(angle); g.translate(-ax, -az); }
-        g.drawImage(stack.layers[i], stack.x0, stack.z0, stack.w, stack.d);
-        this.drawn++;
+  // the stack as a group of flat sheets (in the voxels' own coordinates), drawn as the pictures are: no light
+  function group(stack) {
+    const g = new THREE.Group();
+    stack.layers.forEach((canvas, i) => {
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestMipmapNearestFilter;
+      const mat = new THREE.MeshBasicMaterial({ map: tex, alphaTest: .5, side: THREE.DoubleSide });
+      const geo = new THREE.PlaneGeometry(stack.w, stack.d);
+      for (let s = 0; s < SHEETS; s++) {
+        const m = new THREE.Mesh(geo, mat);
+        m.rotation.x = -Math.PI / 2;
+        m.position.set(stack.x0 + stack.w / 2, stack.y0 + (i + (s + .5) / SHEETS) * RES, stack.z0 + stack.d / 2);
+        g.add(m);
       }
-    }
+    });
+    g.userData.sheets = stack.layers.length * SHEETS;
+    return g;
   }
 
-  window.SpriteStack = { build, View, RES };
+  // the whole rig as stacks in a scene of its own: the fixed parts, the slide and the fan's rotor as
+  // separate stacks so they move; update(slideX, fanAngle, valveOpen) every frame.
+  function rigScene({ fixedSets, slide, rotor, FAN, LEDS, background = 0x17191d }) {
+    const t0 = performance.now();
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(background);
+    const stacks = { fixed: build(fixedSets), slide: build([{ voxels: slide, unit: 1 }]), rotor: build([{ voxels: rotor, unit: 1 }]) };
+    const fixed = group(stacks.fixed), slider = group(stacks.slide), rotorG = new THREE.Group();
+    const r = group(stacks.rotor); r.position.set(-.5, 0, -.5); rotorG.add(r);    // the rotor's axis at its voxels' centre
+    rotorG.position.set(FAN[0], 0, FAN[2]);
+    scene.add(fixed, slider, rotorG);
+    const led = (x, lit, dim) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1, 1.6), new THREE.MeshBasicMaterial({ color: dim }));
+      m.position.set(x, LEDS.y, LEDS.z); scene.add(m);
+      return { m, lit: new THREE.Color(lit), dim: new THREE.Color(dim) };
+    };
+    const shut = led(LEDS.shut, 0xff2a1a, 0x4a1210), open = led(LEDS.open, 0x22ff55, 0x103f1a);
+    const sheets = [fixed, slider, r].reduce((a, g) => a + g.userData.sheets, 0);
+    const pixels = Object.values(stacks).reduce((a, q) => a + q.layers.length * q.layers[0].width * q.layers[0].height, 0);
+    return {
+      scene, sheets, pixels, layers: Object.values(stacks).reduce((a, q) => a + q.layers.length, 0), ms: performance.now() - t0,
+      update(slideX, fanAngle, valveOpen) {
+        slider.position.x = slideX; rotorG.rotation.y = fanAngle;
+        shut.m.material.color.copy(valveOpen ? shut.dim : shut.lit);
+        open.m.material.color.copy(valveOpen ? open.lit : open.dim);
+      },
+    };
+  }
+
+  window.SpriteStack = { build, group, rigScene, RES, SHEETS };
 })();
