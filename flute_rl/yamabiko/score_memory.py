@@ -15,6 +15,17 @@ listening (hi = log(sum a_s exp(beta p_s) / A) / beta, lo the same with -p): the
 middle of its range, which a mean cannot tell.  Two running sums, so their size does not grow with the song.
 Nothing in W grows with the length of the song except the number of terms summed: long songs blur.
 
+The key (how far the whistle is moved into the flute's range) was the largest error left (mem_09: about 30 cent
+per song, against 12 cent after it).  With ``hist_bins`` the memory also keeps a soft histogram of the whistle's
+height: every step adds a_s softmax(h_s) over ``hist_bins`` learned bins (one more running sum of a fixed size),
+from which the 2nd and 98th percentiles the rule uses can be read, untroubled by a few octave slips.  With
+``key_head`` a separate small network reads the key (the shift, in cents) from G, the extremes and the
+histogram, taught directly with the rule's shift as well, and the decoder gives the whistle's own pitch: the
+target is clamp(pitch + shift, low, high), the rule's sum and clip as a fixed part of the graph.
+With ``hist_fixed`` the histogram's bins are fixed bumps on the pitch axis (HIST_LO .. HIST_HI) of the
+extremes' p (taught to be the whistle's pitch / 1000 with the trainer's --key-aux), instead of learned bins:
+the key head then reads where on the pitch axis the whistle sat (mem_10's learned bins left it guessing).
+
 The targets taught are those of the rule pipeline today (flute_rl/yamabiko/whistle.py: clean_track, then
 to_target's shift into [low, high] and rests holding the previous pitch), on the whistle's true pitch, in the
 whistle's own time (no lead or tail: the player adds its fixed lead).  ``MemoryRuntime`` is the NumPy version.
@@ -43,6 +54,18 @@ class MemoryConfig:
     high: float = 1200.0
     extremes: bool = False       # also keep a soft highest and lowest pitch (mem_05 on)
     beta: float = 10.0
+    hist_bins: int = 0           # a soft histogram of the whistle's height (mem_10 on)
+    key_head: bool = False       # the key read by its own network; the decoder gives the whistle's pitch
+    hist_fixed: bool = False     # histogram bins fixed on the pitch axis of p (needs extremes)
+
+
+KEY_MID, KEY_HALF = -1300.0, 1300.0      # the shift's scale: whistles sit above the flute (shift -2600 .. 0)
+RAW_MID, RAW_HALF = 1700.0, 1700.0       # the whistle's pitch (cents re A4): 0 .. 3400 = 440 Hz .. 3.1 kHz
+HIST_LO, HIST_HI = -600.0, 4200.0        # the fixed histogram's pitch axis (cents re A4): 310 Hz .. 4.9 kHz
+
+
+def hist_centres(bins: int) -> np.ndarray:
+    return np.linspace(HIST_LO, HIST_HI, bins)
 
 
 def frequencies(config: MemoryConfig) -> np.ndarray:
@@ -92,10 +115,17 @@ def torch_model(config: MemoryConfig = MemoryConfig()):
             self.register_buffer("freqs", torch.tensor(frequencies(cfg), dtype=torch.float32))
             self.enc = nn.Sequential(nn.Linear(cfg.ear_dim, cfg.hidden), nn.ReLU(), nn.Linear(cfg.hidden, cfg.value))
             extra = 1 if cfg.extremes else 0
+            learned_bins = 0 if cfg.hist_fixed else cfg.hist_bins
             self.gen = nn.Sequential(nn.Linear(cfg.ear_dim, cfg.hidden), nn.ReLU(),
-                                     nn.Linear(cfg.hidden, cfg.global_dim + extra + 1))
-            self.dec = nn.Sequential(nn.Linear(cfg.value + 1 + cfg.global_dim + 2 * extra, cfg.hidden), nn.ReLU(),
+                                     nn.Linear(cfg.hidden, cfg.global_dim + extra + learned_bins + 1))
+            if cfg.hist_fixed:
+                self.register_buffer("centres", torch.tensor(hist_centres(cfg.hist_bins), dtype=torch.float32))
+            g_dim = cfg.global_dim + 2 * extra + cfg.hist_bins
+            self.dec = nn.Sequential(nn.Linear(cfg.value + 1 + g_dim, cfg.hidden), nn.ReLU(),
                                      nn.Linear(cfg.hidden, cfg.hidden), nn.ReLU(), nn.Linear(cfg.hidden, 2))
+            if cfg.key_head:
+                self.key = nn.Sequential(nn.Linear(g_dim, cfg.hidden), nn.ReLU(), nn.Linear(cfg.hidden, cfg.hidden),
+                                         nn.ReLU(), nn.Linear(cfg.hidden, 1))
 
         def code(self, steps):
             angle = 2 * torch.pi * steps[:, None].float() * STEP_S * self.freqs[None]
@@ -118,12 +148,28 @@ def torch_model(config: MemoryConfig = MemoryConfig()):
                 hi = (torch.logsumexp(b * p + logw, 1) - torch.log(mass[:, 0])) / b
                 lo = -(torch.logsumexp(-b * p + logw, 1) - torch.log(mass[:, 0])) / b
                 G = torch.cat([G, hi[:, None], lo[:, None]], 1)
+            if self.config.hist_bins:                                       # where the whistle sits, as a histogram
+                at = gd + (1 if self.config.extremes else 0)
+                if self.config.hist_fixed:                                  # bumps on the pitch axis of p
+                    width = (HIST_HI - HIST_LO) / (self.config.hist_bins - 1)
+                    d = (1000 * g[..., gd:gd + 1] - self.centres) / width
+                    h = torch.softmax(-.5 * d * d, -1)
+                else:
+                    h = torch.softmax(g[..., at:at + self.config.hist_bins], -1)
+                G = torch.cat([G, (h * weight).sum(1) / mass], 1)
             return W, G
+
+        def shift(self, G):
+            """The key: cents the whistle is moved by (key_head only)."""
+            return KEY_MID + KEY_HALF * self.key(G)[:, 0]
 
         def read(self, W, G, steps):
             """-> (target cents (B, T), voice logit (B, T)) at the instants ``steps`` (T,)."""
             r = torch.einsum("bvk,tk->btv", W, self.code(steps))
             out = self.dec(torch.cat([r, G[:, None].expand(-1, r.shape[1], -1)], 2))
+            if self.config.key_head:
+                pitch = RAW_MID + RAW_HALF * out[..., 0]
+                return torch.clamp(pitch + self.shift(G)[:, None], self.config.low, self.config.high), out[..., 1]
             mid, half = (self.config.low + self.config.high) / 2, (self.config.high - self.config.low) / 2
             return mid + half * out[..., 0], out[..., 1]
 
@@ -139,7 +185,10 @@ def export(model) -> dict:
          "mem.low": np.array(model.config.low), "mem.high": np.array(model.config.high)}
     if model.config.extremes:
         a["mem.beta"] = np.array(model.config.beta)
-    for part in ("enc", "gen", "dec"):
+    a["mem.hist_bins"] = np.array(model.config.hist_bins)
+    a["mem.hist_fixed"] = np.array(int(model.config.hist_fixed))
+    parts = ("enc", "gen", "dec") + (("key",) if model.config.key_head else ())
+    for part in parts:
         for i, layer in enumerate(getattr(model, part)):
             if hasattr(layer, "weight"):
                 a[f"mem.{part}{i}.w"] = layer.weight.detach().cpu().numpy().astype(np.float32)
@@ -161,7 +210,12 @@ class MemoryRuntime:
         self.phasor = np.ones(len(self.freqs), np.complex128)
         self.scale = 1 / np.sqrt(len(self.freqs))
         self.beta = float(self.a["mem.beta"]) if "mem.beta" in self.a else None
-        self.G = np.zeros(self.a[self._last("gen") + ".w"].shape[0] - 1 - (self.beta is not None), np.float64)
+        self.bins = int(self.a["mem.hist_bins"]) if "mem.hist_bins" in self.a else 0
+        self.fixed = bool(int(self.a["mem.hist_fixed"])) if "mem.hist_fixed" in self.a else False
+        self.key = any(k.startswith("mem.key") for k in self.a)
+        learned = 0 if self.fixed else self.bins
+        self.G = np.zeros(self.a[self._last("gen") + ".w"].shape[0] - 1 - (self.beta is not None) - learned, np.float64)
+        self.H = np.zeros(self.bins, np.float64)
         self.A = 0.0
         self.hi = self.lo = -np.inf                      # log sum a exp(+-beta p)
         self.n = 0
@@ -195,6 +249,16 @@ class MemoryRuntime:
             la = np.log(max(a, 1e-12))
             self.hi = np.logaddexp(self.hi, self.beta * float(g[gd]) + la)
             self.lo = np.logaddexp(self.lo, -self.beta * float(g[gd]) + la)
+        if self.bins:
+            at = gd + (self.beta is not None)
+            if self.fixed:
+                width = (HIST_HI - HIST_LO) / (self.bins - 1)
+                d = (1000 * float(g[gd]) - hist_centres(self.bins)) / width
+                h = -.5 * d * d
+            else:
+                h = g[at:at + self.bins].astype(np.float64)
+            h = np.exp(h - h.max())
+            self.H += a * h / h.sum()
         self.n += 1
 
     def recall(self, step):
@@ -209,10 +273,15 @@ class MemoryRuntime:
         if self.beta is not None:
             mass = np.log(max(self.A, 1e-3))
             g = np.r_[g, (self.hi - mass) / self.beta, -(self.lo - mass) / self.beta]
+        if self.bins:
+            g = np.r_[g, self.H / max(self.A, 1e-3)]
         out = self._mlp("dec", np.concatenate([r, g]).astype(np.float32))
+        voice = float(1 / (1 + np.exp(-np.clip(out[1], -50.0, 50.0))))
+        if self.key:
+            shift = KEY_MID + KEY_HALF * float(self._mlp("key", g.astype(np.float32))[0])
+            return float(np.clip(RAW_MID + RAW_HALF * out[0] + shift, self.low, self.high)), voice, float(r[-1])
         mid, half = (self.low + self.high) / 2, (self.high - self.low) / 2
-        return (float(mid + half * out[0]), float(1 / (1 + np.exp(-np.clip(out[1], -50.0, 50.0)))),
-                float(r[-1]))
+        return float(mid + half * out[0]), voice, float(r[-1])
 
 
 def score_from_recording(pcm, ear, memory_arrays, lead_steps: int = 60, tail_steps: int = 60):

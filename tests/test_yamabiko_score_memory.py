@@ -61,6 +61,44 @@ def test_numpy_runtime_matches_torch_with_extremes():
         assert rt.recall(i)[0] == pytest.approx(float(cents[0, i]), abs=1e-3)
 
 
+def test_numpy_runtime_matches_torch_with_histogram_and_key_head():
+    torch.manual_seed(2)
+    cfg = MemoryConfig(ear_dim=8, value=6, keys=16, global_dim=4, hidden=12, extremes=True, hist_bins=5, key_head=True)
+    model = torch_model(cfg).eval()
+    codes = torch.randn(1, 70, 8) * 2
+    with torch.no_grad():
+        W, G = model.write(codes, torch.ones(1, 70))
+        cents, vlog = model.read(W, G, torch.arange(70))
+        shift = float(model.shift(G)[0])
+    assert G.shape[1] == 4 + 2 + 5 and float(G[0, 6:].sum()) == pytest.approx(1.0, abs=1e-5)   # a histogram
+    assert float(cents.min()) >= cfg.low - 1e-3 and float(cents.max()) <= cfg.high + 1e-3     # clamped
+    rt = MemoryRuntime(export(model))
+    for c in codes[0].numpy():
+        rt.listen(c)
+    for i in (0, 33, 69):
+        got, p = rt.recall(i)
+        assert got == pytest.approx(float(cents[0, i]), abs=1e-2)
+        assert p == pytest.approx(float(torch.sigmoid(vlog[0, i])), abs=1e-4)
+    assert np.isfinite(shift)
+
+
+def test_numpy_runtime_matches_torch_with_fixed_histogram():
+    torch.manual_seed(3)
+    cfg = MemoryConfig(ear_dim=8, value=6, keys=16, global_dim=4, hidden=12, extremes=True, hist_bins=9,
+                       key_head=True, hist_fixed=True)
+    model = torch_model(cfg).eval()
+    codes = torch.randn(1, 50, 8) * 3
+    with torch.no_grad():
+        W, G = model.write(codes, torch.ones(1, 50))
+        cents, _ = model.read(W, G, torch.arange(50))
+    assert G.shape[1] == 4 + 2 + 9 and float(G[0, 6:].sum()) == pytest.approx(1.0, abs=1e-5)
+    rt = MemoryRuntime(export(model))
+    for c in codes[0].numpy():
+        rt.listen(c)
+    for i in (0, 25, 49):
+        assert rt.recall(i)[0] == pytest.approx(float(cents[0, i]), abs=1e-2)
+
+
 def test_score_from_recording_runs_the_ear_and_the_memory():
     from flute_rl.yamabiko.ear_nn import Ear, EarConfig, export as export_ear, torch_model as ear_model
     from flute_rl.yamabiko.score_memory import score_from_recording

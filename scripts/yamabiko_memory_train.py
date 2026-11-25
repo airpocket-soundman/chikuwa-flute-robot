@@ -227,11 +227,16 @@ def main():
                     help="weight of teaching the memory's pitch-like number (the one its soft highest / lowest "
                          "keep) the whistle's own pitch, in 1000 cents (training only; needs --extremes)")
     ap.add_argument("--extremes", action="store_true", help="also keep a soft highest and lowest pitch (the key)")
+    ap.add_argument("--hist-bins", type=int, default=0, help="also keep a soft histogram of the whistle's height")
+    ap.add_argument("--key-head", action="store_true", help="read the key with its own network (pitch + shift)")
+    ap.add_argument("--hist-fixed", action="store_true", help="histogram bins fixed on the pitch axis of p (with --key-aux)")
+    ap.add_argument("--key-loss", type=float, default=1.0, help="weight of teaching the key head the rule's shift")
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); dev = args.device
     torch.manual_seed(args.seed)
-    config = MemoryConfig(keys=args.keys, max_hz=args.max_hz, extremes=args.extremes, value=args.value)
+    config = MemoryConfig(keys=args.keys, max_hz=args.max_hz, extremes=args.extremes, value=args.value,
+                          hist_bins=args.hist_bins, key_head=args.key_head, hist_fixed=args.hist_fixed)
     ear = load_ear(args.ear, dev)
     started = time.time()
     train = make(np.random.default_rng(args.seed), args.songs, (3.0, 20.0), ear, config, dev)
@@ -258,6 +263,8 @@ def main():
         cents, vlog = model.read(W, G, torch.arange(ear_b.shape[1], device=dev))
         pitch = (F.smooth_l1_loss(cents / 100, target / 100, beta=args.beta, reduction="none") * (1 + voice) * mask).sum() / mask.sum()
         loss = pitch + (F.binary_cross_entropy_with_logits(vlog, voice, reduction="none") * mask).sum() / mask.sum()
+        if config.key_head and args.key_loss:          # the key head, taught the rule's shift itself
+            loss = loss + args.key_loss * F.smooth_l1_loss(model.shift(G) / 100, target.shifts / 100, beta=.25)
         if args.key_aux:                              # the key: p of every heard note ~ the whistle's pitch
             p = model.gen(ear_b)[..., config.global_dim]
             raw = (target - target.shifts[:, None]) / 1000
