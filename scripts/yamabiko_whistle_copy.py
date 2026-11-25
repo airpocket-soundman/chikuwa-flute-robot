@@ -4,6 +4,7 @@
     python scripts/yamabiko_whistle_copy.py --step step1                 # a given step (models/<step>/)
     python scripts/yamabiko_whistle_copy.py --seconds 5 --dry-run        # record and analyse only
     python scripts/yamabiko_whistle_copy.py --wav take.wav --dry-run     # a recording instead of the mic
+    python scripts/yamabiko_whistle_copy.py --target runs/archive_demo/<run>/target.npz   # a score made elsewhere
 
 The ear is YIN (flute_rl/yamabiko/whistle.py); the hand is a performer runtime already on the UNO Q (the
 network-only NNTwinPerformer by default).  The whistle is recorded with the fan off and the valve shut,
@@ -47,6 +48,8 @@ def main():
     ap.add_argument("--host", default="192.168.50.160")
     ap.add_argument("--seconds", type=float, default=5.0)
     ap.add_argument("--wav", default=None, help="analyse this recording instead of recording the mic")
+    ap.add_argument("--target", default=None,
+                    help="play this score (cents, voice) instead of listening, e.g. from scripts/archive_demo.py")
     ap.add_argument("--step", default=None, help="models/<step>/profile.json to run (default: the newest)")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--quantize", action="store_true", help="snap the copy to semitones of its first note")
@@ -62,7 +65,13 @@ def main():
     stamp = time.strftime("%Y%m%d_%H%M%S")
     out = pathlib.Path("runs/real/whistle"); out.mkdir(parents=True, exist_ok=True)
     rig = None
-    if args.wav:
+    if args.target:
+        given = np.load(args.target)
+        target, voice = given["cents"].astype(np.float32), given["voice"].astype(bool)
+        raw = cents = given["source_cents"] if "source_cents" in given.files else np.where(voice, target, np.nan)
+        report = {"target": args.target, "steps": int(len(target))}
+        pcm, sr = np.zeros(1600, np.int16), 16000
+    elif args.wav:
         pcm, sr = read_wav(args.wav)
     else:
         rig = Remote(args.host, forward=False)
@@ -72,15 +81,16 @@ def main():
         print(f"whistle now ({args.seconds:.0f} s)", flush=True)
         pcm, sr = rig.record(args.seconds)
         print("got it", flush=True)
-    write_wav(out / f"{stamp}_whistle.wav", pcm, sr)
-
-    raw = whistle_track(pcm, sr)
-    cents = clean_track(raw, **profile.get("whistle", {}))
-    try:
-        target, voice, report = to_target(cents, profile["low_cents"], profile["high_cents"], quantize=args.quantize)
-    except ValueError as exc:
-        level = 20 * np.log10(max(float(np.sqrt(np.mean((pcm / 32768.0) ** 2))), 1e-9))
-        raise SystemExit(f"{exc}: the recording peaks at {level:.0f} dBFS; whistle closer to the microphone")
+    if not args.target:
+        write_wav(out / f"{stamp}_whistle.wav", pcm, sr)
+        raw = whistle_track(pcm, sr)
+        cents = clean_track(raw, **profile.get("whistle", {}))
+        try:
+            target, voice, report = to_target(cents, profile["low_cents"], profile["high_cents"],
+                                              quantize=args.quantize)
+        except ValueError as exc:
+            level = 20 * np.log10(max(float(np.sqrt(np.mean((pcm / 32768.0) ** 2))), 1e-9))
+            raise SystemExit(f"{exc}: the recording peaks at {level:.0f} dBFS; whistle closer to the microphone")
     print(json.dumps(report))
     np.savez(out / f"{stamp}_target.npz", cents=target, voice=voice, whistle_cents=raw)
 
@@ -115,7 +125,7 @@ def main():
     axes[0, 0].set_title("whistle")
     tt = np.arange(len(target)) * .01
     axes[1, 0].plot(tt, np.where(voice, target, np.nan), "k", lw=2)
-    axes[1, 0].set_title(f"target in the rig's range (shift {report['shift_cents']:+.0f} cent)")
+    axes[1, 0].set_title(f"target in the rig's range (shift {report.get('shift_cents', 0):+.0f} cent)")
     if played is not None:
         for p in range(int(played["count"])):
             h, v, tc, tv = (played[f"{p}/{k}"][0] for k in ("heard", "valid", "target_cents", "target_voice"))

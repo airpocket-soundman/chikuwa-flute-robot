@@ -18,7 +18,7 @@
 口笛の次は、野鳥のさえずりを聴いて**返事をする**。
 
 - 録音して再生するのではなく、**演奏する**。相手の音程・タイミング・歌の型に合わせて、その場で音を作って返せる。
-- 鳥どうしの歌い交わしも、決まった録音の応酬ではなく、相手に合わせて変えている（3 章）。演奏だからこそ、鳥にとって自然な返事になる可能性がある。
+- 鳥どうしの歌い交わしも、決まった録音の応酬ではなく、相手に合わせて変えている（2.2・2.3）。演奏だからこそ、鳥にとって自然な返事になる可能性がある。
 - 人の口笛の揺らぎを学んでいることが、ここでも効く。鳥は「その土地の人の口笛の癖」を覚えて応えることが分かっている（2.1）。
 
 ## 2. 人・機械と鳥のやりとりの研究例
@@ -57,7 +57,47 @@
 - **演奏だから自然**: 相手の音程に合わせる（ナイチンゲール）、返す歌の型で意味を変える（ソングスパロー）、返すタイミングで意味を変える（ナイチンゲール）。録音の再生ではできない、その場で合わせる返事が鍵。
 - **今の E2E 方針との関係**: 楽譜を外に持たず、聞いた音を重みに書き込んで思い出す仕組み（step6）は、揺らぎを持ち運ぶための前提。耳（step5）を鳥の声まで広げ、返事の作り方（何を・いつ返すか）を学ぶのが、口笛の真似の先の段になる。
 
-## 4. 注意
+## 4. 目標：野鳥の言葉・人の口笛言語・LLM をつなぐ（2026-11-25）
+
+```
+人の口笛言語（シルボ・ゴメロ）──┐                      ┌── 口笛言語の音程の動き ──┐
+野鳥の声（シジュウカラ）────────┼─ 耳 ─→ LLM（意味）─→ ┤                          ├─ 体に合わせて圧縮 → 笛
+人の話し言葉 ────────────────────┘                      └── 鳥の語彙からの返事 ────┘
+```
+
+- **合成音でも成立してしまう問題**: 言葉のやりとりだけなら、スピーカーで合成音を鳴らすほうが楽で正確。鳥の再生実験もほぼすべてスピーカーで行われている。
+  だから体の役目を「会話ができること」には置かない。
+- **体の役目**: 口笛言語は、話し言葉を人の口という狭い体に押し込めたもの（母音は音の高さ、子音は音程の動き方）。
+  やまびこ1号も狭い体（1 オクターブ、端から端まで約 1.4 秒、静止摩擦）。LLM の言いたいことを**この体で出せる動きに自分で圧縮し直す**のが、合成音にはない部分。
+  体が違えば吹き方（方言）も変わるはず。
+- **見せ方**: 制約のない合成音と、この体で吹いた音を並べ、口笛言語の話者や鳥に聞かせて、それでも通じるかを比べる。
+- **LLM の主張の範囲**: 鳥の「言葉」は語彙が少なく、意味もほとんどが警戒や集合。「LLM が鳥と会話する」とは言わず、「分かっている語彙の範囲で、意味の通る返事を選ぶ」まで。
+- **最初の検証**: アーカイブの口笛言語と鳥の声を、今の体（ツインの上）で吹き直し、音程の形がどこまで残るかを見る。デモの手順と結果は [archive-demo.md](archive-demo.md)。
+
+## 5. アート・インスタレーションとしての可能性
+
+### 5.1 近い先行作品
+
+| 作品 | 内容 | この作品との違い |
+|---|---|---|
+| Alexandra Daisy Ginsberg《Machine Auguries》（2019〜、ロンドン・トレド・ウメオ） | 夜明けの鳥のコーラスに、AI が作った鳥の声が少しずつ入り込み、置き換えていく音と光のインスタレーション。鳥の減少への問いかけ | 声はスピーカーから出る合成音で、生きた鳥とのやりとりではない |
+| Tully Arnot《Bird Song》（APT11） | コードで作った鳥の声を、電子回路と空気ポンプで機械的に鳴らす | 機械の声だが、聞いて返すことはしない |
+| David Rothenberg（Nightingales in Berlin、Nightingale Cities） | クラリネット奏者がベルリンの公園でナイチンゲールと即興演奏する。アルバム・映画・本になった。「どの種も一種だけでは作れない音楽」 | 人が演奏する。縄張りに自信のある雄は、聴いて、間を置いて、短く返すという |
+| Céleste Boursier-Mougenot《from here to ear》 | ギターの弦にとまるキンカチョウが音を鳴らすインスタレーション | 生きた鳥が演奏者 |
+| Yapci Ramos《Freedom》（2019）、《yo, Guirre》（2026、ラ・ゴメラ） | 鳥の録音と作家の口笛のぶつかり合い（火山石の 2 チャンネル音響作品）。後者はシルボ・ゴメロと羊飼いの杖を扱う映像・音響作品 | 口笛は人が吹く |
+| 《Stuck》（2014、リガ、SKAN II） | 口笛言語の話者 Kico Correa が、ラトビア語とロシア語を口笛言語に訳そうとした音響作品 | 翻訳は人がする |
+| 18 世紀の自動さえずり鳥の箱（メトロポリタン美術館所蔵ほか） | 箱から機械の鳥が出て、首を振り羽ばたきながら鳴く | 機械の鳥の系譜。決まった歌を鳴らすだけ |
+
+### 5.2 この作品ならではの案
+
+1. **夜明けのコーラスに加わる笛**: 《Machine Auguries》は合成音が鳥の声を「置き換える」。こちらは本物の笛の音で、鳥の声に「加わり、返す」。屋外の展示。
+2. **聴いて、間を置いて、返す演奏者**: Rothenberg のセッションの演奏者を機械にする。ナイチンゲールが相手の音程に合わせて返す習性（2.2）と組み合わせる。
+3. **翻訳する笛**: 来場者が話す → LLM → 口笛言語 → 笛が吹く。来場者が口笛で返すと、笛が聴いて訳す。《Stuck》の翻訳を機械が担う。
+4. **方言が生まれる群れ**: 形の違う笛（ちくわ・3D プリント・竹）を何台も並べ、互いに聴いて真似し合う。体ごとに出せる動きが違うので、同じ言葉でも台ごとに吹き方（方言）が分かれていく。
+   ミツオシエが土地ごとに違う人の呼び声に応えること（2.1）の、機械版。
+5. **自動さえずり鳥の箱の現代版**: 決まった歌を鳴らす 18 世紀の箱に対して、聴いて覚え、練習で上達し、へたったちくわでも合わせ直す箱。ちくわの可笑しさも活かせる。
+
+## 6. 注意
 
 - 繁殖期の野鳥に音を聞かせ続けると、ストレスを与え、縄張りや子育てを乱すおそれがある。野外で試すときは、時間と回数を絞る。
 - 上の研究例は検索で集めたもので、原論文まで読んで確かめたのは一部だけ。引用するときは原論文を確認する。
@@ -79,3 +119,13 @@
 - [京都大学 2022: シジュウカラの発話者の認識](https://www.kyoto-u.ac.jp/research-news/2022-09-29-6)
 - [BE-PAL: ウグイスの鳴きまね](https://www.bepal.net/archives/651153)
 - [国立科学博物館 プレス資料](https://web.kahaku.go.jp/procedure/press/pdf/1475680.pdf)
+- [artnet: Machine Auguries: Toledo](https://news.artnet.com/art-world/alexandra-daisy-ginsberg-machine-auguries-ai-toledo-museum-2300348)
+- [FACT: Machine Auguries (2019)](https://www.fact.co.uk/artwork/machine-auguries-2019)
+- [QAGOMA: Tully Arnot (APT11)](https://www.qagoma.qld.gov.au/exhibition/the-11th-asia-pacific-triennial-of-contemporary-art-apt11/tully-arnot)
+- [UChicago Press: Nightingales in Berlin](https://pressblog.uchicago.edu/2019/05/23/read-an-excerpt-from-nightingales-in-berlin-searching-for-the-perfect-sound.html)
+- [DailyGood: David Rothenberg, interspecies music](https://www.dailygood.org/story/3048/david-rothenberg-the-joy-and-mystery-of-interspecies-music-making-david-rothenberg/)
+- [Bonart: Yapci Ramos, yo, Guirre](https://www.bonart.cat/en/n/47229/yapci-ramos-revives-the-flight-of-the-guirre-through-contemporary-art)
+- [musikprotokoll: Silbadores / Stuck](https://musikprotokoll.orf.at/en/blog/silbadores/iestredziszastryal-stuck)
+- [The Met: Mechanical singing bird box](https://www.metmuseum.org/en/art/collection/search/910012?pkgids=913)
+- [OpenSLR SLR137 Silbo Gomero Speech Corpus](https://openslr.org/137)
+- [xeno-canto: Japanese Tit](https://xeno-canto.org/species/Parus-minor)
