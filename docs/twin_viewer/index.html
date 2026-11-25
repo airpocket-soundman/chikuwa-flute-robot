@@ -43,7 +43,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="rig.js?v=4"></script>
-<script src="sprite_stack.js?v=2"></script>
+<script src="sprite_stack.js?v=3"></script>
 <script>
 const R = window.YamabikoRig, { C, Voxels, STROKE, SLIDE_HOME } = R;
 const built = R.build();
@@ -151,11 +151,13 @@ function setMode(m) {
     rotor: SpriteStack.build([{ voxels: built.rotor, unit: 1 }]),
   };
   renderer.domElement.style.display = m === "voxel" ? "" : "none";
+  controls.enabled = m === "voxel"; spriteControls.enabled = m === "sprite";
   SC.style.display = m === "sprite" ? "" : "none";
   document.getElementById("modeVoxel").setAttribute("aria-pressed", m === "voxel");
   document.getElementById("modeSprite").setAttribute("aria-pressed", m === "sprite");
 }
 function drawSprites() {
+  spriteControls.update(); SV.follow(camera, controls.target);
   SV.clear("#1b1d22");
   const items = [];
   for (const [name, q] of Object.entries(STACKS)) for (let i = 0; i < q.layers.length; i++) items.push([q.y0 + i * SpriteStack.RES, name, i]);
@@ -172,17 +174,12 @@ function drawSprites() {
     if (on) { g.fillStyle = lit + "44"; g.beginPath(); g.arc(px, py, r * 3, 0, 7); g.fill(); }
   }
 }
-{ // drag to turn and tilt, wheel to zoom
-  let drag = null;
-  SC.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY, SV.yaw, SV.pitch]; SC.setPointerCapture(e.pointerId); });
-  SC.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    SV.yaw = drag[2] + (e.clientX - drag[0]) * .008;
-    SV.pitch = Math.min(Math.max(drag[3] + (e.clientY - drag[1]) * .006, THREE.MathUtils.degToRad(25)), THREE.MathUtils.degToRad(88));
-  });
-  SC.addEventListener("pointerup", () => { drag = null; });
-  SC.addEventListener("wheel", (e) => { e.preventDefault(); SV.scale = Math.min(Math.max(SV.scale * Math.exp(-e.deltaY * .001), .5), 60); }, { passive: false });
-}
+// the sprite view is turned by the same OrbitControls (the same camera) as the voxel view
+const spriteControls = new THREE.OrbitControls(camera, SC);
+spriteControls.target = controls.target;                 // one target for both
+spriteControls.enableDamping = true; spriteControls.minDistance = 2; spriteControls.maxDistance = 10000;
+spriteControls.maxPolarAngle = THREE.MathUtils.degToRad(70);   // not flatter than 20 degrees: the pile shows its slices
+spriteControls.enabled = false;
 document.getElementById("modeVoxel").onclick = () => setMode("voxel");
 document.getElementById("modeSprite").onclick = () => setMode("sprite");
 
@@ -227,7 +224,7 @@ function resize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
   const dpr = Math.min(devicePixelRatio, 2); SC.width = innerWidth * dpr; SC.height = innerHeight * dpr;
-  SC.style.width = innerWidth + "px"; SC.style.height = innerHeight + "px"; SV.scale = Math.min(innerWidth / 200, 8) * dpr;
+  SC.style.width = innerWidth + "px"; SC.style.height = innerHeight + "px";
 }
 addEventListener("resize", resize); resize();
 function frame(time) {
@@ -243,9 +240,7 @@ moveBtn.onclick = () => { moving = !moving; moveBtn.setAttribute("aria-pressed",
 namesBtn.onclick = () => {
   const on = labelBox.classList.toggle("hidden") === false; namesBtn.setAttribute("aria-pressed", on);
 };
-document.getElementById("reset").onclick = () => {
-  home(); SV.yaw = 0; SV.pitch = THREE.MathUtils.degToRad(48); SV.scale = Math.min(innerWidth / 200, 8) * Math.min(devicePixelRatio, 2);
-};
+document.getElementById("reset").onclick = home;
 </script>
 </body>
 </html>

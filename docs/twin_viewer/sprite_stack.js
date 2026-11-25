@@ -45,6 +45,15 @@
       this.yaw = 0; this.pitch = THREE.MathUtils.degToRad(48); this.scale = 5; this.cx = 74; this.cz = -14; this.cy = 4;
       this.drawn = 0;
     }
+    // take the view from a perspective camera looking at `target`: its turn about the vertical, its
+    // height angle and how many pixels a centimetre is at the target, so both views move alike
+    follow(camera, target) {
+      const off = camera.position.clone().sub(target), r = off.length();
+      this.yaw = Math.atan2(off.x, off.z);
+      this.pitch = Math.min(Math.max(Math.asin(Math.min(Math.max(off.y / r, -1), 1)), THREE.MathUtils.degToRad(20)), Math.PI / 2);
+      this.scale = (this.c.height / 2) / (r * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+      this.cx = target.x; this.cy = target.y; this.cz = target.z;
+    }
     project(x, y, z) {
       const dx = x - this.cx, dz = z - this.cz, c = Math.cos(this.yaw), s = Math.sin(this.yaw);
       const u = dx * c - dz * s, w = dx * s + dz * c;

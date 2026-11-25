@@ -72,7 +72,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="rig.js?v=4"></script>
-<script src="sprite_stack.js?v=2"></script>
+<script src="sprite_stack.js?v=3"></script>
 <script>
 const R = window.YamabikoRig, $ = (id) => document.getElementById(id);
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -179,6 +179,7 @@ function buildStacks() {
   STACKS.count = Object.values(STACKS).filter(q => q.layers).reduce((a, q) => a + q.layers.length, 0);
 }
 function drawSprites(k) {
+  spriteControls.update(); SV.follow(camera, controls.target);
   SV.clear("#17191d");
   const st = STACKS, sx = slider.position.x;
   // every stack's layers by height, lowest first, so higher slices cover lower ones
@@ -203,24 +204,19 @@ function setMode(m) {
   MODE = m;
   if (m === "sprite" && !STACKS) buildStacks();
   renderer.domElement.style.display = m === "voxel" ? "" : "none";
+  controls.enabled = m === "voxel"; spriteControls.enabled = m === "sprite";
   SC.style.display = m === "sprite" ? "" : "none";
   $("modeVoxel").setAttribute("aria-pressed", m === "voxel"); $("modeSprite").setAttribute("aria-pressed", m === "sprite");
   perf.n = 0; perf.ms = 0;
 }
 $("modeVoxel").onclick = () => setMode("voxel");
 $("modeSprite").onclick = () => setMode("sprite");
-// the sprite view's own handling: drag to turn and tilt, wheel to zoom
-{
-  let drag = null;
-  SC.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY, SV.yaw, SV.pitch]; SC.setPointerCapture(e.pointerId); SC.style.cursor = "grabbing"; });
-  SC.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    SV.yaw = drag[2] + (e.clientX - drag[0]) * .008;
-    SV.pitch = Math.min(Math.max(drag[3] + (e.clientY - drag[1]) * .006, THREE.MathUtils.degToRad(25)), THREE.MathUtils.degToRad(88));
-  });
-  SC.addEventListener("pointerup", () => { drag = null; SC.style.cursor = "grab"; });
-  SC.addEventListener("wheel", (e) => { e.preventDefault(); SV.scale = Math.min(Math.max(SV.scale * Math.exp(-e.deltaY * .001), .5), 60); }, { passive: false });
-}
+// the sprite view is turned by the same OrbitControls (the same camera) as the voxel view
+const spriteControls = new THREE.OrbitControls(camera, SC);
+spriteControls.target = controls.target;                 // one target for both
+spriteControls.enableDamping = true; spriteControls.minDistance = 2; spriteControls.maxDistance = 10000;
+spriteControls.maxPolarAngle = THREE.MathUtils.degToRad(70);   // not flatter than 20 degrees: the pile shows its slices
+spriteControls.enabled = false;
 // how heavy each is: the time to draw a frame, shown live, and a fair test with the GPU waited for
 const perf = { ms: 0, n: 0 };
 function showPerf() {
@@ -391,7 +387,7 @@ addEventListener("keydown", (e) => { if (e.code === "Space" && e.target.tagName 
 function resize() {
   renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   const dpr = Math.min(devicePixelRatio, 2); SC.width = innerWidth * dpr; SC.height = innerHeight * dpr;
-  SC.style.width = innerWidth + "px"; SC.style.height = innerHeight + "px"; SV.scale = Math.min(innerWidth / 230, 8) * dpr;
+  SC.style.width = innerWidth + "px"; SC.style.height = innerHeight + "px";
   drawGraph();
 }
 addEventListener("resize", resize); resize();
