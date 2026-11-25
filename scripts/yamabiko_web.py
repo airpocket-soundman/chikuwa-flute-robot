@@ -7,6 +7,11 @@ and remembered in runs/web_step.txt.  The board's EXEC button drives it: press t
 the recording and play, press while calibrating or playing to stop (WhistleJob).  The page's big button does
 the same.  Started at boot by the UNO Q's crontab (@reboot, after the command server).
 
+The page also plays archive clips (a whistled language, Silbo Gomero, and Japanese tit calls): the example is
+heard from the page (the clip, and the clip at the flute's speed) and the flute plays its score with the chosen
+step; pressing twice plays it again.  The clips are made on the PC by scripts/archive_pack.py into
+runs/archive_pack/ and copied by scripts/uno_q_push.sh.
+
 Talks to the command server (scripts/yamabiko_server.py) on the same board, as one connection: while the
 page drives the outputs, other clients (yamabiko_remote.py, the button jog) are refused until it lets go.
 
@@ -230,6 +235,7 @@ poll();
 # ----- whistle copy: record a whistle, play it back with a performer runtime ---------------------------
 
 WHISTLE_DIR = pathlib.Path(__file__).resolve().parents[1] / "runs" / "real" / "whistle"
+ARCHIVE_PACK = pathlib.Path(__file__).resolve().parents[1] / "runs" / "archive_pack"   # scripts/archive_pack.py
 
 
 def common_ear(profile):
@@ -339,7 +345,7 @@ class WhistleJob:
             self.stopped = False
             self.end_recording.clear()
             keep = ("press", "whistle", "cleaned", "target", "voice", "report", "heard", "key", "relative_mae", "shift",
-                    "stamp", "plays_n", "plays_id")       # the last song's graphs stay while it is played again
+                    "stamp", "plays_n", "plays_id", "archive")       # the last song's graphs stay while it is played again
             self.state = {"phase": "prepare", "message": first, **{k: self.state[k] for k in keep if k in self.state}}
             self.thread = threading.Thread(target=target, args=args, daemon=True)
             self.thread.start()
@@ -413,6 +419,73 @@ class WhistleJob:
         self.song = {"step": None, "path": None, "voice": None, "stamp": stamp, "pcm": pcm, "sr": sr, "quantize": False}
         self.wavs["whistle"] = wav_bytes(pcm, sr)
         self._set(message=f"最後の録音（{stamp}）を読み込みました。2 回押すと、選んだ版で吹きます")
+
+    # ----- archive clips (scripts/archive_pack.py) ---------------------------------------------------
+    def archive_list(self):
+        """The clips in runs/archive_pack/: their meta.json (title, what it says, credit, licence, ...)."""
+        items = []
+        for meta in sorted(ARCHIVE_PACK.glob("*/meta.json")) if ARCHIVE_PACK.exists() else []:
+            try:
+                m = json.loads(meta.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (meta.parent / "target.npz").exists():
+                m["id"] = meta.parent.name
+                m["has_slow"] = (meta.parent / "source_slow.wav").exists()
+                items.append(m)
+        return items
+
+    def archive_wav(self, item_id, name):
+        """Bytes of an archive clip's source.wav or source_slow.wav (only ids of the pack, only those names)."""
+        if name not in ("source", "source_slow") or item_id not in {m["id"] for m in self.archive_list()}:
+            return None
+        try:
+            return (ARCHIVE_PACK / item_id / f"{name}.wav").read_bytes()
+        except OSError:
+            return None
+
+    def archive_play(self, item_id, step=None):
+        """Play an archive clip's score with the chosen step; it becomes the song (two presses: again)."""
+        item = next((m for m in self.archive_list() if m["id"] == item_id), None)
+        if item is None:
+            raise ValueError(f"{item_id} がありません（PC で scripts/archive_pack.py を作って送ってください）")
+        if step and step != self.step:
+            self.choose(step)
+        return self._launch(self._archive, self.profiles[self.step], item, first=f"{item['title']} を吹く準備")
+
+    def _archive(self, profile, item):
+        import numpy as np
+        rig = None
+        try:
+            rig = self._connect(profile)
+            if self.tuning is None:
+                self._tune(rig, profile)
+            self._check()
+            folder = ARCHIVE_PACK / item["id"]
+            with np.load(folder / "target.npz") as d:
+                target, voice = d["cents"].astype(float), d["voice"].astype(bool)
+                heard = d["source_cents"].astype(float) if "source_cents" in d.files else np.where(voice, target, np.nan)
+            self.wavs = {"whistle": (folder / "source.wav").read_bytes()}
+            self.song = {"step": profile["name"], "path": str(folder / "target.npz"), "voice": voice,
+                         "stamp": f"archive_{item['id']}", "pcm": None, "sr": None, "quantize": False,
+                         "fixed": True, "archive": item}
+            self.practice, self.plays = [], []
+
+            def listed(a):
+                return [None if not np.isfinite(v) else round(float(v), 1) for v in a]
+            span = float(np.nanpercentile(heard, 98) - np.nanpercentile(heard, 2)) if np.isfinite(heard).any() else 0.0
+            report = {"whistle_span_cents": span, "range_cents": profile["high_cents"] - profile["low_cents"],
+                      "clipped_fraction": 0.0, "archive": item["title"], "interval_scale": item.get("interval_scale"),
+                      "slow": item.get("slow")}
+            self._set(whistle=listed(heard), cleaned=listed(heard), target=[round(float(v), 1) for v in target],
+                      voice=[bool(v) for v in voice], report=report, plays_n=0, plays_id=None, archive=item["id"])
+            self._play(rig, profile)
+        except Stopped as exc:
+            self._set(phase="idle", message=str(exc))
+        except Exception as exc:                       # noqa: BLE001
+            self._set(phase="error", message=str(exc))
+        finally:
+            self._release(rig)
 
     # ----- data collection --------------------------------------------------------------------------
     def _load_takes(self):
@@ -690,7 +763,7 @@ class WhistleJob:
             if self.tuning is None:
                 self._tune(rig, profile)
             self._check()
-            if self.song["step"] != profile["name"]:   # another step: hear the same recording again with it
+            if self.song["step"] != profile["name"] and not self.song.get("fixed"):   # another step: hear it again
                 self._set(phase="analyse", message=f"同じ録音を {profile['name']} で聞き取り中")
                 self._analyse(self.song["pcm"], self.song["sr"], profile, self.song["quantize"], self.song["stamp"])
             self._play(rig, profile)
@@ -724,7 +797,7 @@ class WhistleJob:
             start = rig.audio_mark()
             began = time.monotonic()
             self._set(whistle=None, cleaned=None, target=None, voice=None, report=None, heard=None, relative_mae=None,
-                      plays_n=0, plays_id=None)          # a new song: the last one's graphs go
+                      plays_n=0, plays_id=None, archive=None)   # a new song: the last one's graphs go
             self._set(phase="record", message="口笛をどうぞ。吹き終わったらボタンを押してください",
                       record_began=time.monotonic(), max_seconds=MAX_RECORD_S)
             self.end_recording.wait(MAX_RECORD_S)
@@ -857,6 +930,12 @@ label{color:var(--mute);font-size:14px}
 svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margin-right:14px;font-size:13px;color:var(--mute)}
 .sw{display:inline-block;width:14px;height:4px;vertical-align:middle;margin-right:5px;border-radius:2px}
 .num{font-variant-numeric:tabular-nums}
+.arc{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+.arc>div{border:2px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;background:var(--bg)}
+.arc>div.on{border-color:var(--acc);background:var(--acc2)}
+.arc b{font-size:15px;line-height:1.4}.arc q{font-size:13px;color:var(--fg);font-style:italic}
+.arc small{font-size:11px;color:var(--mute);line-height:1.35;overflow-wrap:anywhere}.arc small a{color:var(--mute)}
+.arc .row{gap:6px}.arc button.sub{padding:6px 10px;font-size:13px}.arc button.go{background:var(--acc);color:var(--onacc);padding:6px 12px;font-size:13px;font-weight:700}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}@media (max-width:760px){.grid2{grid-template-columns:1fr}}
 </style></head><body><main>
 <header><h1>やまびこ1号</h1><span class="mute">口笛を聞いて、スライドホイッスルでまねて吹きます</span>
@@ -909,11 +988,17 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
   <div class="mute" style="margin-top:8px">選んだ版は覚えておき、次に起動したときも使います。</div>
 </section>
 
+<section id="arcBox">
+  <h2>アーカイブの声を吹く <span class="mute">口笛言語（シルボ・ゴメロ）とシジュウカラ</span></h2>
+  <div class="mute" style="margin-bottom:8px">「原音」でアーカイブの声を、「笛の速さ」で笛が吹く速さに伸ばした声を、この画面から聞けます。「笛で吹く」で選んだ版が吹きます（その後、基板のボタン 2 回でもう一度）。</div>
+  <div class="arc" id="arc"><span class="mute">読み込み中</span></div>
+</section>
+
 <section><h2>練習の成績 <span class="mute" id="practiceinfo"></span></h2>
 <div class="practice" id="practice"><span class="mute">録音して演奏すると、1 回目から順に並びます（調を合わせた平均の誤差、セント。低いほど良い）</span></div></section>
 
 <div class="grid2">
-<section><h2>聞いた口笛</h2>
+<section><h2 id="h1">聞いた口笛</h2>
 <div class="legend"><span><i class="sw" style="background:var(--c1)"></i>耳の聞いた音程</span><span><i class="sw" style="background:var(--c2)"></i>整えた後</span></div>
 <svg id="g1" viewBox="0 0 860 260"></svg><div class="mute num" id="info1"></div>
 <div class="row" style="margin-top:8px"><button class="sub" id="pw" disabled>▶ 口笛を聞く</button></div></section>
@@ -1044,6 +1129,23 @@ if(location.pathname==="/collect")api("mode",{collect:true});         // the pag
 $("cal").onclick=()=>api("calibrate");
 function listen(name){const a=$("au");a.src=`/api/whistle/${name}.wav?t=${Date.now()}`;a.play()}
 $("pw").onclick=()=>listen("whistle");$("pf").onclick=()=>listen("flute");
+let ARC=[],arcKey="";
+const esc=t=>String(t==null?"":t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function loadArchive(){try{ARC=(await (await fetch("/api/whistle/archive")).json()).items||[]}catch(e){ARC=[]}arcKey="";renderArchive(S)}
+function hear(id,name){const a=$("au");a.src=`/api/whistle/archive/${encodeURIComponent(id)}/${name}.wav`;a.play()}
+function renderArchive(s){
+  const key=JSON.stringify([ARC.map(m=>m.id),s.busy,s.archive,s.step]);if(key===arcKey)return;arcKey=key;
+  if(!ARC.length){$("arc").innerHTML='<span class="mute">まだありません。PC で <code>python scripts/archive_fetch.py silbo</code>・<code>tit</code>、<code>python scripts/archive_pack.py</code> を実行し、<code>scripts/uno_q_push.sh</code> で送ってください。</span>';return}
+  $("arc").innerHTML=ARC.map(m=>{const lic=(m.licence||"").split("/licenses/")[1]||"";
+    return `<div class="${m.id===s.archive?"on":""}" data-id="${esc(m.id)}"><b>${esc(m.title)}</b>${m.says?`<q>${esc(m.says)}</q>`:""}
+    <span class="mute num" style="font-size:12px">原音 ${(+m.seconds).toFixed(1)} 秒 → 笛 ${(+m.play_seconds).toFixed(1)} 秒（${m.slow} 倍ゆっくり、音程の間隔 ×${(+m.interval_scale).toFixed(2)}）</span>
+    <div class="row"><button class="sub" data-a="source">▶ 原音</button>${m.has_slow?'<button class="sub" data-a="source_slow">▶ 笛の速さ</button>':""}<button class="go" data-a="play" ${s.busy?"disabled":""}>笛で吹く（${esc(s.step||"")}）</button></div>
+    <small>${esc(m.credit)}${lic?` · CC ${esc(lic.replace(/\/$/,"").toUpperCase())}`:""}${m.page?` · <a href="${esc(m.page)}" target="_blank" rel="noopener">出典</a>`:""}</small></div>`}).join("");
+  for(const b of $("arc").querySelectorAll("button")){const id=b.closest("[data-id]").dataset.id;
+    b.onclick=()=>b.dataset.a==="play"?api("archive_play",{id}):hear(id,b.dataset.a)}}
+setInterval(()=>{if(S&&S.phase!==undefined){renderArchive(S);$("arcBox").hidden=!!S.collect;
+  $("h1").textContent=S.archive?"お手本（アーカイブの声）":"聞いた口笛";$("pw").textContent=S.archive?"▶ お手本を聞く":"▶ 口笛を聞く"}},500);
+loadArchive();
 poll();
 </script></body></html>
 """
@@ -1078,6 +1180,16 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
             elif self.path == "/api/whistle/plays":          # every play of the song (fetched when it changes)
                 self._json(200, {"plays": whistle.plays, "target": whistle.state.get("target"),
                                  "voice": whistle.state.get("voice")})
+            elif self.path == "/api/whistle/archive":
+                self._json(200, {"items": whistle.archive_list()})
+            elif self.path.startswith("/api/whistle/archive/"):     # /api/whistle/archive/<id>/<source|source_slow>.wav
+                parts = self.path.split("?")[0].split("/")
+                data = (whistle.archive_wav(parts[4], parts[5][:-4])
+                        if len(parts) == 6 and parts[5].endswith(".wav") else None)
+                if data is None:
+                    self._json(404, {"error": "ありません"})
+                else:
+                    self._send(200, data, "audio/wav")
             elif self.path.split("?")[0] in ("/api/whistle/whistle.wav", "/api/whistle/flute.wav", "/api/whistle/take.wav"):
                 name = self.path.split("?")[0].rsplit("/", 1)[1][:-4]
                 data = whistle.wavs.get(name)
@@ -1109,6 +1221,7 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
                 "/api/whistle/stop": whistle.stop,
                 "/api/whistle/step": lambda: whistle.choose(req["step"]),
                 "/api/whistle/calibrate": lambda: whistle.calibrate(req.get("step")),
+                "/api/whistle/archive_play": lambda: whistle.archive_play(str(req["id"]), req.get("step")),
             }
             fn = routes.get(self.path)
             if fn is None:

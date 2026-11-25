@@ -38,6 +38,13 @@ for dir in models/*/; do
     [ -f "$f" ] && put "$f" "$D/$f"
   done
 done
+# the archive clips for the play page (scripts/archive_pack.py; local only, not in git)
+if [ -d runs/archive_pack ]; then
+  for dir in runs/archive_pack/*/; do
+    sh_ "mkdir -p $D/$dir"
+    for f in "$dir"*; do put "$f" "$D/$f"; done
+  done
+fi
 for p in "$@"; do
   put "$p" "$D/$p"
 done
