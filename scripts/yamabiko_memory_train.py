@@ -26,7 +26,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "scripts"))
 from flute_rl.yamabiko.ear_nn import EarConfig, torch_model as ear_model  # noqa: E402
 from flute_rl.yamabiko.ear_synth import FRAME, HOP, phrase  # noqa: E402
-from flute_rl.yamabiko.score_memory import MemoryConfig, MemoryRuntime, export, teacher, torch_model  # noqa: E402
+from flute_rl.yamabiko.score_memory import MemoryConfig, MemoryRuntime, export, teacher, teacher_shift, torch_model  # noqa: E402
 
 WHISTLE = {"max_gap_steps": 2}     # the profiles' whistle cleaning
 
@@ -60,7 +60,8 @@ def make(rng, count, seconds, ear, config, device):
             continue
         codes = ear_codes(ear, x, device)
         n = min(len(codes), len(t[0]))
-        items.append((codes[:n], torch.tensor(t[0][:n]), torch.tensor(t[1][:n])))
+        target = torch.tensor(t[0][:n]); target.shift = teacher_shift(cents, config, WHISTLE)
+        items.append((codes[:n], target, torch.tensor(t[1][:n])))
     return items
 
 
@@ -90,7 +91,8 @@ def real_items(folders, holdout, ear, config, device, rng, crops=8, seconds=(4.0
                 t = teacher(track[start:start + length], config, WHISTLE)
                 if t is None or t[1].sum() < 50:
                     continue
-                item = (codes[start:start + length], torch.tensor(t[0]), torch.tensor(t[1]))
+                target = torch.tensor(t[0]); target.shift = teacher_shift(track[start:start + length], config, WHISTLE)
+                item = (codes[start:start + length], target, torch.tensor(t[1]))
                 (test if held else train).append(item)
     return train, test
 
@@ -105,6 +107,7 @@ def batch(items, device):
         n = len(c)
         ear[i, :n] = c.to(device).float(); target[i, :n] = t.to(device); voice[i, :n] = v.to(device).float()
         mask[i, :n] = 1
+    target.shifts = torch.tensor([float(getattr(t, "shift", 0.0)) for _, t, _ in items], device=device)
     return ear, target, voice, mask
 
 
@@ -214,6 +217,9 @@ def main():
     ap.add_argument("--real-share", type=float, default=.4, help="share of each batch cut from real whistles")
     ap.add_argument("--value", type=int, default=64, help="numbers written per instant")
     ap.add_argument("--beta", type=float, default=.25, help="smooth-L1 knee of the pitch loss, in 100 cents")
+    ap.add_argument("--key-aux", type=float, default=0.0,
+                    help="weight of teaching the memory's pitch-like number (the one its soft highest / lowest "
+                         "keep) the whistle's own pitch, in 1000 cents (training only; needs --extremes)")
     ap.add_argument("--extremes", action="store_true", help="also keep a soft highest and lowest pitch (the key)")
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -241,6 +247,11 @@ def main():
         cents, vlog = model.read(W, G, torch.arange(ear_b.shape[1], device=dev))
         pitch = (F.smooth_l1_loss(cents / 100, target / 100, beta=args.beta, reduction="none") * (1 + voice) * mask).sum() / mask.sum()
         loss = pitch + (F.binary_cross_entropy_with_logits(vlog, voice, reduction="none") * mask).sum() / mask.sum()
+        if args.key_aux:                              # the key: p of every heard note ~ the whistle's pitch
+            p = model.gen(ear_b)[..., config.global_dim]
+            raw = (target - target.shifts[:, None]) / 1000
+            on = voice * mask * (target > config.low + 1) * (target < config.high - 1)   # not where the rule clipped
+            loss = loss + args.key_aux * (F.smooth_l1_loss(p, raw, beta=.05, reduction="none") * on).sum() / on.sum().clamp_min(1)
         opt.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step(); sched.step()
         if step % 500 == 0 or step == args.steps:

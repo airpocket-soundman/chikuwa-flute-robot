@@ -72,6 +72,15 @@ def teacher(cents: np.ndarray, config: MemoryConfig, whistle: dict | None = None
     return held.astype(np.float32), voiced
 
 
+def teacher_shift(cents: np.ndarray, config: MemoryConfig, whistle: dict | None = None) -> float:
+    """How far the rule moves the whistle (cents added): the middle of the flute's range minus the middle of
+    the whistle's (2nd and 98th percentiles), as ``teacher``.  0 when nothing whistles."""
+    c = clean_track(cents, **(whistle or {}))
+    if not np.isfinite(c).any():
+        return 0.0
+    return float((config.low + config.high) / 2 - (np.nanpercentile(c, 2) + np.nanpercentile(c, 98)) / 2)
+
+
 def torch_model(config: MemoryConfig = MemoryConfig()):
     import torch
     from torch import nn
