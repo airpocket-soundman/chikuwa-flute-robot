@@ -43,6 +43,7 @@ def main():
     ap.add_argument("--twin", default="runs/real/twin_y1f80_05.json")
     ap.add_argument("--actuator", default="models/step7c/nn_f80_t7_tw05.pt")
     ap.add_argument("--mlend-songs", type=int, default=40)
+    ap.add_argument("--rig-holdout", nargs="+", default=["20261124_111404", "20261124_111830"])
     ap.add_argument("--json", default=None)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
@@ -51,7 +52,7 @@ def main():
     for ear_path, mem_path in args.pair:
         ear = mt.load_ear(ear_path, dev)
         model, config = load_memory(mem_path, dev)
-        _, rig = mt.real_items(["runs/real/whistle_data", "runs/real/whistle"], ["20261124_111404", "20261124_111830"],
+        _, rig = mt.real_items(["runs/real/whistle_data", "runs/real/whistle"], args.rig_holdout,
                                ear, config, dev, np.random.default_rng(7))
         _, mlend = mt.real_items(["runs/archive/mlend_whistles"], ["_test"], ear, config, dev,
                                  np.random.default_rng(9), crops=1)

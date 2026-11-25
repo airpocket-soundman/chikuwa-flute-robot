@@ -417,6 +417,7 @@ class Server:
             "until": time.monotonic() + float(req.get("max_seconds", 150.0)),
             "input": (0, 1) if again else (1, 0), "pressed": self.buttons(), "fan": None, "modes": [],
             "stopped": None, "audio_start": None, "late": 0,
+            "listen_out": req.get("listen_out"), "listen_start": None, "listen_saved": False,
             "log": {k: [] for k in ("heard", "valid", "target_cents", "target_voice", "pwm", "valve")}}
         self.step8_result = None
         return {"started": True, "start": "again" if again else "listen"}
@@ -461,6 +462,7 @@ class Server:
             return self._step8_end(ses, "button")
         out = s8.tick(self.link.audio.latest(320), button=b, double=d, shift=ses["shift"])
         ses["modes"].append(out["mode"])
+        self._step8_listened(ses, out["mode"])
         fan = round(float(out["fan"]), 2) if out["mode"] == "play" else 0.0
         ses["fan_sent"] = ses.get("fan_sent", 0) + 1
         if fan != ses["fan"] or (fan > .05 and ses["fan_sent"] >= 50):   # again every 0.5 s while on: the
@@ -481,9 +483,24 @@ class Server:
         if out["mode"] == "idle" and len(ses["modes"]) > 1:
             self._step8_end(ses, None)
 
+    def _step8_listened(self, ses, mode):
+        """The whistle it listened to, saved as the whistle copy saves one (data for the ear and the memory)."""
+        if mode == "listen" and ses["listen_start"] is None:
+            ses["listen_start"] = self.link.audio.end
+        elif mode != "listen" and ses["listen_start"] is not None and not ses["listen_saved"] and ses["listen_out"]:
+            ses["listen_saved"] = True
+            pcm = self.link.audio.span(ses["listen_start"], self.link.audio.end)
+            if len(pcm) > SR // 2:
+                try:
+                    pathlib.Path(ses["listen_out"]).parent.mkdir(parents=True, exist_ok=True)
+                    np.savez_compressed(ses["listen_out"], pcm=pcm, sr=SR)
+                except OSError as exc:
+                    self.log(f"step8: could not save the whistle: {exc}")
+
     def _step8_end(self, ses, why):
         """The object is idle again (or stopped): outputs to safe, the play's record written, the result kept."""
         self.step8_session = None
+        self._step8_listened(ses, "idle")
         ses["s8"].mode = 0
         self.safe(f"step8 {why or 'done'}")
         log = ses["log"]

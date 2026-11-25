@@ -822,7 +822,8 @@ class WhistleJob:
             rig.call("step8_start", start=start, ear_runtime=profile["ear_runtime_path"],
                      memory_runtime=profile["memory_runtime_path"], runtime=profile["runtime_path"],
                      valve_runtime=profile["valve_runtime_path"], heads=profile["heads_path"],
-                     shift_cents=self.shift_for(profile), out=str(out), max_seconds=150)
+                     shift_cents=self.shift_for(profile), out=str(out), max_seconds=150,
+                     listen_out=str(WHISTLE_DIR / f"{stamp}_whistle.npz") if start == "listen" else None)
             finished_sent = False
             while True:
                 st = rig.call("step8_status")
