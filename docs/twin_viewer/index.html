@@ -166,9 +166,7 @@ fixed.cylY(16, 17, 22, -26, 9.6, C.black, 7, .05);            // top plate aroun
 fixed.box(30, 32, 5, 22, -16, -14, C.black, .03);             // the housing's post
 
 // servo (SG90) on the valve box's left face
-fixed.box(-10, -6, 9, 21, -9, -2, C.servo, .05);
-fixed.box(-11, -10, 11, 18, -8, -3, C.servoLabel, .04);
-fixed.box(-12, -6, 19, 20, -9, -2, C.servo, .05);             // mounting ears
+fixed.box(-10, -6, 10, 20, -8, -3, C.servo, .04);
 
 // microphone board on its white bracket, beside the tube holder
 fixed.box(28, 30, 3, 24, -6, -4, C.white, .03);
@@ -211,10 +209,10 @@ scene.add(fanRotor);
 
 // servo horn and the valve flap it turns (inside the box, seen through the front slot)
 const horn = new Voxels();
-horn.box(-1, 1, 0, 1, -1, 1, C.white, .02).box(-1, 1, 0, 1, 1, 5, C.white, .02);
+horn.box(-1, 1, 0, 1, -1, 4, C.white, .02);
 const servoHorn = new THREE.Group();
 servoHorn.add(horn.mesh([0, 0, 0]));
-servoHorn.position.set(-8, 21, -5.5);
+servoHorn.position.set(-8, 20, -5.5);
 scene.add(servoHorn);
 
 const flap = new Voxels();
