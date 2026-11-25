@@ -54,3 +54,14 @@ def test_listen_follows_a_sweep():
     hz = 440 * 2 ** (clean[v] / 1200)
     assert abs(hz[2] - 1000) < 80 and abs(hz[-3] - 2000) < 120
     assert len(archive_demo.synth(clean, v)) == len(clean) * 160
+
+
+def test_stretch_keeps_the_pitch():
+    sr = 16000
+    t = np.arange(sr) / sr
+    x = .5 * np.sin(2 * np.pi * 1500 * t)
+    y = archive_demo.stretch(x, 2.0)
+    assert abs(len(y) - 2 * len(x)) < 1100
+    raw, _ = archive_demo.listen(y, sr, "silbo")
+    hz = 440 * 2 ** (np.nanmedian(raw) / 1200)
+    assert abs(hz - 1500) < 15

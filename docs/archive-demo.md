@@ -37,11 +37,21 @@ python scripts/archive_demo.py runs/archive/xeno_canto/parus_minor/XC1147321.mp3
 
 | ファイル | 中身 |
 |---|---|
-| `source.wav` | 切り出した原音 |
+| `source.wav` | 切り出した原音（アーカイブの音そのまま） |
+| `source_slow.wav` | `--slow` のとき、原音を音程を変えずにデモと同じ速さへ伸ばしたもの（WSOLA） |
+| `listen.wav` | 聞き比べ用に全部を順につないだもの: 原音 → デモの速さの原音 → 楽譜 → 各版の演奏（0.7 s 間隔） |
 | `target.wav` / `target.npz` | 体に合わせた楽譜（音と、`cents`・`voice`） |
 | `<step>.wav` | 模擬機体の 1 台目が吹いた音程を音にしたもの（鳴っている間だけ） |
 | `demo.png` | 原音のスペクトログラムと聴き取った線、楽譜、各版の演奏 |
 | `report.json` | 下の数値 |
+
+**音を流す**: `--play` で、作り終えた後に上の順でスピーカーから流す（Windows は標準の winsound、Mac/Linux は afplay/aplay）。
+前に作ったものをもう一度流すときは `--replay`。シルボ・ゴメロの文なら、流す前に意味（書き起こし）を表示する。
+
+```
+python scripts/archive_demo.py runs/archive/silbo_gomero/sentences/sentences/clips/01-sentence-001.wav --kind silbo --slow 2 --play
+python scripts/archive_demo.py --replay runs/archive_demo/<run>
+```
 
 数値（模擬機体の平均）:
 - **shape**: 調をそろえた後の |演奏 − 楽譜| の平均（cent）。口笛言語は音程の線が言葉なので、これが本命の指標

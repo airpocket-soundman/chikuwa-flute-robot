@@ -4,6 +4,8 @@
     python scripts/archive_demo.py runs/archive/xeno_canto/parus_minor/XC285813.mp3 --kind bird --start 3 --seconds 6
     python scripts/archive_demo.py <file> --kind silbo --slow 2 --steps classic step7c   # speak half as fast
     python scripts/archive_demo.py --list silbo                                          # what there is
+    python scripts/archive_demo.py <file> --kind silbo --slow 2 --play                   # and hear it all
+    python scripts/archive_demo.py --replay runs/archive_demo/<run>                      # hear a run again
 
 Fetch the archives first (scripts/archive_fetch.py).  The steps:
   1. listen   the pitch every 10 ms (YIN, the training-side ear; a whistled language is a pitch line, and a bird
@@ -13,9 +15,11 @@ Fetch the archives first (scripts/archive_fetch.py).  The steps:
               usually are), ``--fit clip`` keeps them and cuts the ends; ``--slow`` stretches time
   3. play     every ``--steps`` profile plays it on ``--rigs`` rigs drawn around the twin (scripts/yamabiko_compare_sim.py,
               NumPy only), and the first rig's take is drawn and sounded
-Writes runs/archive_demo/<stamp>_<name>/: source.wav (the clip), target.npz (cents, voice: the score the real rig
+Writes runs/archive_demo/<stamp>_<name>/: source.wav (the clip), source_slow.wav (the clip at the demo's --slow,
+pitch kept), target.npz (cents, voice: the score the real rig
 can play with ``scripts/yamabiko_whistle_copy.py --target``), <step>.wav (the simulated flute: its pitch, sounding
-only when the flute does), demo.png and report.json.
+only when the flute does), listen.wav (all of these in a row: source, source at the demo's speed, score, each
+step's flute), demo.png and report.json.  ``--play`` plays them through the speakers in that order.
 
 Per step, over the rigs (the pitch line is what a whistled language carries, so this is the score that matters):
   shape  mean |played - target| in cent after removing the key, where both sound
@@ -124,6 +128,71 @@ def synth(cents, sounding, sr=SR_OUT, hz=None):
     return .25 * amp * (np.sin(phase) + .3 * np.sin(2 * phase) + .1 * np.sin(3 * phase))
 
 
+def stretch(x, factor, frame=1024, hop=256, search=192):
+    """``x`` made ``factor`` times longer with its pitch kept (WSOLA: overlap Hann frames, each one shifted by
+    up to ``search`` samples to line up with the previous), so the source can be heard at the demo's --slow."""
+    if factor == 1.0 or len(x) < frame * 2:
+        return np.asarray(x, np.float64)
+    x = np.r_[np.zeros(search), np.asarray(x, np.float64), np.zeros(frame + search)]
+    window = np.hanning(frame)
+    n_out = int((len(x) - frame - 2 * search) * factor)
+    out, norm = np.zeros(n_out + frame), np.zeros(n_out + frame)
+    natural = None                                    # where the last frame would naturally continue
+    for k, pos in enumerate(range(0, n_out, hop)):
+        centre = search + int(pos / factor)
+        if natural is None:
+            start = centre
+        else:
+            ref = x[natural:natural + frame]
+            lo, hi = max(centre - search, 0), min(centre + search, len(x) - frame)
+            cands = np.lib.stride_tricks.sliding_window_view(x[lo:hi + frame], frame)[:hi - lo + 1:8]
+            start = lo + 8 * int(np.argmax(cands @ ref)) if len(cands) else centre
+        out[pos:pos + frame] += x[start:start + frame] * window
+        norm[pos:pos + frame] += window
+        natural = start + hop
+    return out[:n_out] / np.maximum(norm[:n_out], 1e-3)
+
+
+def listening(out_dir: pathlib.Path, steps) -> list[tuple[str, pathlib.Path]]:
+    """(label, wav) in the order to hear them, and listen.wav with all of them in a row (0.7 s apart)."""
+    parts = [("source (archive)", out_dir / "source.wav")]
+    if (out_dir / "source_slow.wav").exists():
+        parts.append(("source at the demo's speed", out_dir / "source_slow.wav"))
+    parts.append(("score for the flute", out_dir / "target.wav"))
+    parts += [(f"flute, {name} (sim)", out_dir / f"{name}.wav") for name in steps if (out_dir / f"{name}.wav").exists()]
+    gap = np.zeros(int(.7 * SR_OUT))
+    chain = []
+    for _, path in parts:
+        y, sr = read_audio(path)
+        chain += [resample(y, sr), gap]
+    write_wav(out_dir / "listen.wav", np.concatenate(chain), SR_OUT)
+    return parts
+
+
+def play_wavs(parts):
+    """Play each wav through the speakers in turn (Windows: winsound; else aplay / afplay if there)."""
+    import shutil
+    import subprocess
+    for label, path in parts:
+        print(f"> {label}: {path.name}", flush=True)
+        if sys.platform == "win32":
+            import winsound
+            winsound.PlaySound(str(path), winsound.SND_FILENAME)
+        elif shutil.which("afplay") or shutil.which("aplay"):
+            subprocess.run([shutil.which("afplay") or shutil.which("aplay"), str(path)], check=False)
+        else:
+            print("  (no player found; open the file instead)")
+            return
+        time.sleep(.4)
+
+
+def replay(run: pathlib.Path):
+    report = json.loads((run / "report.json").read_text("utf-8"))
+    if report.get("says"):
+        print(f'says: "{report["says"]}"')
+    play_wavs(listening(run, list(report.get("steps", {}))))
+
+
 def transcription(src: pathlib.Path) -> str:
     """The sentence a Silbo Gomero clip says (transc.csv beside its clips/ folder), or ''."""
     import csv
@@ -178,11 +247,16 @@ def main():
     ap.add_argument("--rigs", type=int, default=8)
     ap.add_argument("--seed", type=int, default=7777)
     ap.add_argument("--out", default=None, help="folder (default runs/archive_demo/<stamp>_<name>)")
+    ap.add_argument("--play", action="store_true",
+                    help="afterwards play the source, the score and every step's flute through the speakers")
+    ap.add_argument("--replay", metavar="RUN", help="play an earlier run's sounds again (a runs/archive_demo/ folder)")
     args = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):                 # Spanish ¿ ñ on a cp932 console
         sys.stdout.reconfigure(errors="replace")
     if args.list:
         return list_sources(args.list)
+    if args.replay:
+        return replay(pathlib.Path(args.replay))
     if not args.source:
         ap.error("give a source file, or --list")
     src = pathlib.Path(args.source)
@@ -194,6 +268,8 @@ def main():
     out_dir = pathlib.Path(args.out or ROOT / "runs/archive_demo" / f"{time.strftime('%Y%m%d_%H%M%S')}_{src.stem}")
     out_dir.mkdir(parents=True, exist_ok=True)
     write_wav(out_dir / "source.wav", resample(x, sr), SR_OUT)
+    if args.slow != 1.0:
+        write_wav(out_dir / "source_slow.wav", np.clip(stretch(resample(x, sr), args.slow), -1, 1), SR_OUT)
 
     raw, clean = listen(x, sr, args.kind)
     profiles = load_profiles()
@@ -263,7 +339,11 @@ def main():
     for ax in axes[1:, 0]:
         ax.set_ylabel("cent"); ax.grid(alpha=.3)
     plt.tight_layout(); plt.savefig(out_dir / "demo.png", dpi=70); plt.close(fig)
-    print(f"saved {out_dir.relative_to(ROOT) if out_dir.is_relative_to(ROOT) else out_dir}")
+    parts = listening(out_dir, list(results))
+    print(f"saved {out_dir.relative_to(ROOT) if out_dir.is_relative_to(ROOT) else out_dir} "
+          f"(listen.wav: {', '.join(label for label, _ in parts)})")
+    if args.play:
+        play_wavs(parts)
 
 
 if __name__ == "__main__":
