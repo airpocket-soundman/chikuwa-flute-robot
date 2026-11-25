@@ -3,6 +3,7 @@
     python scripts/archive_fetch.py silbo                    # Silbo Gomero Speech Corpus (OpenSLR SLR137), ~0.3 GB
     python scripts/archive_fetch.py tit --pages 2            # Japanese tit (Parus minor) from xeno-canto, Japan, quality A
     python scripts/archive_fetch.py tit --query "Parus minor q:A type:song"
+    python scripts/archive_fetch.py mlend --per-interpreter 3   # MLEnd Hums and Whistles: whistled tunes, ~1 GB
 
 silbo  runs/archive/silbo_gomero/{words,sentences,fragments}/*.wav plus the transcriptions.  CC BY-NC-SA 4.0
        (A. Jakubiak, Silbo Gomero Teaching Project; cite Interspeech 2023, doi 10.21437/Interspeech.2023-989).
@@ -10,6 +11,10 @@ tit    runs/archive/xeno_canto/<species>/XC<id>.mp3 and manifest.json (recordist
        each recording).  The licences are per recording, mostly CC BY-NC-ND or BY-NC-SA: use them for analysis and
        demos with the credit, do not commit or publish edited copies of an ND one.  xeno-canto's API v3 needs a
        personal key, so this reads the public search page instead (one request per page, then one per file).
+mlend  runs/archive/mlend_hw/{attributes.csv, audio/<file>.wav, manifest.json}: whistles of 8 tunes by 129
+       people (Queen Mary University of London students' MLEnd dataset, github.com/MLEndDatasets/HumsAndWhistles).
+       Up to ``--per-interpreter`` whistles per person, the tunes taken in turn.  **No licence is stated** (Kaggle
+       lists "Unknown"): use it only to train and test here, do not publish or commit the sounds.
 
 The audio is data, not code: nothing in these folders is run.  Skips files that are already there.
 """
@@ -130,6 +135,36 @@ def tit(args):
     print(f"{len(manifest)} recordings in {folder.relative_to(ROOT)} (manifest.json has each licence)")
 
 
+MLEND = "https://github.com/MLEndDatasets/HumsAndWhistles/raw/main/"
+
+
+def mlend(args):
+    import csv
+    from concurrent.futures import ThreadPoolExecutor
+    folder = ARCHIVE / "mlend_hw"
+    if not fetch(MLEND + "MLEndHWD_audio_attributes_benchmark.csv", folder / "attributes.csv"):
+        raise SystemExit("could not fetch the list")
+    rows = [r for r in csv.DictReader(open(folder / "attributes.csv", encoding="utf-8")) if r["Interpretation"] == "Whistle"]
+    by_person = {}
+    for r in rows:
+        by_person.setdefault(r["Interpreter"], []).append(r)
+    chosen, turn = [], 0
+    for person, takes in sorted(by_person.items(), key=lambda kv: int(kv[0])):
+        takes = sorted(takes, key=lambda r: r["Song"])
+        for k in range(min(args.per_interpreter, len(takes))):
+            chosen.append(takes[(turn + k) % len(takes)])
+        turn += 1
+    print(f"{len(rows)} whistles by {len(by_person)} people; fetching {len(chosen)}")
+
+    def one(r):
+        return r if fetch(MLEND + "MLEndHWD_audiofiles/" + r["filename"], folder / "audio" / r["filename"]) else None
+    with ThreadPoolExecutor(args.workers) as pool:
+        got = [r for r in pool.map(one, chosen) if r]
+    (folder / "manifest.json").write_text(json.dumps(
+        [{"file": r["filename"], "interpreter": r["Interpreter"], "song": r["Song"]} for r in got], indent=1), encoding="utf-8")
+    print(f"{len(got)} whistles in {(folder / 'audio').relative_to(ROOT)} (no licence stated: keep them here)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="what", required=True)
@@ -140,8 +175,11 @@ def main():
     t.add_argument("--pages", type=int, default=2, help="search pages to read (30 recordings each)")
     t.add_argument("--limit", type=int, default=0, help="stop after this many recordings (0: all on the pages)")
     t.add_argument("--pause", type=float, default=1.0, help="seconds between downloads")
+    m = sub.add_parser("mlend")
+    m.add_argument("--per-interpreter", type=int, default=3)
+    m.add_argument("--workers", type=int, default=8)
     args = ap.parse_args()
-    {"silbo": silbo, "tit": tit}[args.what](args)
+    {"silbo": silbo, "tit": tit, "mlend": mlend}[args.what](args)
 
 
 if __name__ == "__main__":

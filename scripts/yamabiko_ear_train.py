@@ -8,6 +8,8 @@
 whistle frames (flute_rl/yamabiko/ear_synth.py) to the training set, a quiet frame of the rig's recordings
 under each, and scores a separate synthetic test set.  ``--demo DIR`` also scores the 16 kHz WAVs in DIR
 (the demo videos: a whistle from a phone, then the flute), labelled offline like the dataset.
+``--extra DIR`` adds more whistles in the recorded takes' form (scripts/yamabiko_archive_whistles.py: the Silbo
+Gomero corpus under the rig's room), ``--extra-repeat`` times; stems with "_test" are scored, not trained on.
 
 Voiced frames teach the pitch (cross-entropy on 25-cent bins, a Gaussian of one bin around the label), quiet
 frames teach "not sounding"; unsure frames teach nothing.  Every batch is augmented: gain, white noise and a
@@ -62,7 +64,7 @@ def demo_frames(folder):
     return tuple(np.concatenate(z) for z in zip(*parts))
 
 
-def recorded_frames(folders, test_stems):
+def recorded_frames(folders, test_stems, test_marker=None):
     """Frames of the page's record-only takes: whistles labelled as the dataset (YIN and FFT agreeing, up to
     4 kHz), quiet and other (speech, claps) all "not sounding".  Split by take: ``test_stems`` are held out."""
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -81,7 +83,8 @@ def recorded_frames(folders, test_stems):
         X, c, st = data.build(d["pcm"])
         if kind != "whistle":
             c, st = np.full(len(X), np.nan, np.float32), np.zeros(len(X), np.int8)
-        sp = np.full(len(X), 1 if path.stem in test_stems else 0, np.int8)
+        held = path.stem in test_stems or (test_marker is not None and test_marker in path.stem)
+        sp = np.full(len(X), 1 if held else 0, np.int8)
         parts.append((X, c, st, sp))
         print(f"  {path.stem:32s} {kind:8s} {len(X):5d} frames voiced {np.mean(st == 1):.2f}"
               f"{'  (test)' if sp[0] else ''}", flush=True)
@@ -140,6 +143,8 @@ def main():
     ap.add_argument("--recorded-test", nargs="*", default=[], help="stems of takes kept out for the test")
     ap.add_argument("--recorded-repeat", type=int, default=4, help="times the recorded whistles go in the training set")
     ap.add_argument("--compare", default=None, help="an ear runtime (.npz) to score on the same recorded test")
+    ap.add_argument("--extra", nargs="*", default=[], help="folders of more whistles (e.g. runs/archive/silbo_whistles)")
+    ap.add_argument("--extra-repeat", type=int, default=1)
     ap.add_argument("--demo", default=None, help="folder of 16 kHz WAVs to score as well")
     ap.add_argument("--epochs", type=int, default=12)
     ap.add_argument("--batch", type=int, default=512)
@@ -179,6 +184,18 @@ def main():
         recorded_test = (rx[te], rc[te], rs[te])
         print(f"recorded takes: {len(tr)} training frames (x{args.recorded_repeat}), {len(te)} test frames, "
               f"voiced {np.mean(rs == 1):.2f}", flush=True)
+    extra_test = None
+    if args.extra:
+        ex, ec, es, esplit = recorded_frames(args.extra, [], test_marker="_test")
+        tr = np.flatnonzero(esplit == 0)
+        rep_idx = np.concatenate([tr] * max(1, args.extra_repeat))
+        x = np.concatenate([x, ex[rep_idx].astype(np.float32) / 32768.0])
+        cents = np.concatenate([cents, ec[rep_idx]]); state = np.concatenate([state, es[rep_idx]])
+        split = np.concatenate([split, np.zeros(len(rep_idx), split.dtype)])
+        te = np.flatnonzero(esplit == 1)
+        extra_test = (ex[te], ec[te], es[te])
+        print(f"extra whistles: {len(tr)} training frames (x{args.extra_repeat}), {len(te)} test frames, "
+              f"voiced {np.mean(es == 1):.2f}", flush=True)
     use = state >= 0
     train = np.flatnonzero(use & (split == 0))
     test = np.flatnonzero(split[:n_rig] == 1)
@@ -221,6 +238,12 @@ def main():
         if args.compare:
             report["recorded_holdout_compare"] = score_numpy(args.compare, tx, tc, ts)
             print(f"  {args.compare}: {report['recorded_holdout_compare']}", flush=True)
+    if extra_test is not None and len(extra_test[0]):
+        tx, tc, ts = extra_test
+        report["extra_holdout"] = score("extra whistles (held out)", tx, tc, ts, model, config.low_cents, dev)
+        if args.compare:
+            report["extra_holdout_compare"] = score_numpy(args.compare, tx, tc, ts)
+            print(f"  {args.compare}: {report['extra_holdout_compare']}", flush=True)
     if args.demo:
         dx, dc, ds = demo_frames(args.demo)
         high = (ds == 1) & (dc > 1800)          # above the flute's range: the whistle

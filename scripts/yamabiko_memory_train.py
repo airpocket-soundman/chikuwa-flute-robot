@@ -9,6 +9,9 @@ every 10 ms); the memory writes them and is taught to read back the rule pipelin
 holds), on the demo videos' real whistles (teacher from YIN, as the whistle copy does today), and with
 ``--play`` by playing the recalled targets with an actuator network on rigs around a twin, against the same
 melody played from the rule's targets.  Writes <out>.pt, <out>.json and <out>_runtime.npz.
+``--extra DIR`` adds songs cut from more human whistles in the rig recordings' form (scripts/yamabiko_archive_whistles
+.py: the Silbo Gomero corpus under the rig's room) as ``--extra-share`` of every batch; its takes with "_test"
+in the stem are scored apart (``extra_holdout``), so ``real_holdout`` stays the rig's own held-out whistles.
 """
 from __future__ import annotations
 
@@ -65,7 +68,7 @@ def make(rng, count, seconds, ear, config, device):
     return items
 
 
-def real_items(folders, holdout, ear, config, device, rng, crops=8, seconds=(4.0, 20.0)):
+def real_items(folders, holdout, ear, config, device, rng, crops=8, seconds=(4.0, 20.0), kinds=("whistle",)):
     """Songs cut from whistles recorded on the rig (the page's takes of kind whistle, and the whistle copy's
     recordings): ``crops`` stretches of ``seconds`` per take, the teacher made from YIN as the whistle copy does.
     Returns (training items, held-out items); the takes named in ``holdout`` only give held-out items."""
@@ -76,7 +79,7 @@ def real_items(folders, holdout, ear, config, device, rng, crops=8, seconds=(4.0
             if "_play" in path.stem or "_target" in path.stem:
                 continue
             d = np.load(path)
-            if "pcm" not in d.files or ("kind" in d.files and str(d["kind"]) != "whistle"):
+            if "pcm" not in d.files or ("kind" in d.files and str(d["kind"]) not in kinds):
                 continue
             pcm = d["pcm"]
             codes = ear_codes(ear, pcm / 32768.0, device)
@@ -215,6 +218,9 @@ def main():
     ap.add_argument("--real", nargs="*", default=[], help="folders of whistles recorded on the rig")
     ap.add_argument("--real-holdout", nargs="*", default=[], help="stems of recordings kept for the test only")
     ap.add_argument("--real-share", type=float, default=.4, help="share of each batch cut from real whistles")
+    ap.add_argument("--extra", nargs="*", default=[], help="folders of more human whistles (runs/archive/silbo_whistles)")
+    ap.add_argument("--extra-share", type=float, default=.25, help="share of each batch cut from the extra whistles")
+    ap.add_argument("--extra-crops", type=int, default=2, help="songs cut from every extra take")
     ap.add_argument("--value", type=int, default=64, help="numbers written per instant")
     ap.add_argument("--beta", type=float, default=.25, help="smooth-L1 knee of the pitch loss, in 100 cents")
     ap.add_argument("--key-aux", type=float, default=0.0,
@@ -232,16 +238,21 @@ def main():
     tests = {s: make(np.random.default_rng(args.seed + 100 + s), 32, float(s), ear, config, dev) for s in (5, 10, 20, 30)}
     real_train, real_test = (real_items(args.real, args.real_holdout, ear, config, dev, np.random.default_rng(args.seed + 7))
                              if args.real else ([], []))
+    extra_train, extra_test = (real_items(args.extra, ["_test"], ear, config, dev, np.random.default_rng(args.seed + 9),
+                                          crops=args.extra_crops) if args.extra else ([], []))
     print(f"data: {len(train)} songs, {sum(len(c) for c, _, _ in train) / 6000:.0f} min; real {len(real_train)} songs "
-          f"for training, {len(real_test)} held out  {time.time() - started:.0f}s", flush=True)
+          f"for training, {len(real_test)} held out; extra {len(extra_train)} / {len(extra_test)}  "
+          f"{time.time() - started:.0f}s", flush=True)
     model = torch_model(config).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.steps)
     rng = np.random.default_rng(args.seed + 1)
     for step in range(1, args.steps + 1):
         k = int(round(args.batch * args.real_share)) if real_train else 0
-        chosen = [train[i] for i in rng.choice(len(train), args.batch - k)] + \
-                 [real_train[i] for i in rng.choice(len(real_train), k)] if k else [train[i] for i in rng.choice(len(train), args.batch)]
+        e = int(round(args.batch * args.extra_share)) if extra_train else 0
+        chosen = [train[i] for i in rng.choice(len(train), args.batch - k - e)]
+        chosen += [real_train[i] for i in rng.choice(len(real_train), k)] if k else []
+        chosen += [extra_train[i] for i in rng.choice(len(extra_train), e)] if e else []
         ear_b, target, voice, mask = batch(chosen, dev)
         W, G = model.write(ear_b, mask)
         cents, vlog = model.read(W, G, torch.arange(ear_b.shape[1], device=dev))
@@ -267,10 +278,14 @@ def main():
         report["demo"] = {n: scores(model, [it], dev) for n, it in zip(names, items)}
     if real_test:
         report["real_holdout"] = scores(model, real_test, dev)
+    if extra_test:
+        report["extra_holdout"] = scores(model, extra_test, dev)
     if args.play:
         report["play_10s"] = play_scores(model, tests[10][:12], dev, args.play, args.actuator)
         if real_test:
             report["play_real"] = play_scores(model, real_test[:12], dev, args.play, args.actuator)
+        if extra_test:
+            report["play_extra"] = play_scores(model, extra_test[:12], dev, args.play, args.actuator)
         if args.demo:
             report["play_demo"] = play_scores(model, items, dev, args.play, args.actuator)
     print(json.dumps(report, indent=2, ensure_ascii=False))
