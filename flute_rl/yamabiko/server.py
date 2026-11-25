@@ -105,6 +105,7 @@ class Server:
         self.practice = None               # (runtime, valve, target) and the runtime the last practice play used
         self.running = True
         self.next_step = time.monotonic()
+        self.panel_out = []                # the touch panel's page, still to send (a few pieces per step)
 
     # ----- outputs ---------------------------------------------------------------------------------
     def safe(self, why=""):
@@ -168,8 +169,8 @@ class Server:
     def cmd_panel(self, client, req):
         """The touch panel: show ``page_b64`` (with ``version``) if given, and hand over what it asked for since
         the last call (``events``, each a list of bytes).  Needs no ownership of the outputs."""
-        if req.get("page_b64") is not None:
-            self.link.panel(base64.b64decode(req["page_b64"]), int(req.get("version", 0)))
+        if req.get("page_b64") is not None:              # sent a few pieces per 10 ms step (tick)
+            self.panel_out = list(self.link.panel_frames(base64.b64decode(req["page_b64"]), int(req.get("version", 0))))
         events = [list(e) for e in getattr(self.link, "panel_events", [])]
         if events:
             self.link.panel_events.clear()
@@ -461,10 +462,11 @@ class Server:
         out = s8.tick(self.link.audio.latest(320), button=b, double=d, shift=ses["shift"])
         ses["modes"].append(out["mode"])
         fan = round(float(out["fan"]), 2) if out["mode"] == "play" else 0.0
-        if fan != ses["fan"]:
-            self.fan_on, self.fan_duty = fan > .05, fan
+        ses["fan_sent"] = ses.get("fan_sent", 0) + 1
+        if fan != ses["fan"] or (fan > .05 and ses["fan_sent"] >= 50):   # again every 0.5 s while on: the
+            self.fan_on, self.fan_duty = fan > .05, fan                   # firmware's watchdog switches it off
             self.link.fan(fan > .05, fan)
-            ses["fan"] = fan
+            ses["fan"], ses["fan_sent"] = fan, 0
         self.pwm, self.valve, self.brake = float(out["pwm"]), bool(out["valve"]), False
         self.link.command(self.pwm, self.valve, False)
         if "t" in out:
@@ -667,6 +669,10 @@ class Server:
                 self._step8_step()                              # step8 runs: it gives the command
             else:
                 self.link.command(self.pwm, self.valve, self.brake)
+            for _ in range(3):                                  # the panel's page: 3 pieces per step at most
+                if not self.panel_out:
+                    break
+                self.link.send(self.panel_out.pop(0))
             self.next_step = max(self.next_step + STEP_S, now - STEP_S)
         self.link.poll(max(0.0, min(.002, self.next_step - time.monotonic())))
         st = self.link.status

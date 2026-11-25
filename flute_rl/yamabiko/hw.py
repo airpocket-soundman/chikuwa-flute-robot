@@ -151,13 +151,23 @@ class Link:
     def valve_positions(self, open_pos: int, closed_pos: int, move_ms: int) -> None:
         self.send(b"K" + struct.pack("<HHH", open_pos, closed_pos, move_ms))
 
-    def panel(self, page: bytes, version: int) -> None:
-        """Show ``page`` on the touch panel: into the MCU's spare page in 32-byte pieces, then switch to it."""
+    @staticmethod
+    def panel_frames(page: bytes, version: int) -> list:
+        """The commands that show ``page`` on the touch panel: 32-byte pieces into the MCU's spare page, then
+        the switch to it.  The server sends a few every 10 ms step (sent at once, a page with its graph held the
+        commands up ~100 ms, the firmware's watchdog stopped the fan and nothing switched it on again)."""
+        frames = []
         for off in range(0, len(page), 32):
             piece = page[off:off + 32]
-            self.send(b"U" + struct.pack("<H", off) + piece + bytes(32 - len(piece)))
-            time.sleep(.002)          # paced: sent back to back, the pieces overran the MCU's receive buffer
-        self.send(b"V" + struct.pack("<HH", len(page), version & 0xFFFF))
+            frames.append(b"U" + struct.pack("<H", off) + piece + bytes(32 - len(piece)))
+        frames.append(b"V" + struct.pack("<HH", len(page), version & 0xFFFF))
+        return frames
+
+    def panel(self, page: bytes, version: int) -> None:
+        """All of panel_frames at once, paced (tests and tools; the server spreads them over its steps)."""
+        for frame in self.panel_frames(page, version):
+            self.send(frame)
+            time.sleep(.002)          # sent back to back, the pieces overran the MCU's receive buffer
 
     def limit(self, max_pwm: float) -> None:
         self.send(b"L" + struct.pack("<H", int(round(max(0.0, min(1.0, max_pwm)) * 1000))))

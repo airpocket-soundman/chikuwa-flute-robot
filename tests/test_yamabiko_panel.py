@@ -65,7 +65,9 @@ def test_server_panel_command():
     try:
         link.panel_events.append(bytes([panel.EV_STEP, 2]))
         out = srv.cmd_panel(None, {"page_b64": "AAEC", "version": 9})
-        assert out == {"events": [[panel.EV_STEP, 2]]} and link.panel_pages == [(b"\x00\x01\x02", 9)]
+        assert out == {"events": [[panel.EV_STEP, 2]]}
+        assert [f[:1] for f in srv.panel_out] == [b"U", b"V"]                # queued: a few pieces per step
+        assert srv.panel_out[0][3:6] == b"\x00\x01\x02" and struct.unpack("<HH", srv.panel_out[1][1:]) == (3, 9)
         assert srv.cmd_panel(None, {}) == {"events": []}
     finally:
         srv.close()

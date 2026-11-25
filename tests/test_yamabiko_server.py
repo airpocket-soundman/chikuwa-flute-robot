@@ -34,6 +34,7 @@ class FakeLink:
     def stop(self): self.sent.append(b"X")
     def limit(self, m): self.max_pwm = m
     def panel(self, page, version): self.panel_pages.append((bytes(page), version))
+    panel_frames = staticmethod(__import__('flute_rl.yamabiko.hw', fromlist=['Link']).Link.panel_frames)
     def fan(self, on, duty): self.fan_state = (on, duty)
     def valve_positions(self, *a): self.sent.append(("K",) + a)
 
