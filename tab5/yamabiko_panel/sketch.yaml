@@ -1,0 +1,2 @@
+# arduino-cli compile tab5/yamabiko_panel  (the Tab5 has 16 MB of flash; the Japanese fonts need a 3 MB app)
+default_fqbn: m5stack:esp32:m5stack_tab5:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB

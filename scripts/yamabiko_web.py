@@ -12,6 +12,11 @@ heard from the page (the clip, and the clip at the flute's speed) and the flute 
 step; pressing twice plays it again.  The clips are made on the PC by scripts/archive_pack.py into
 runs/archive_pack/ and copied by scripts/uno_q_push.sh.
 
+The touch panel (M5Stack Tab5 on the B board's I2C, tab5/yamabiko_panel/) shows the same: PanelBridge sends
+it a page (flute_rl/yamabiko/panel.py) whenever the status changes and acts on what it asks for (choose a
+step, calibrate, play an archive clip).  Its record / again / stop buttons are presses of the EXEC button
+in the MCU, so they work as the board's button does, also while the flute plays.
+
 Talks to the command server (scripts/yamabiko_server.py) on the same board, as one connection: while the
 page drives the outputs, other clients (yamabiko_remote.py, the button jog) are refused until it lets go.
 
@@ -310,6 +315,7 @@ class WhistleJob:
         self.collect = False      # the data collection mode: record only, no calibration, no play
         self.collect_kind, self.collect_seconds = "whistle", MAX_RECORD_S
         self.takes = self._load_takes()
+        self.panel = None         # PanelBridge, when the touch panel runs
         self._restore_song()
 
     # ----- the chosen step ---------------------------------------------------------------------------
@@ -668,6 +674,8 @@ class WhistleJob:
 
     def _tune(self, rig, profile):
         self._set(phase="tune", message="キャリブレーション中（縮み切りの音と、上下に 1 往復）")
+        if self.panel:
+            self.panel.push_now()
         try:
             result = rig.tune(runtime=profile["runtime_path"], fan=profile["fan"], stop_on_button=True,
                               **common_ear(profile))
@@ -725,6 +733,8 @@ class WhistleJob:
         song = self.song
         n = len(self.practice) + 1
         self._set(phase="play", message=f"演奏中（練習 {n} 回目、ボタンで止められます）", heard=None, relative_mae=None)
+        if self.panel:
+            self.panel.push_now()
         out = WHISTLE_DIR / f"{song['stamp']}_{profile['name']}_play{n}.npz"
         try:
             result = rig.play(profile["runtime_path"], song["path"], out=str(out), repeats=1, fan=profile["fan"],
@@ -855,6 +865,98 @@ class WhistleJob:
             self.plays = []
             self._set(whistle=listed(raw), cleaned=listed(cents), target=[round(float(v), 1) for v in target],
                       voice=[bool(v) for v in voice], report=report, plays_n=0, plays_id=None)
+
+
+class PanelBridge:
+    """The touch panel: a page whenever the web page's status changes, and its requests (events) acted on.
+    Talks to the command server on its own connection; while the server is busy (tune, play) it waits, so
+    WhistleJob calls push_now() just before those (the panel then shows the phase, with its own clock)."""
+
+    PERIOD_S = .25
+    RESEND_S = 5.0          # the page again even unchanged (the MCU loses it when it restarts or is flashed)
+
+    def __init__(self, whistle, server_port):
+        self.whistle, self.server_port = whistle, server_port
+        self.lock = threading.Lock()
+        self.remote = None
+        self.version, self.sent, self.sent_at = 0, None, 0.0
+        self.archive, self.archive_at = [], 0.0
+        whistle.panel = self
+
+    def _page(self):
+        from flute_rl.yamabiko.panel import encode
+        if time.monotonic() - self.archive_at > 30:
+            self.archive, self.archive_at = self.whistle.archive_list(), time.monotonic()
+        status = self.whistle.status()
+        plays = self.whistle.plays
+        heard = plays[-1]["heard"] if plays else None
+        return encode(status, self.archive, heard)
+
+    def _call(self, page=None):
+        if self.remote is None:
+            self.remote = Remote(port=self.server_port, forward=False, timeout=3.0)
+        if page is not None:
+            self.version = (self.version + 1) & 0xFFFF
+            self.sent_at = time.monotonic()
+        return self.remote.panel(page, self.version)
+
+    def push_now(self):
+        """Send the page now if it changed (before the server becomes busy)."""
+        with self.lock:
+            try:
+                page = self._page()
+                if page != self.sent:
+                    events = self._call(page)
+                    self.sent = page
+                    self._act(events)
+            except Exception:                          # noqa: BLE001  (the panel is optional)
+                self._drop()
+
+    def _drop(self):
+        if self.remote is not None:
+            try:
+                self.remote.close()
+            except Exception:                          # noqa: BLE001
+                pass
+        self.remote, self.sent = None, None
+
+    def _act(self, events):
+        from flute_rl.yamabiko.panel import EV_ARCHIVE, EV_CALIBRATE, EV_STEP
+        for ev in events:
+            if not ev:
+                continue
+            try:
+                if ev[0] == EV_STEP and len(ev) > 1:
+                    names = list(self.whistle.profiles)
+                    if ev[1] < len(names):
+                        self.whistle.choose(names[ev[1]])
+                elif ev[0] == EV_CALIBRATE:
+                    self.whistle.calibrate()
+                elif ev[0] == EV_ARCHIVE and len(ev) > 1:
+                    items = self.whistle.archive_list()
+                    if ev[1] < len(items):
+                        self.whistle.archive_play(items[ev[1]]["id"])
+            except ValueError as exc:
+                self.whistle._set(message=str(exc))
+
+    def run(self):
+        def go():
+            while True:
+                time.sleep(self.PERIOD_S)
+                st = self.whistle.state
+                if self.whistle.busy() and st.get("phase") in WhistleJob.BUSY_SERVER:
+                    continue                           # the server plays: it would not answer
+                with self.lock:
+                    try:
+                        page = self._page()
+                        stale = time.monotonic() - self.sent_at > self.RESEND_S
+                        events = self._call(page if page != self.sent or stale else None)
+                        self.sent = page
+                        self._act(events)
+                    except Exception:                  # noqa: BLE001
+                        self._drop()
+                        time.sleep(2)
+        threading.Thread(target=go, daemon=True).start()
 
 
 MAIN_PAGE = r"""<!doctype html>
@@ -1244,6 +1346,7 @@ def main():
     ap.add_argument("--no-calibrate-at-start", action="store_true",
                     help="do not calibrate the flute once the page starts (it sounds the flute for ~10 s)")
     ap.add_argument("--no-button", action="store_true", help="do not start and stop with the board's EXEC button")
+    ap.add_argument("--no-panel", action="store_true", help="do not drive the touch panel (Tab5 on I2C)")
     args = ap.parse_args()
     bench = Bench(args.server_port)
     whistle = WhistleJob(bench, args.server_port, load_profiles())
@@ -1252,6 +1355,8 @@ def main():
         whistle.calibrate_at_start()
     if not args.no_button:
         whistle.watch_button()
+    if not args.no_panel:
+        PanelBridge(whistle, args.server_port).run()
     print(f"yamabiko web on port {args.port}", flush=True)
     try:
         httpd.serve_forever()

@@ -17,6 +17,8 @@
 //                                        D1 to J4 (pulled up while booting, so the servo line idles then)
 //   D3        PB0        GPIO           backup solenoid valve (not fitted): follows the valve command
 //   D8        PB4        GPIO           EXEC button, active low
+//   PF14/PF15 J15-16/18  I2C4           the touch panel (M5Stack Tab5) on the B board's J3, as an I2C target
+//                                        at PANEL_ADDR (see "Panel" below)
 //
 // The valve is the rotary disc on an SG90 (hobby PWM servo, no read-back): the Linux side sends open /
 // closed, the pulse widths are set with 'K' and the pulse moves from one to the other over move_ms.
@@ -42,6 +44,20 @@
 //   'F' + on(u8) + duty(u16, 0..1000)                                 fan
 //   'K' + open(u16) + closed(u16) + move_ms(u16)                      servo pulses of the valve [us, 500..2500]
 //   'L' + max_pwm(u16, 0..1000)                                       limit of |pwm|
+//   'U' + offset(u16) + data(32 bytes)                                 a piece of the next panel page
+//   'V' + length(u16) + version(u16)                                   the panel page is complete: show it
+// MCU -> Linux also:
+//   type 'U' panel:  what the panel asked for (the bytes it wrote after register 0x02)
+//
+// Panel: the Tab5 is the I2C controller, this MCU the target at PANEL_ADDR on I2C4, remapped to PF14 / PF15
+// (the core's I2C4 pins are PD12 / PD13, and its Zephyr build has no I2C target support, so the registers
+// are served from loop(), with clock stretching holding the bus while a transfer waits).  The Tab5 writes
+//   0x01 n           n presses of the EXEC button (1 or 2, 150 ms apart): record / end / stop, 2 = again
+//   0x02 bytes...    an event for the Linux side (choose a step, calibrate, play an archive clip), sent on
+//   0x03 lo hi       where the next read starts
+// and reads the page: 'Y' '1' version(u16) length(u16), then `length` bytes the Linux side made
+// (flute_rl/yamabiko/panel.py).  Reads past the end give 0xFF.  Two buffers: Linux fills the one not shown,
+// 'V' shows it, so a page is never half new (the Tab5 checks the version before and after its reads).
 #include <Arduino.h>
 #include <stm32u5xx.h>
 
@@ -68,6 +84,10 @@
 #define SERVO_US_MAX 2500u
 #define STATUS_MS 10u
 #define SENSE_MV_FULL 3300u       // ADC full scale
+#define PANEL_ADDR 0x42           // I2C target address of the panel link
+#define PANEL_MAX 3072u           // bytes of one panel page
+#define PANEL_CHUNK 32u           // bytes in a 'U' command
+#define PANEL_PRESS_GAP_MS 150u   // between the two presses of a double press from the panel
 
 static volatile uint32_t ring[RING_FRAMES * 2] __attribute__((aligned(32)));
 // Linked-list item: the words the channel reloads after each block, in register order
@@ -232,6 +252,14 @@ static uint32_t sense_sum, sense_n, sense_peak;
 static uint16_t sense_mv, sense_peak_mv;
 
 static uint8_t btn_presses, btn_stable = 1, btn_run;
+static uint8_t panel_page[2][PANEL_MAX];
+static uint16_t panel_len[2], panel_ver[2];
+static uint8_t panel_cur;                     // the page the Tab5 reads
+static uint16_t panel_ptr;                    // where its next read starts
+static uint8_t panel_presses_left;
+static uint32_t panel_press_at;
+static uint32_t panel_xfers, panel_errors;
+static bool panel_ok;
 static uint32_t io_ms, status_ms;
 
 static float servo_us, servo_goal_us, servo_step_us;   // pulse now, where it goes, change per ms
@@ -462,6 +490,10 @@ static void info() {
            (unsigned long)(timer_clk(true) / fan_top), max_pwm, valve_pos_open, valve_pos_closed, valve_move_ms,
            (int)(servo_us + 0.5f));
   send_text(s);
+  snprintf(s, sizeof(s), "PANEL i2c4 %s addr 0x%02x timingr 0x%08lx transfers %lu errors %lu page v%u %u bytes",
+           panel_ok ? "PF14/PF15" : "off", PANEL_ADDR, (unsigned long)I2C4->TIMINGR, (unsigned long)panel_xfers,
+           (unsigned long)panel_errors, panel_ver[panel_cur], panel_len[panel_cur]);
+  send_text(s);
 }
 
 // Bytes of a command after the sync byte, without the sum (0: not a command).
@@ -472,6 +504,8 @@ static uint8_t cmd_len(uint8_t c) {
     case 'F': return 4;
     case 'K': return 7;
     case 'L': return 3;
+    case 'U': return 3 + PANEL_CHUNK;
+    case 'V': return 5;
     case 'S': case 'X': case 'i': return 1;
     default: return 0;
   }
@@ -509,9 +543,21 @@ static void run_cmd(const uint8_t *b) {
   } else if (c == 'S') { stream_restart(); streaming = true; }
   else if (c == 'X') streaming = false;
   else if (c == 'i') info();
+  else if (c == 'U') {                           // into the page not shown
+    uint16_t off;
+    memcpy(&off, b + 1, 2);
+    uint8_t *page = panel_page[panel_cur ^ 1];
+    for (uint32_t i = 0; i < PANEL_CHUNK && off + i < PANEL_MAX; i++) page[off + i] = b[3 + i];
+  } else if (c == 'V') {                         // show it
+    uint8_t next = panel_cur ^ 1;
+    memcpy(&panel_len[next], b + 1, 2);
+    memcpy(&panel_ver[next], b + 3, 2);
+    if (panel_len[next] > PANEL_MAX) panel_len[next] = PANEL_MAX;
+    panel_cur = next;
+  }
 }
 
-static uint8_t rx[12];                           // sync, command, payload, sum
+static uint8_t rx[8 + PANEL_CHUNK];              // sync, command, payload, sum
 static uint8_t rx_n;
 
 static void commands() {
@@ -564,6 +610,11 @@ static void io_tick() {
   } else {
     btn_run = 0;
   }
+  if (panel_presses_left && (int32_t)(now - panel_press_at) >= 0) {   // the panel's presses count as the button's
+    btn_presses++;
+    panel_presses_left--;
+    panel_press_at = now + PANEL_PRESS_GAP_MS;
+  }
   if (now - rpm_ms >= 500u) {                  // 2 pulses per turn: pulses in 0.5 s x 60 = rpm
     uint32_t p = tach_pulses;
     fan_rpm = (uint16_t)((p - tach_last) * 60u);
@@ -578,6 +629,98 @@ static void io_tick() {
     send_status(now);
   }
 }
+// ---- panel (I2C4 target, polled) -----------------------------------------------------
+
+static void panel_setup() {
+  RCC->APB1ENR2 |= RCC_APB1ENR2_I2C4EN;
+  RCC->AHB2ENR1 |= RCC_AHB2ENR1_GPIOFEN | RCC_AHB2ENR1_GPIODEN;
+  (void)RCC->AHB2ENR1;
+  GPIOD->MODER |= (3u << (2 * 12)) | (3u << (2 * 13));      // the core's I2C4 pins let go (analog)
+  for (uint32_t pin = 14; pin <= 15; pin++) {               // PF14 SCL, PF15 SDA: AF4, open drain, pull-up
+    GPIOF->OTYPER |= 1u << pin;                              // (the B board has 4.7 k to 3.3 V as well)
+    GPIOF->PUPDR = (GPIOF->PUPDR & ~(3u << (2 * pin))) | (1u << (2 * pin));
+    pin_af(GPIOF, pin, 4);
+  }
+  I2C4->CR1 &= ~I2C_CR1_PE;
+  while (I2C4->CR1 & I2C_CR1_PE) {}
+  I2C4->CR1 &= ~(I2C_CR1_NOSTRETCH | I2C_CR1_GCEN | I2C_CR1_SBC | I2C_CR1_TXIE | I2C_CR1_RXIE | I2C_CR1_ADDRIE |
+                 I2C_CR1_NACKIE | I2C_CR1_STOPIE | I2C_CR1_TCIE | I2C_CR1_ERRIE);   // polled: no interrupts
+  if (I2C4->TIMINGR == 0) I2C4->TIMINGR = 0x00F07BFFu;      // only the data setup / hold matter for a target
+  I2C4->OAR1 = 0;
+  I2C4->OAR2 = 0;
+  I2C4->OAR1 = I2C_OAR1_OA1EN | ((uint32_t)PANEL_ADDR << 1);
+  I2C4->CR1 |= I2C_CR1_PE;
+  panel_ok = true;
+}
+
+static uint8_t panel_byte(uint16_t i) {
+  uint8_t c = panel_cur;
+  if (i == 0) return 'Y';
+  if (i == 1) return '1';
+  if (i == 2) return panel_ver[c] & 0xFF;
+  if (i == 3) return panel_ver[c] >> 8;
+  if (i == 4) return panel_len[c] & 0xFF;
+  if (i == 5) return panel_len[c] >> 8;
+  return (uint16_t)(i - 6) < panel_len[c] ? panel_page[c][i - 6] : 0xFF;
+}
+
+static void panel_written(const uint8_t *b, uint8_t n) {
+  if (n == 0) return;
+  if (b[0] == 0x01 && n >= 2) {                              // presses of the EXEC button
+    uint8_t k = b[1] < 1 ? 1 : (b[1] > 2 ? 2 : b[1]);
+    if (!panel_presses_left) panel_press_at = millis();
+    panel_presses_left = k;
+  } else if (b[0] == 0x02 && n >= 2) {
+    send_packet('U', b + 1, n - 1, nullptr, 0);
+  } else if (b[0] == 0x03 && n >= 3) {
+    panel_ptr = (uint16_t)(b[1] | (b[2] << 8));
+  }
+}
+
+// One whole transfer once the address matched: the controller waits (clock stretching) while this runs,
+// so a transfer of 32 bytes at 100-400 kHz keeps the loop for about 1-3 ms.
+static void panel_poll() {
+  if (!panel_ok) return;
+  uint32_t isr = I2C4->ISR;
+  if (!(isr & I2C_ISR_ADDR)) {
+    if (isr & (I2C_ISR_STOPF | I2C_ISR_NACKF | I2C_ISR_BERR | I2C_ISR_OVR))
+      I2C4->ICR = I2C_ICR_STOPCF | I2C_ICR_NACKCF | I2C_ICR_BERRCF | I2C_ICR_OVRCF;
+    return;
+  }
+  uint8_t w[40];
+  uint8_t wn = 0;
+  bool reading = false;
+  uint32_t t0 = millis();
+  for (;;) {
+    isr = I2C4->ISR;
+    if (isr & I2C_ISR_ADDR) {                                // start, or a repeated start
+      if (wn) { panel_written(w, wn); wn = 0; }
+      reading = (isr & I2C_ISR_DIR) != 0;
+      if (reading) I2C4->ISR |= I2C_ISR_TXE;                 // drop a byte left from an earlier read
+      I2C4->ICR = I2C_ICR_ADDRCF;
+      t0 = millis();
+      continue;
+    }
+    if (!reading && (isr & I2C_ISR_RXNE)) {
+      uint8_t v = (uint8_t)I2C4->RXDR;
+      if (wn < sizeof(w)) w[wn++] = v;
+    }
+    if (reading && (isr & I2C_ISR_TXIS)) I2C4->TXDR = panel_byte(panel_ptr++);
+    if (isr & I2C_ISR_NACKF) I2C4->ICR = I2C_ICR_NACKCF;
+    if (isr & I2C_ISR_STOPF) { I2C4->ICR = I2C_ICR_STOPCF; break; }
+    if (isr & (I2C_ISR_BERR | I2C_ISR_OVR)) I2C4->ICR = I2C_ICR_BERRCF | I2C_ICR_OVRCF;
+    if (millis() - t0 > 25u) {                               // the controller went away: start over
+      I2C4->CR1 &= ~I2C_CR1_PE;
+      while (I2C4->CR1 & I2C_CR1_PE) {}
+      I2C4->CR1 |= I2C_CR1_PE;
+      panel_errors++;
+      return;
+    }
+  }
+  if (wn) panel_written(w, wn);
+  panel_xfers++;
+}
+
 // ---- audio ------------------------------------------------------------------------
 
 static inline void push_sample(float x) {
@@ -650,6 +793,7 @@ void setup() {
   for (int i = 0; i < NTAPS; i++) taps[i] /= s;
 
   io_setup();
+  panel_setup();
   sai_setup();
   stream_restart();
   streaming = false;
@@ -665,6 +809,7 @@ void loop() {
     dma_total_words();                        // keep counting passes while idle
   }
   io_tick();
+  panel_poll();
   uint32_t us = (DWT->CYCCNT - t0) / cyc_per_us;
   if (us > max_loop_us) max_loop_us = us;
 }

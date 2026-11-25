@@ -4,6 +4,9 @@
 > [nn-e2e-plan.md](nn-e2e-plan.md) にまとめた。比較用の古典制御（PID、NN なし）は [classic.md](classic.md)。
 > 実機で再開するときの手順は nn-e2e-plan.md の 6 章。以下は機体・基板・UNO Q の記録。
 
+> **2026-11-25 追記（Tab5 のタッチパネル）:** M5Stack Tab5 を B 基板の J3（I2C）につなぐ演奏用の簡易 UI を作った。配線・仕組み・確かめたことは [tab5_panel.md](tab5_panel.md)。
+> UNO Q のファームウェアは I2C4 のパネル対応版に書き換え済み（前の版は `build_fw_before_panel/`）。
+
 > **2026-11-24 追記（画面とボタン）:** UNO Q の `http://<UNO Q>:8080/` が演奏の画面になった（`scripts/yamabiko_web.py`。手動テストは `/bench`）。
 > classic・step1〜（`models/*/profile.json` があるもの全部）を画面で選び、選んだ版は `runs/web_step.txt` に残る。
 > - 電源を入れると crontab の `@reboot` でサーバー（15 秒後）と画面（45 秒後）が立ち上がり、**画面が起動後に一度キャリブレーションする（笛が約 10 秒鳴る）**。

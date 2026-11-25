@@ -162,6 +162,16 @@ class Server:
     def cmd_status(self, client, req):
         return self.status()
 
+    def cmd_panel(self, client, req):
+        """The touch panel: show ``page_b64`` (with ``version``) if given, and hand over what it asked for since
+        the last call (``events``, each a list of bytes).  Needs no ownership of the outputs."""
+        if req.get("page_b64") is not None:
+            self.link.panel(base64.b64decode(req["page_b64"]), int(req.get("version", 0)))
+        events = [list(e) for e in getattr(self.link, "panel_events", [])]
+        if events:
+            self.link.panel_events.clear()
+        return {"events": events}
+
     def cmd_actuator(self, client, req):
         pwm = float(req.get("pwm", 0.0))
         if abs(pwm) > self.max_pwm + 1e-9:

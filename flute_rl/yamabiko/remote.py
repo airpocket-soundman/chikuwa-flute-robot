@@ -142,6 +142,12 @@ class Remote:
         """Today's flute: home note and one sweep (server cmd_tune); its shift_cents goes to play()."""
         return self.call("tune", timeout=60, runtime=runtime, **kw)
 
+    def panel(self, page=None, version=0):
+        """Show a page on the touch panel (flute_rl/yamabiko/panel.py) and get what it asked for."""
+        import base64
+        req = {} if page is None else {"page_b64": base64.b64encode(page).decode(), "version": int(version)}
+        return self.call("panel", **req)["events"]
+
     def play(self, runtime, target, out=None, repeats=1, **kw):
         """Play a target with a NumPy runtime; both paths are on the UNO Q (push them first with push())."""
         return self.call("play", timeout=600, runtime=runtime, target=target, out=out, repeats=int(repeats), **kw)

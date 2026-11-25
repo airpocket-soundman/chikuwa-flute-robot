@@ -122,6 +122,7 @@ class Link:
         self.audio = Audio()
         self.status: Status | None = None
         self.texts: list[str] = []
+        self.panel_events: list[bytes] = []     # what the touch panel asked for ('U' packets)
 
     def close(self) -> None:
         os.close(self.fd)
@@ -149,6 +150,13 @@ class Link:
 
     def valve_positions(self, open_pos: int, closed_pos: int, move_ms: int) -> None:
         self.send(b"K" + struct.pack("<HHH", open_pos, closed_pos, move_ms))
+
+    def panel(self, page: bytes, version: int) -> None:
+        """Show ``page`` on the touch panel: into the MCU's spare page in 32-byte pieces, then switch to it."""
+        for off in range(0, len(page), 32):
+            piece = page[off:off + 32]
+            self.send(b"U" + struct.pack("<H", off) + piece + bytes(32 - len(piece)))
+        self.send(b"V" + struct.pack("<HH", len(page), version & 0xFFFF))
 
     def limit(self, max_pwm: float) -> None:
         self.send(b"L" + struct.pack("<H", int(round(max(0.0, min(1.0, max_pwm)) * 1000))))
@@ -197,6 +205,8 @@ class Link:
                 self.status = Status(*STATUS.unpack(payload), t)
             elif typ == "T":
                 self.texts.append(payload.decode(errors="replace"))
+            elif typ == "U":
+                self.panel_events.append(payload)
 
     def drain(self, seconds: float) -> None:
         until = time.monotonic() + seconds

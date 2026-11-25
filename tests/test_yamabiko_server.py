@@ -23,6 +23,7 @@ class FakeLink:
         self.pwm, self.valve, self.fan_state, self.max_pwm = 0, False, (False, 0.0), 1.0
         self.t0, self.made = time.monotonic(), 0
         self.buttons = 7          # the board button's press count
+        self.panel_events, self.panel_pages = [], []
 
     def send(self, data):
         self.sent.append(data)
@@ -32,6 +33,7 @@ class FakeLink:
     def start(self): self.sent.append(b"S")
     def stop(self): self.sent.append(b"X")
     def limit(self, m): self.max_pwm = m
+    def panel(self, page, version): self.panel_pages.append((bytes(page), version))
     def fan(self, on, duty): self.fan_state = (on, duty)
     def valve_positions(self, *a): self.sent.append(("K",) + a)
 
