@@ -99,8 +99,10 @@
       <input id="seek" type="range" min="0" max="399" value="0" step="1">
       <select id="speed" style="width:auto">
         <option value="0.25">0.25 倍</option><option value="0.5">0.5 倍</option>
-        <option value="1" selected>1 倍</option><option value="2">2 倍</option>
+        <option value="1" selected>1 倍</option><option value="2">2 倍</option><option value="4">4 倍</option>
+        <option value="8">8 倍</option><option value="16">16 倍</option><option value="32">32 倍</option>
       </select>
+      <button id="loop" aria-pressed="false" title="最後まで行ったら最初から">🔁 くり返し</button>
       <span class="time" id="time">0.00 / 0.00 s</span>
     </div>
   </section>
@@ -508,7 +510,10 @@ function frame(now) {
   if (S.data) {
     if (S.playing) {
       S.t += dt / S.data.dt * S.speed;
-      if (S.t >= S.data.steps - 1) { S.t = S.data.steps - 1; setPlaying(false); }
+      if (S.t >= S.data.steps - 1) {
+        if (S.loop) S.t = S.t % (S.data.steps - 1);
+        else { S.t = S.data.steps - 1; setPlaying(false); }
+      }
       $("seek").value = Math.floor(S.t);
     }
     const k = Math.floor(S.t);
@@ -580,6 +585,7 @@ function setPlaying(on) {
 $("play").onclick = () => setPlaying(!S.playing);
 $("seek").oninput = (e) => { S.t = +e.target.value; };
 $("speed").onchange = (e) => { S.speed = +e.target.value; };
+$("loop").onclick = () => { S.loop = !S.loop; $("loop").setAttribute("aria-pressed", S.loop); };
 $("sound").onclick = () => soundOn(!audio.on);
 $("run").onchange = (e) => loadRun(e.target.value);
 $("modeAll").onclick = () => { S.mode = "all"; showLook(); $("modeAll").setAttribute("aria-pressed", true); $("modeOne").setAttribute("aria-pressed", false); goFleet(); };
