@@ -207,6 +207,26 @@ fanRotor.position.set(4, 0, -38);
 scene.add(fanRotor);
 
 // (the servo horn and the valve it turns are inside the box, not shown)
+// two LEDs on the box's top, front edge, to show the valve (added for the viewer): red = shut, green = open
+function led(x, color) {
+  const mat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: color, emissiveIntensity: 0, roughness: .3 });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1, 1.6), mat);
+  m.position.set(x, 15.5, -12.2);
+  scene.add(m);
+  const glow = new THREE.PointLight(color, 0, 14);
+  glow.position.set(x, 17, -12.2);
+  scene.add(glow);
+  return { mat, glow, color: new THREE.Color(color) };
+}
+const ledShut = led(2.5, 0xff1a10), ledOpen = led(5.5, 0x14e03a);
+function setValve(open) {
+  for (const [l, on] of [[ledShut, !open], [ledOpen, open]]) {
+    l.mat.emissiveIntensity = on ? 1 : 0;
+    l.mat.color.set(on ? 0x000000 : 0x2a2a2a);
+    l.glow.intensity = on ? .5 : 0;
+  }
+}
+setValve(false);
 
 
 // the slide: rod in the tube, out to the carriage the actuator rod pushes
@@ -272,6 +292,7 @@ function demo(time) {
   const pos = (slider.userData.pos ?? 0) + (target - (slider.userData.pos ?? 0)) * .08;
   slider.userData.pos = pos;
   slider.position.x = SLIDE_HOME + pos * STROKE;                           // the slide follows, a little late
+  setValve((t % .6) < .5);                                         // tongue between notes
 }
 
 function resize() {
@@ -289,7 +310,7 @@ function frame(time) {
 requestAnimationFrame(frame);
 
 const moveBtn = document.getElementById("move"), namesBtn = document.getElementById("names");
-moveBtn.onclick = () => { moving = !moving; moveBtn.setAttribute("aria-pressed", moving); t0 = performance.now(); };
+moveBtn.onclick = () => { moving = !moving; moveBtn.setAttribute("aria-pressed", moving); t0 = performance.now(); if (!moving) setValve(false); };
 namesBtn.onclick = () => {
   const on = labelBox.classList.toggle("hidden") === false; namesBtn.setAttribute("aria-pressed", on);
 };
