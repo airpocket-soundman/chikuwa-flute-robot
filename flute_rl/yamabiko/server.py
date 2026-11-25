@@ -292,11 +292,20 @@ class Server:
         cents, voice = target["cents"].astype(np.float64), target["voice"].astype(bool)
         rig = self._rig(req)
         rig.ear = self._ear(req)                              # step3: the ear network instead of YIN
+        # the button's count before anything moves: a press during the fan's warm-up or the homing stops the
+        # play too (taken after them, a press there was missed and pressed again, and the spare press then
+        # started the next play)
+        pressed = self.buttons() if req.get("stop_on_button") else None
+
+        def pressed_now():
+            return pressed is not None and self.buttons() not in (None, pressed)
         self.fan_on, self.fan_duty = True, float(req.get("fan", .7))
         self.link.fan(True, self.fan_duty)
         # the fan spins up with the valve shut (no sound) before the first note; the steps keep the
         # firmware's 100 ms command watchdog fed
         for _ in range(int(round(float(req.get("warmup_s", 3.0)) / STEP_S))):
+            if pressed_now():
+                break
             rig.step(0.0, False)
         # heard above this is the flute overblowing, not a position the twin knows: count it as not heard
         max_cents = float(req.get("max_cents", cents[voice].max() + 250 if voice.any() else np.inf))
@@ -312,7 +321,6 @@ class Server:
                 lead = int(round(float(req.get("lead_seconds", 1.6)) / STEP_S))
                 cents = np.r_[np.full(lead, cents[0]), cents]
                 voice = np.r_[np.zeros(lead, bool), voice]
-            pressed = self.buttons() if req.get("stop_on_button") else None
             stopped = False
             for play in range(int(req.get("repeats", 1))):
                 if stopped:
@@ -320,6 +328,8 @@ class Server:
                 rig.resync()
                 if not self_home:
                     for _ in range(int(round(float(req.get("homing_seconds", 1.3)) / STEP_S))):
+                        if pressed_now():
+                            break                               # the first step of the song stops it
                         rig.step(-1.0, False)
                 if play == 0 and req.get("relative", False) and "shift_cents" not in req:
                     # a relative melody copy: sound the home note, and move the whole target by how far the
@@ -338,7 +348,7 @@ class Server:
                 pwm_log, heard_log, valid_log, valve_log = [], [], [], []
                 audio_start = self.link.audio.end
                 for t in range(len(cents)):
-                    if pressed is not None and self.buttons() not in (None, pressed):   # the board button
+                    if pressed_now():                           # the board button (or the panel's stop)
                         stopped = True
                         self.log("play stopped by the button")
                         break
@@ -379,12 +389,11 @@ class Server:
         self.take(client)
         rig = self._rig(req)
         rig.ear = self._ear(req)                              # step5: the same ear as the play
+        pressed = self.buttons() if req.get("stop_on_button") else None   # before the warm-up, as cmd_play
         self.fan_on, self.fan_duty = True, float(req.get("fan", .8))
         self.link.fan(True, self.fan_duty)
         pwm = float(req.get("pwm", .6))
         heard, phase = [], []
-
-        pressed = self.buttons() if req.get("stop_on_button") else None
 
         def step(command, valve, name):
             if pressed is not None and self.buttons() not in (None, pressed):
@@ -395,8 +404,12 @@ class Server:
 
         try:
             for _ in range(int(round(float(req.get("warmup_s", 3.0)) / STEP_S))):
+                if pressed is not None and self.buttons() not in (None, pressed):
+                    raise RuntimeError("stopped with the button")
                 rig.step(0.0, False)
             for _ in range(int(round(1.3 / STEP_S))):
+                if pressed is not None and self.buttons() not in (None, pressed):
+                    raise RuntimeError("stopped with the button")
                 rig.step(-1.0, False)
             for _ in range(80):
                 step(-.3, True, "home")

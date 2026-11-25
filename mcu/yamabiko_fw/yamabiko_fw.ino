@@ -259,6 +259,7 @@ static uint16_t panel_ptr;                    // where its next read starts
 static uint8_t panel_presses_left;
 static uint32_t panel_press_at;
 static uint32_t panel_xfers, panel_errors;
+static uint32_t presses_board, presses_panel, panel_events_sent;   // where the presses came from
 static bool panel_ok;
 static uint32_t io_ms, status_ms;
 
@@ -491,10 +492,11 @@ static void info() {
            (int)(servo_us + 0.5f));
   send_text(s);
   snprintf(s, sizeof(s), "PANEL i2c4 %s addr 0x%02x timingr 0x%08lx transfers %lu errors %lu page v%u %u bytes "
-           "scl %d sda %d isr 0x%05lx",
+           "scl %d sda %d isr 0x%05lx presses board %lu panel %lu events %lu",
            panel_ok ? "PF14/PF15" : "off", PANEL_ADDR, (unsigned long)I2C4->TIMINGR, (unsigned long)panel_xfers,
            (unsigned long)panel_errors, panel_ver[panel_cur], panel_len[panel_cur],
-           (int)((GPIOF->IDR >> 14) & 1), (int)((GPIOF->IDR >> 15) & 1), (unsigned long)(I2C4->ISR & 0xFFFFFu));
+           (int)((GPIOF->IDR >> 14) & 1), (int)((GPIOF->IDR >> 15) & 1), (unsigned long)(I2C4->ISR & 0xFFFFFu),
+           (unsigned long)presses_board, (unsigned long)presses_panel, (unsigned long)panel_events_sent);
   send_text(s);
 }
 
@@ -607,13 +609,14 @@ static void io_tick() {
     if (++btn_run >= 20) {
       btn_stable = level;
       btn_run = 0;
-      if (!level) btn_presses++;
+      if (!level) { btn_presses++; presses_board++; }
     }
   } else {
     btn_run = 0;
   }
   if (panel_presses_left && (int32_t)(now - panel_press_at) >= 0) {   // the panel's presses count as the button's
     btn_presses++;
+    presses_panel++;
     panel_presses_left--;
     panel_press_at = now + PANEL_PRESS_GAP_MS;
   }
@@ -674,6 +677,7 @@ static void panel_written(const uint8_t *b, uint8_t n) {
     panel_presses_left = k;
   } else if (b[0] == 0x02 && n >= 2) {
     send_packet('U', b + 1, n - 1, nullptr, 0);
+    panel_events_sent++;
   } else if (b[0] == 0x03 && n >= 3) {
     panel_ptr = (uint16_t)(b[1] | (b[2] << 8));
   }
@@ -703,7 +707,16 @@ static void panel_poll() {
   if (!panel_ok) return;
   for (int k = 0; k < 4; k++) {                              // a few events per pass (stop, address, a byte)
     uint32_t isr = I2C4->ISR;
-    // The stop of the last transfer first: a stop and the next start can both be pending, and taking the start
+    // A byte received first: its stop can already be pending.  Taken after the stop, the last byte of
+    // "0x03 lo hi" stayed in RXDR and became the first byte of the next write: hi 0x01 / 0x02 read as a press /
+    // an event (the panel "pressed" by itself once the page passed 262 bytes).
+    if (panel_active && !panel_reading && (isr & I2C_ISR_RXNE)) {
+      uint8_t v = (uint8_t)I2C4->RXDR;
+      if (panel_wn < sizeof(panel_w)) panel_w[panel_wn++] = v;
+      panel_seen_ms = millis();
+      continue;
+    }
+    // Then the stop of the last transfer: a stop and the next start can both be pending, and taking the start
     // first then the stop dropped the new transfer with SCL held low (the bus hung).
     if (isr & I2C_ISR_STOPF) {
       I2C4->ICR = I2C_ICR_STOPCF | I2C_ICR_NACKCF;
@@ -724,6 +737,7 @@ static void panel_poll() {
       continue;
     }
     if (!panel_active) {
+      if (isr & I2C_ISR_RXNE) (void)I2C4->RXDR;            // a byte from no transfer of ours: drop it
       if (isr & (I2C_ISR_NACKF | I2C_ISR_BERR | I2C_ISR_OVR))
         I2C4->ICR = I2C_ICR_NACKCF | I2C_ICR_BERRCF | I2C_ICR_OVRCF;
       if (!(isr & I2C_ISR_BUSY)) panel_seen_ms = millis();

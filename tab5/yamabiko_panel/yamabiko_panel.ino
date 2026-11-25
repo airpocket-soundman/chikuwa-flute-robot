@@ -28,14 +28,23 @@ static bool have_page = false;
 static uint32_t last_ok_ms = 0, last_poll_ms = 0, phase_since_ms = 0, flash_until_ms = 0;
 static uint8_t last_phase = 255;
 static int flash_btn = -1;
+static uint32_t stop_hold_until = 0;
+static int down_btn = -1, down_tab = -1, down_row = -1;   // what the finger is on now (the pressed look)   // after the stop: record / again / stop wait
 static bool tab_archive = false;
 static bool dirty = true;
 static uint8_t buf[3200];
+static uint16_t page_len;
+static uint32_t i2c_ok, i2c_fail, pages_read, taps, presses_sent, events_sent;
+static bool log_on = true;
 
 // ---- colours and layout ------------------------------------------------------------------------
 static uint16_t C(uint32_t rgb) { return lgfx::color565(rgb >> 16, (rgb >> 8) & 0xFF, rgb & 0xFF); }
 static uint16_t BG, CARD, FG, MUTE, LINE, ACC, ACC2, REC, WARN, C_ORANGE, C_ORANGE2, C_WHITE;
 static int W, H;
+static uint16_t darker(uint16_t c, int pct = 72) {          // the pressed look: the colour at pct %
+  int r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
+  return (uint16_t)(((r * pct / 100) << 11) | ((g * pct / 100) << 5) | (b * pct / 100));
+}
 struct Rect { int x, y, w, h; bool in(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; } };
 enum Btn { B_REC, B_AGAIN, B_CAL, B_STOP, B_N };
 static Rect btn[B_N], tabs[2], listArea, graph, bars;
@@ -58,10 +67,11 @@ static bool set_ptr(uint16_t at) {
   return M5.Ex_I2C.writeRegister(ADDR, 0x03, b, 2, FREQ);
 }
 static bool read_at(uint16_t at, uint8_t *out, size_t n) {
-  if (!set_ptr(at)) return false;
-  if (!M5.Ex_I2C.start(ADDR, true, FREQ)) { M5.Ex_I2C.stop(); return false; }
+  if (!set_ptr(at)) { i2c_fail++; return false; }
+  if (!M5.Ex_I2C.start(ADDR, true, FREQ)) { M5.Ex_I2C.stop(); i2c_fail++; return false; }
   bool ok = M5.Ex_I2C.read(out, n, true);
   M5.Ex_I2C.stop();
+  ok ? i2c_ok++ : i2c_fail++;
   return ok;
 }
 static bool header(uint16_t &ver, uint16_t &len) {
@@ -85,13 +95,21 @@ static void poll_page() {
   page::Page q;
   if (!page::parse(buf, len, q)) return;
   pg = q;
+  page_len = len;
   shown_ver = ver;
+  pages_read++;
   have_page = true;
   if (pg.phase != last_phase) { last_phase = pg.phase; phase_since_ms = millis(); }
   dirty = true;
 }
-static void press(uint8_t n) { M5.Ex_I2C.writeRegister(ADDR, 0x01, &n, 1, FREQ); }
+static void press(uint8_t n) {
+  presses_sent++;
+  if (log_on) Serial.printf("press %u\n", n);
+  M5.Ex_I2C.writeRegister(ADDR, 0x01, &n, 1, FREQ);
+}
 static void event(uint8_t a, int b = -1) {
+  events_sent++;
+  if (log_on) Serial.printf("event 0x%02x %d\n", a, b);
   uint8_t e[2] = {a, (uint8_t)b};
   M5.Ex_I2C.writeRegister(ADDR, 0x02, e, b < 0 ? 1 : 2, FREQ);
 }
@@ -112,6 +130,7 @@ static void text_fit(const std::string &s, int x, int y, int w, const lgfx::IFon
 static bool btn_enabled(int i) {
   bool busy = pg.busy(), rec = pg.phase == page::RECORD;
   if (!have_page) return false;
+  if (i != B_CAL && (int32_t)(millis() - stop_hold_until) < 0) return false;   // just stopped
   switch (i) {
     case B_REC: return !busy || rec;
     case B_AGAIN: return !busy && (pg.flags & page::FLAG_HAS_SONG);
@@ -126,17 +145,23 @@ static void draw_button(int i) {
   bool en = btn_enabled(i), fl = (flash_btn == i && millis() < flash_until_ms);
   uint16_t col = i == B_REC ? (pg.phase == page::RECORD ? REC : ACC) : i == B_AGAIN ? ACC : i == B_CAL ? CARD : WARN;
   if (!en) col = LINE;
-  cv.fillRoundRect(r.x, r.y, r.w, r.h, 16, col);
+  bool down = en && down_btn == i;
+  int sink = down ? 3 : 0;
+  if (en && !down) cv.fillRoundRect(r.x + 2, r.y + 5, r.w, r.h, 16, darker(BG, 85));   // a shadow under it
+  if (down) col = darker(col == CARD ? ACC2 : col);
+  cv.fillRoundRect(r.x, r.y + sink, r.w, r.h, 16, col);
   if (fl) cv.drawRoundRect(r.x - 4, r.y - 4, r.w + 8, r.h + 8, 18, ACC);
   uint16_t tc = (i == B_CAL && en) ? FG : (en ? C_WHITE : MUTE);
   if (i == B_CAL) cv.drawRoundRect(r.x, r.y, r.w, r.h, 16, LINE);
   cv.setTextColor(tc);
-  const char *label[] = {pg.phase == page::RECORD ? "録音終了して演奏" : "録音", "練習：もう一度", "キャリブレーション", "止める"};
+  bool holding = (int32_t)(millis() - stop_hold_until) < 0;
+  const char *label[] = {pg.phase == page::RECORD ? "録音終了して演奏" : "録音", "練習：もう一度", "キャリブレーション",
+                         holding ? "止めています" : "止める"};
   const char *sub[] = {"基板のボタン 1 回", "基板のボタン 2 回", "その日の笛を測る（約 10 秒鳴る）", "動いている間に"};
   cv.setTextDatum(textdatum_t::top_left);
-  text_fit(label[i], r.x + 18, r.y + 20, r.w - 30, &fonts::lgfxJapanGothic_32);
+  text_fit(label[i], r.x + 18, r.y + 20 + sink, r.w - 30, &fonts::lgfxJapanGothic_32);
   cv.setFont(&fonts::lgfxJapanGothic_16);
-  text_fit(sub[i], r.x + 18, r.y + 70, r.w - 30, &fonts::lgfxJapanGothic_16);
+  text_fit(sub[i], r.x + 18, r.y + 70 + sink, r.w - 30, &fonts::lgfxJapanGothic_16);
 }
 
 static void draw_header() {
@@ -265,13 +290,17 @@ static void draw_bars() {
   cv.setTextDatum(textdatum_t::top_left);
 }
 
-static int row_h() { return tab_archive ? 74 : 42; }
+static int row_h() {                            // every step fits (13 of them on 2026-11-25)
+  if (tab_archive) return 74;
+  int n = pg.steps.empty() ? 1 : (int)pg.steps.size();
+  return std::min(42, (listArea.h - 12) / n);
+}
 
 static void draw_list() {
   for (int t = 0; t < 2; t++) {
     const Rect &r = tabs[t];
     bool on = tab_archive == (t == 1);
-    cv.fillRoundRect(r.x, r.y, r.w, r.h, 12, on ? CARD : BG);
+    cv.fillRoundRect(r.x, r.y, r.w, r.h, 12, down_tab == t ? ACC2 : (on ? CARD : BG));
     cv.drawRoundRect(r.x, r.y, r.w, r.h, 12, on ? ACC : LINE);
     cv.setTextColor(on ? FG : MUTE);
     cv.setTextDatum(textdatum_t::middle_center);
@@ -288,6 +317,7 @@ static void draw_list() {
     if (y + rh > a.y + a.h) break;
     bool on = tab_archive ? (int)i == pg.archive_playing : i == pg.step;
     if (on) cv.fillRoundRect(a.x + 4, y, a.w - 8, rh - 4, 10, ACC2);
+    if ((int)i == down_row && !pg.busy()) cv.fillRoundRect(a.x + 4, y, a.w - 8, rh - 4, 10, darker(ACC2, 88));
     cv.setTextColor(pg.busy() ? MUTE : FG);
     if (tab_archive) {
       std::string t = items[i];
@@ -330,24 +360,140 @@ static void draw() {
 }
 
 // ---- touch ----------------------------------------------------------------------------------------
+static void click_sound() { M5.Speaker.tone(1760, 28); }
+
+static void finger_on(int x, int y, bool down) {           // what is under the finger, for the pressed look
+  int b = -1, t = -1, r = -1;
+  if (down) {
+    for (int i = 0; i < B_N; i++) if (btn[i].in(x, y) && btn_enabled(i)) b = i;
+    for (int k = 0; k < 2; k++) if (tabs[k].in(x, y)) t = k;
+    if (listArea.in(x, y) && have_page && !pg.busy()) r = (y - listArea.y - 6) / row_h();
+  }
+  if (b != down_btn || t != down_tab || r != down_row) { down_btn = b; down_tab = t; down_row = r; dirty = true; }
+}
 static void tapped(int x, int y) {
+  taps++;
+  if (log_on) Serial.printf("tap %d %d at %lu ms\n", x, y, (unsigned long)millis());
   for (int i = 0; i < B_N; i++) {
     if (!btn[i].in(x, y) || !btn_enabled(i)) continue;
     if (i == B_REC || i == B_STOP) press(1);
     else if (i == B_AGAIN) press(2);
     else event(page::EV_CALIBRATE);
+    if (i == B_STOP) stop_hold_until = millis() + 2000;
+    click_sound();
     flash_btn = i;
     flash_until_ms = millis() + 600;
     dirty = true;
     return;
   }
   for (int t = 0; t < 2; t++)
-    if (tabs[t].in(x, y)) { tab_archive = t == 1; dirty = true; return; }
+    if (tabs[t].in(x, y)) { tab_archive = t == 1; dirty = true; click_sound(); return; }
   if (listArea.in(x, y) && have_page && !pg.busy()) {
     int i = (y - listArea.y - 6) / row_h();
-    if (tab_archive && i >= 0 && i < (int)pg.archive.size()) event(page::EV_ARCHIVE, i);
-    if (!tab_archive && i >= 0 && i < (int)pg.steps.size()) event(page::EV_STEP, i);
+    if (tab_archive && i >= 0 && i < (int)pg.archive.size()) { event(page::EV_ARCHIVE, i); click_sound(); }
+    if (!tab_archive && i >= 0 && i < (int)pg.steps.size()) { event(page::EV_STEP, i); click_sound(); }
     dirty = true;
+  }
+}
+
+// ---- serial API (USB, 115200): one command per line, one JSON line back ----------------------------------
+// help | status | page | press 1|2 | step <i> | archive <i> | calibrate | tap <x> <y> | tab steps|archive
+// bright <0-255> | log on|off | redraw
+static std::string json_str(const std::string &t) {
+  std::string o = "\"";
+  for (char c : t) {
+    if (c == '"' || c == '\\') { o += '\\'; o += c; }
+    else if ((unsigned char)c < 0x20) o += ' ';
+    else o += c;
+  }
+  return o + "\"";
+}
+
+static std::string json_list(const std::vector<std::string> &v) {
+  std::string o = "[";
+  for (size_t i = 0; i < v.size(); i++) o += (i ? "," : "") + json_str(v[i]);
+  return o + "]";
+}
+
+static void reply(const std::string &j) { Serial.print(j.c_str()); Serial.print("\n"); }
+
+static void api_status() {
+  char b[640];
+  snprintf(b, sizeof(b),
+           "{\"ok\":true,\"have_page\":%s,\"version\":%u,\"phase\":\"%s\",\"busy\":%s,\"step\":%d,\"steps\":%u,"
+           "\"archive\":%u,\"archive_playing\":%d,\"flags\":%u,\"last_ok_ms_ago\":%lu,\"i2c_ok\":%lu,\"i2c_fail\":%lu,"
+           "\"pages_read\":%lu,\"taps\":%lu,\"presses_sent\":%lu,\"events_sent\":%lu,\"tab\":\"%s\",\"stop_hold_ms\":%ld,"
+           "\"display\":[%d,%d],\"psram_free\":%u,\"uptime_ms\":%lu,\"log\":%s}",
+           have_page ? "true" : "false", shown_ver == 0xFFFF ? 0 : shown_ver, page::PHASES[pg.phase],
+           pg.busy() ? "true" : "false", pg.step, (unsigned)pg.steps.size(), (unsigned)pg.archive.size(),
+           pg.archive_playing, pg.flags, (unsigned long)(millis() - last_ok_ms), (unsigned long)i2c_ok,
+           (unsigned long)i2c_fail, (unsigned long)pages_read, (unsigned long)taps, (unsigned long)presses_sent,
+           (unsigned long)events_sent, tab_archive ? "archive" : "steps",
+           (long)std::max<int32_t>(0, (int32_t)(stop_hold_until - millis())), W, H, (unsigned)ESP.getFreePsram(),
+           (unsigned long)millis(), log_on ? "true" : "false");
+  reply(b);
+}
+
+static void api_page() {
+  std::string o = "{\"ok\":true,\"message\":" + json_str(pg.message) + ",\"steps\":" + json_list(pg.steps) +
+                  ",\"archive\":" + json_list(pg.archive) + ",\"practice\":[";
+  for (size_t i = 0; i < pg.practice.size(); i++) {
+    char b[16]; snprintf(b, sizeof(b), "%s%.1f", i ? "," : "", pg.practice[i]); o += b;
+  }
+  char b[128];
+  snprintf(b, sizeof(b), "],\"points\":%u,\"stride\":%u,\"record_s\":%.1f,\"play_s\":%.1f,\"home_cents\":%d}",
+           (unsigned)pg.target.size(), pg.stride, pg.record_s, pg.play_s, pg.home_cents);
+  reply(o + b);
+}
+
+static void api_line(const std::string &line) {
+  char cmd[16] = {0}, arg[16] = {0};
+  int a = -1, b2 = -1;
+  int n = sscanf(line.c_str(), "%15s %15s %d", cmd, arg, &b2);
+  if (n < 1) return;
+  std::string c = cmd;
+  if (n >= 2) a = atoi(arg);
+  if (c == "help") {
+    reply("{\"ok\":true,\"commands\":[\"status\",\"page\",\"press 1|2\",\"step <i>\",\"archive <i>\",\"calibrate\","
+          "\"tap <x> <y>\",\"tab steps|archive\",\"bright <0-255>\",\"log on|off\",\"redraw\",\"dump <off> <n>\"]}");
+  } else if (c == "status") {
+    api_status();
+  } else if (c == "page") {
+    api_page();
+  } else if (c == "press" && (a == 1 || a == 2)) {
+    press((uint8_t)a); reply("{\"ok\":true}");
+  } else if (c == "step" && a >= 0) {
+    event(page::EV_STEP, a); reply("{\"ok\":true}");
+  } else if (c == "archive" && a >= 0) {
+    event(page::EV_ARCHIVE, a); reply("{\"ok\":true}");
+  } else if (c == "calibrate") {
+    event(page::EV_CALIBRATE); reply("{\"ok\":true}");
+  } else if (c == "tap" && n == 3) {
+    tapped(a, b2); dirty = true; reply("{\"ok\":true}");
+  } else if (c == "tab" && n >= 2) {
+    tab_archive = std::string(arg) == "archive"; dirty = true; reply("{\"ok\":true}");
+  } else if (c == "bright" && a >= 0) {
+    M5.Display.setBrightness((uint8_t)std::min(a, 255)); reply("{\"ok\":true}");
+  } else if (c == "log" && n >= 2) {
+    log_on = std::string(arg) == "on"; reply("{\"ok\":true}");
+  } else if (c == "dump" && n == 3) {              // the page's raw bytes: dump <offset> <count up to 128>
+    std::string o = "{\"ok\":true,\"length\":" + std::to_string(page_len) + ",\"hex\":\"";
+    for (int i = a; i < a + std::min(b2, 128) && i < (int)page_len; i++) { char h[3]; snprintf(h, 3, "%02x", buf[i]); o += h; }
+    reply(o + "\"}");
+  } else if (c == "redraw") {
+    dirty = true; reply("{\"ok\":true}");
+  } else {
+    reply("{\"ok\":false,\"error\":" + json_str("unknown: " + line) + "}");
+  }
+}
+
+static void api_poll() {
+  static std::string line;
+  while (Serial.available()) {
+    char ch = (char)Serial.read();
+    if (ch == '\r') continue;
+    if (ch == '\n') { api_line(line); line.clear(); }
+    else if (line.size() < 80) line += ch;
   }
 }
 
@@ -356,6 +502,7 @@ void setup() {
   M5.begin(cfg);
   M5.Display.setRotation(M5.Display.width() > M5.Display.height() ? 0 : 1);
   M5.Display.setBrightness(160);
+  M5.Speaker.setVolume(90);
   BG = C(0xF3F5F4); CARD = C(0xFFFFFF); FG = C(0x17201D); MUTE = C(0x5F6B66); LINE = C(0xDDE3E0);
   ACC = C(0x1F7A6C); ACC2 = C(0xE7F2EF); REC = C(0xC2410C); WARN = C(0xB42318); C_ORANGE = C(0xD9622B);
   C_ORANGE2 = C(0xF2B38A); C_WHITE = C(0xFFFFFF);
@@ -373,7 +520,9 @@ void setup() {
 
 void loop() {
   M5.update();
+  api_poll();
   auto t = M5.Touch.getDetail();
+  finger_on(t.x, t.y, t.isPressed());
   if (t.wasClicked()) tapped(t.x, t.y);
   uint32_t now = millis();
   if (now - last_poll_ms >= POLL_MS) {
@@ -382,6 +531,9 @@ void loop() {
     if (have_page && (pg.phase == page::RECORD || pg.phase == page::PLAY)) dirty = true;   // the progress bar
     if (have_page && now - last_ok_ms > 3000) dirty = true;
     if (flash_btn >= 0 && now > flash_until_ms) { flash_btn = -1; dirty = true; }
+    static bool was_holding = false;
+    bool holding = (int32_t)(now - stop_hold_until) < 0;
+    if (holding != was_holding) { was_holding = holding; dirty = true; }
   }
   if (dirty) draw();
   delay(5);

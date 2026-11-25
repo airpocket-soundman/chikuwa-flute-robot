@@ -294,6 +294,7 @@ class WhistleJob:
 
     BUSY_SERVER = ("tune", "play")          # phases the command server is busy in (it watches the button)
     DOUBLE_S = .5                           # a second press within this is a double press
+    QUIET_S = 1.5                           # presses this soon after a stop belong to the stop
 
     def __init__(self, bench, server_port, profiles):
         self.bench, self.server_port = bench, server_port
@@ -381,6 +382,8 @@ class WhistleJob:
     def _pressed(self, action, presses):
         """Put a board-button press in the status for the page: its number, single or double, the action."""
         self.presses += 1
+        if action == "stop":                   # a press or two more (the stop seemed slow) must not start a play
+            self.quiet_until = time.monotonic() + self.QUIET_S
         self._set(press={"n": self.presses, "action": action, "double": presses >= 2})
 
     def press(self, presses=1):
@@ -398,6 +401,9 @@ class WhistleJob:
                 self.finish()
             return
         if not self.busy():
+            if time.monotonic() < getattr(self, "quiet_until", 0.0):
+                self._set(message="止めました（止めた直後の押下は、続きの「止める」として扱います）")
+                return
             action = "replay" if presses >= 2 else "record"
             self._pressed(action, presses)
             try:
