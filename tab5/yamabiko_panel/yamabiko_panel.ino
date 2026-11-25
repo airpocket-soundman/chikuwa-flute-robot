@@ -94,6 +94,8 @@ static void poll_page() {                         // every POLL_MS: is there a n
   if (!header(ver, len)) return;
   last_ok_ms = millis();
   if (ver == shown_ver && have_page) return;
+  if (reading_page && ver == want_ver && len == want_len) return;   // reading it: go on (starting over every
+                                                                    // poll, a slow pass never finished a page)
   want_ver = ver; want_len = len; want_off = 0; reading_page = true;
 }
 
