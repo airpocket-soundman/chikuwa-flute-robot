@@ -1,0 +1,135 @@
+{
+  "config": {
+    "ear": "runs/ear/ear_08.pt",
+    "out": "runs/memory/mem_12b",
+    "songs": 1200,
+    "steps": 30000,
+    "batch": 16,
+    "lr": 0.001,
+    "keys": 4096,
+    "max_hz": 15.0,
+    "demo": "runs/ear/demo",
+    "play": "runs/real/twin_y1f80_05.json",
+    "actuator": "models/step7c/nn_f80_t7_tw05.pt",
+    "real": [
+      "runs/real/whistle_data",
+      "runs/real/whistle"
+    ],
+    "real_holdout": [
+      "20261124_111404",
+      "20261124_111830",
+      "20261125_115203"
+    ],
+    "real_share": 0.4,
+    "extra": [
+      "runs/archive/mlend_whistles"
+    ],
+    "extra_share": 0.25,
+    "extra_crops": 2,
+    "value": 128,
+    "beta": 0.08,
+    "key_aux": 1.0,
+    "extremes": true,
+    "hist_bins": 96,
+    "key_head": true,
+    "hist_fixed": true,
+    "key_loss": 1.0,
+    "seed": 11,
+    "device": "cuda"
+  },
+  "by_length": {
+    "5s": {
+      "mae_cents": 26.708675384521484,
+      "within_25c": 0.5860277229954645,
+      "mae_after_offset": 6.6817121505737305,
+      "voice_agree": 0.9852830661322645,
+      "songs": 32
+    },
+    "10s": {
+      "mae_cents": 28.451929092407227,
+      "within_25c": 0.5330241505261244,
+      "mae_after_offset": 9.328975677490234,
+      "voice_agree": 0.9825763263263263,
+      "songs": 32
+    },
+    "20s": {
+      "mae_cents": 25.109405517578125,
+      "within_25c": 0.5691369793321941,
+      "mae_after_offset": 10.628793716430664,
+      "voice_agree": 0.9808654327163582,
+      "songs": 32
+    },
+    "30s": {
+      "mae_cents": 49.3051872253418,
+      "within_25c": 0.3931397788277532,
+      "mae_after_offset": 23.472923278808594,
+      "voice_agree": 0.9802850950316773,
+      "songs": 32
+    }
+  },
+  "demo": {
+    "デモ1カエルの合唱": {
+      "mae_cents": 16.766386032104492,
+      "within_25c": 0.9242424242424242,
+      "mae_after_offset": 6.139223575592041,
+      "voice_agree": 0.9875195007800313,
+      "songs": 1
+    },
+    "デモ2うぐいす": {
+      "mae_cents": 10.583874702453613,
+      "within_25c": 0.925531914893617,
+      "mae_after_offset": 9.648118019104004,
+      "voice_agree": 0.9880952380952381,
+      "songs": 1
+    },
+    "デモ3スーパーマリオ": {
+      "mae_cents": 67.08827209472656,
+      "within_25c": 0.0,
+      "mae_after_offset": 10.640069007873535,
+      "voice_agree": 0.9965635738831615,
+      "songs": 1
+    }
+  },
+  "real_holdout": {
+    "mae_cents": 40.030765533447266,
+    "within_25c": 0.47601214660402374,
+    "mae_after_offset": 8.944098472595215,
+    "voice_agree": 0.9849590949700122,
+    "songs": 24
+  },
+  "extra_holdout": {
+    "mae_cents": 47.07838439941406,
+    "within_25c": 0.4716704599997206,
+    "mae_after_offset": 15.608099937438965,
+    "voice_agree": 0.9639267229209508,
+    "songs": 118
+  },
+  "play_10s": {
+    "rule": 0.6640524196429082,
+    "memory": 0.46303112139695995,
+    "rule_in_key": 0.6702107572853683,
+    "memory_in_key": 0.6044681670331,
+    "songs": 12
+  },
+  "play_real": {
+    "rule": 0.8576555531367756,
+    "memory": 0.3765359908770993,
+    "rule_in_key": 0.8687705148931125,
+    "memory_in_key": 0.5215926583132178,
+    "songs": 12
+  },
+  "play_extra": {
+    "rule": 0.777758132222164,
+    "memory": 0.4244382521137297,
+    "rule_in_key": 0.7709947553847121,
+    "memory_in_key": 0.6749962839491608,
+    "songs": 12
+  },
+  "play_demo": {
+    "rule": 0.6531207526333672,
+    "memory": 0.5123226724430853,
+    "rule_in_key": 0.858022213727489,
+    "memory_in_key": 0.7418737257900102,
+    "songs": 3
+  }
+}

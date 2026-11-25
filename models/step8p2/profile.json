@@ -1,0 +1,22 @@
+{
+  "name": "step8p2",
+  "title": "step8p2: step8p の耳と記憶を ear_08・mem_12b（人の口笛のアーカイブと実機の口笛で学び、移調を改良した記憶）に替えた候補",
+  "ear": "nn",
+  "ear_runtime": "ear_08_runtime.npz",
+  "doc": "docs/step8.md",
+  "runtime": "nn_f80_t7_ilc_01_runtime.npz",
+  "valve_runtime": "valve_t7_free_runtime.npz",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  },
+  "common_ear": true,
+  "memory_runtime": "mem_12b_runtime.npz",
+  "heads": "step8p2_heads.npz"
+}
