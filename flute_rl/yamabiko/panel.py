@@ -38,6 +38,7 @@ PHASES = ["idle", "prepare", "tune", "record", "analyse", "play", "done", "saved
 FLAG_BUSY, FLAG_HAS_SONG, FLAG_COLLECT, FLAG_SERVER_BUSY, FLAG_ARCHIVE = 1, 2, 4, 8, 16
 EV_STEP, EV_CALIBRATE, EV_ARCHIVE = 0x10, 0x11, 0x12
 EV_RECORD, EV_FINISH, EV_AGAIN = 0x13, 0x14, 0x15     # the panel's record / end and play / again
+EV_RESET = 0x16                                         # stop everything and reset (as the board's button)
 MAX_POINTS = 240
 MAX_BYTES = 3072                       # PANEL_MAX in the firmware
 LIMITS = {"message": 150, "step": 24, "archive": 72}

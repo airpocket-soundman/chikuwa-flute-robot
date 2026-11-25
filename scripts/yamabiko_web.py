@@ -390,6 +390,25 @@ class WhistleJob:
             self.quiet_until = time.monotonic() + self.QUIET_S
         self._set(press={"n": self.presses, "action": action, "double": presses >= 2})
 
+    def reset(self):
+        """Stop everything and reset (the page's and the panel's reset button, as the board's button): the job
+        is told to stop, a recording is dropped, step8 on the server is stopped, an error is cleared."""
+        self.stopped = True
+        self.end_recording.set()
+        self.drop_recording = True
+        try:
+            r = Remote(port=self.server_port, forward=False, timeout=3.0)
+            try:
+                r.call("step8_stop")
+            finally:
+                r.close()
+        except Exception:                              # noqa: BLE001  (the server is busy with a play: the
+            pass                                       # board's button or the panel's stop reaches it)
+        self._set(phase="idle", message="リセットしました（動いていたものを止めて、待機に戻しました）", record_began=None)
+        if self.panel:
+            self.panel.push_now()
+        return {"reset": True}
+
     def press(self, presses=1):
         """The board's EXEC button: it stops everything and resets, whatever runs (2026-11-25: recording and
         playing start from the page and the panel only).  The server stops a tune or a play by itself on the same
@@ -953,7 +972,8 @@ class PanelBridge:
         self.whistle, self.server_port = whistle, server_port
         self.lock = threading.Lock()
         self.remote = None
-        self.version, self.sent, self.sent_at = 0, None, 0.0
+        # the first version from the clock: after a restart the panel may still hold a page numbered as a new one
+        self.version, self.sent, self.sent_at = int(time.time()) & 0xFFFF, None, 0.0
         self.archive, self.archive_at = [], 0.0
         whistle.panel = self
 
@@ -970,7 +990,8 @@ class PanelBridge:
         if self.remote is None:
             self.remote = Remote(port=self.server_port, forward=False, timeout=3.0)
         if page is not None:
-            self.version = (self.version + 1) & 0xFFFF
+            if page != self.sent:                      # the same page sent again keeps its version: the panel
+                self.version = (self.version + 1) & 0xFFFF   # does not read it again
             self.sent_at = time.monotonic()
         return self.remote.panel(page, self.version)
 
@@ -995,7 +1016,7 @@ class PanelBridge:
         self.remote, self.sent = None, None
 
     def _act(self, events):
-        from flute_rl.yamabiko.panel import EV_AGAIN, EV_ARCHIVE, EV_CALIBRATE, EV_FINISH, EV_RECORD, EV_STEP
+        from flute_rl.yamabiko.panel import EV_AGAIN, EV_ARCHIVE, EV_CALIBRATE, EV_FINISH, EV_RECORD, EV_RESET, EV_STEP
         for ev in events:
             if not ev:
                 continue
@@ -1012,6 +1033,8 @@ class PanelBridge:
                     self.whistle.finish()
                 elif ev[0] == EV_AGAIN:
                     self.whistle.replay()
+                elif ev[0] == EV_RESET:
+                    self.whistle.reset()
                 elif ev[0] == EV_ARCHIVE and len(ev) > 1:
                     items = self.whistle.archive_list()
                     if ev[1] < len(items):
@@ -1121,7 +1144,8 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}@media (max-width:760px){.grid2{grid-template-columns:1fr}}
 </style></head><body><main>
 <header><h1>やまびこ1号</h1><span class="mute">口笛を聞いて、スライドホイッスルでまねて吹きます</span>
-<span class="modes" role="group" aria-label="モード" style="margin-left:auto"><button id="mPlay" aria-pressed="true">演奏</button><button id="mCollect" aria-pressed="false">録音だけ（データ集め）</button></span></header>
+<button id="reset" class="sub" style="margin-left:auto" title="動いているものを止めて、待機に戻します（基板の EXEC ボタンと同じ）">リセット</button>
+<span class="modes" role="group" aria-label="モード"><button id="mPlay" aria-pressed="true">演奏</button><button id="mCollect" aria-pressed="false">録音だけ（データ集め）</button></span></header>
 
 <section class="hero">
   <div class="phase"><i class="dot" id="dot"></i><span id="phase">接続中</span><span class="mute" id="stepnow"></span></div>
@@ -1302,7 +1326,7 @@ async function poll(){
   const ha=s.has_audio||[];$("pw").disabled=s.busy||!ha.includes("whistle");$("pf").disabled=s.busy||!ha.includes("flute");
   setTimeout(poll,s.busy?250:1000)}
 $("rec").onclick=()=>{if(S.phase==="record")api("finish");else api("start",{quantize:$("quant").checked})};
-$("again").onclick=()=>api("replay");$("stop").onclick=()=>api("stop");
+$("again").onclick=()=>api("replay");$("stop").onclick=()=>api("stop");$("reset").onclick=()=>api("reset");
 $("mPlay").onclick=()=>api("mode",{collect:false});$("mCollect").onclick=()=>api("mode",{collect:true});
 $("take").onclick=()=>{if(S.phase==="record")api("finish");else api("take")};$("del").onclick=()=>api("delete_last");
 $("kind").onchange=()=>api("mode",{kind:$("kind").value});$("secs").onchange=()=>api("mode",{seconds:+$("secs").value});
@@ -1401,6 +1425,7 @@ def make_handler(bench: Bench, whistle: "WhistleJob"):
                 "/api/whistle/take": whistle.start_take,
                 "/api/whistle/delete_last": whistle.delete_last,
                 "/api/whistle/stop": whistle.stop,
+                "/api/whistle/reset": whistle.reset,
                 "/api/whistle/step": lambda: whistle.choose(req["step"]),
                 "/api/whistle/calibrate": lambda: whistle.calibrate(req.get("step")),
                 "/api/whistle/archive_play": lambda: whistle.archive_play(str(req["id"]), req.get("step")),

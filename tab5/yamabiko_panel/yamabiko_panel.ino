@@ -51,7 +51,7 @@ static uint16_t darker(uint16_t c, int pct = 72) {          // the pressed look:
 }
 struct Rect { int x, y, w, h; bool in(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; } };
 enum Btn { B_REC, B_AGAIN, B_CAL, B_STOP, B_N };
-static Rect btn[B_N], tabs[2], listArea, graph, bars;
+static Rect btn[B_N], tabs[2], listArea, graph, bars, reset_btn;
 
 static void layout() {
   W = cv.width(); H = cv.height();
@@ -62,6 +62,7 @@ static void layout() {
   tabs[1] = {rx + right / 2 - gap / 2, top + gap, right / 2 - gap, 54};
   listArea = {rx, top + gap + 62, right - gap, H - top - gap - 62 - gap};
   graph = {left + gap, top + gap, rx - left - 3 * gap, (H - top) * 62 / 100};
+  reset_btn = {W - 190, 16, 172, 64};
   bars = {left + gap, graph.y + graph.h + gap, graph.w, H - (graph.y + graph.h + gap) - gap};
 }
 
@@ -94,19 +95,19 @@ static void poll_page() {                         // every POLL_MS: is there a n
   if (!header(ver, len)) return;
   last_ok_ms = millis();
   if (ver == shown_ver && have_page) return;
-  if (reading_page && ver == want_ver && len == want_len) return;   // reading it: go on (starting over every
-                                                                    // poll, a slow pass never finished a page)
+  if (reading_page) return;          // a page being read is read to its end first (started over on every new
+                                     // version, a slow pass never finished one: the panel kept an old page)
   want_ver = ver; want_len = len; want_off = 0; reading_page = true;
 }
 
-static void read_page_piece() {                   // one piece of the new page (about 2 ms at 400 kHz)
+static void read_page_piece() {                   // up to 8 pieces of the new page (about 2 ms each at 400 kHz)
   if (!reading_page) return;
-  if (want_off < want_len) {
+  for (int k = 0; k < 8 && want_off < want_len; k++) {
     size_t n = want_len - want_off < PIECE ? want_len - want_off : PIECE;
     if (!read_at(6 + want_off, buf + want_off, n)) { reading_page = false; return; }
     want_off += n;
-    return;
   }
+  if (want_off < want_len) return;
   reading_page = false;
   uint16_t ver2, len2;
   if (!header(ver2, len2) || ver2 != want_ver) return;   // changed while read: next time
@@ -208,9 +209,21 @@ static void draw_header() {
     cv.setFont(&fonts::lgfxJapanGothic_20);
     cv.setTextColor(MUTE);
     cv.setTextDatum(textdatum_t::top_right);
-    cv.drawString(s, W - 20, 20);
+    cv.drawString(s, W - 210, 20);
     cv.setTextDatum(textdatum_t::top_left);
   }
+}
+
+static void draw_reset() {                         // top right: stop everything and reset
+  const Rect &r = reset_btn;
+  bool down = down_btn == 100;
+  cv.fillRoundRect(r.x, r.y + (down ? 2 : 0), r.w, r.h, 14, down ? darker(ACC2) : CARD);
+  cv.drawRoundRect(r.x, r.y + (down ? 2 : 0), r.w, r.h, 14, pending_btn == 100 ? ACC : LINE);
+  cv.setTextColor(FG);
+  cv.setTextDatum(textdatum_t::middle_center);
+  cv.setFont(&fonts::lgfxJapanGothic_28);
+  cv.drawString(pending_btn == 100 ? "受け付けました" : "リセット", r.x + r.w / 2, r.y + r.h / 2 + (down ? 2 : 0));
+  cv.setTextDatum(textdatum_t::top_left);
 }
 
 static void draw_progress() {
@@ -365,6 +378,7 @@ static void draw_list() {
 static void draw() {
   cv.fillScreen(BG);
   draw_header();
+  draw_reset();
   for (int i = 0; i < B_N; i++) draw_button(i);
   draw_progress();
   draw_graph();
@@ -389,6 +403,7 @@ static void finger_on(int x, int y, bool down) {           // what is under the 
   int b = -1, t = -1, r = -1;
   if (down) {
     for (int i = 0; i < B_N; i++) if (btn[i].in(x, y) && btn_enabled(i)) b = i;
+    if (reset_btn.in(x, y)) b = 100;
     for (int k = 0; k < 2; k++) if (tabs[k].in(x, y)) t = k;
     if (listArea.in(x, y) && have_page && !pg.busy()) r = (y - listArea.y - 6) / row_h();
   }
@@ -410,6 +425,14 @@ static void tapped(int x, int y) {
     flash_btn = i;
     flash_until_ms = millis() + 600;
     dirty = true;
+    return;
+  }
+  if (reset_btn.in(x, y)) {                        // reset: the UNO Q stops everything; the panel reads anew
+    event(page::EV_RESET);
+    reading_page = false; shown_ver = 0xFFFF; stop_hold_until = 0;
+    pending_btn = 100; pending_until = millis() + 3000; pending_phase = 255;
+    click_sound();
+    draw();
     return;
   }
   for (int t = 0; t < 2; t++)
@@ -562,7 +585,8 @@ void loop() {
     bool holding = (int32_t)(now - stop_hold_until) < 0;
     if (holding != was_holding) { was_holding = holding; dirty = true; }
   }
-  if (pending_btn >= 0 && (pg.phase != pending_phase || (int32_t)(millis() - pending_until) > 0)) {
+  if (pending_btn >= 0 && ((pending_btn == 100 ? shown_ver != 0xFFFF : pg.phase != pending_phase) ||
+                           (int32_t)(millis() - pending_until) > 0)) {
     pending_btn = -1;
     dirty = true;
   }
