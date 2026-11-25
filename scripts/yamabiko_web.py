@@ -239,6 +239,7 @@ poll();
 # ----- whistle copy: record a whistle, play it back with a performer runtime ---------------------------
 
 WHISTLE_DIR = pathlib.Path(__file__).resolve().parents[1] / "runs" / "real" / "whistle"
+NEED_CALIBRATION = "先にキャリブレーションしてください（その日の笛を測ります。約 10 秒鳴ります）"
 ARCHIVE_PACK = pathlib.Path(__file__).resolve().parents[1] / "runs" / "archive_pack"   # scripts/archive_pack.py
 
 
@@ -360,6 +361,8 @@ class WhistleJob:
         return {"started": True}
 
     def start(self, quantize=False, step=None):
+        if self.tuning is None and not self.collect:
+            raise ValueError(NEED_CALIBRATION)
         if step:
             self.choose(step) if step != self.step else None
         profile = self.profiles[self.step]
@@ -461,6 +464,8 @@ class WhistleJob:
 
     def archive_play(self, item_id, step=None):
         """Play an archive clip's score with the chosen step; it becomes the song (two presses: again)."""
+        if self.tuning is None and not self.collect:
+            raise ValueError(NEED_CALIBRATION)
         item = next((m for m in self.archive_list() if m["id"] == item_id), None)
         if item is None:
             raise ValueError(f"{item_id} がありません（PC で scripts/archive_pack.py を作って送ってください）")
@@ -473,8 +478,8 @@ class WhistleJob:
         rig = None
         try:
             rig = self._connect(profile)
-            if self.tuning is None:
-                self._tune(rig, profile)
+            if self.tuning is None:                    # not calibrated: the page asks for it first
+                raise ValueError(NEED_CALIBRATION)
             self._check()
             folder = ARCHIVE_PACK / item["id"]
             with np.load(folder / "target.npz") as d:
@@ -587,6 +592,8 @@ class WhistleJob:
 
     def replay(self, step=None):
         """Play the last recorded song again, without recording (practice)."""
+        if self.tuning is None and not self.collect:
+            raise ValueError(NEED_CALIBRATION)
         if self.song is None:
             raise ValueError("まだ録音がありません。「録音」から始めてください")
         profile = self.profiles[self.step]
@@ -770,8 +777,8 @@ class WhistleJob:
         rig = None
         try:
             rig = self._connect(profile)
-            if self.tuning is None:
-                self._tune(rig, profile)
+            if self.tuning is None:                    # not calibrated: the page asks for it first
+                raise ValueError(NEED_CALIBRATION)
             self._check()
             if self.song["step"] != profile["name"] and not self.song.get("fixed"):   # another step: hear it again
                 self._set(phase="analyse", message=f"同じ録音を {profile['name']} で聞き取り中")
@@ -792,8 +799,8 @@ class WhistleJob:
         rig = None
         try:
             rig = self._connect(profile)
-            if self.tuning is None:
-                self._tune(rig, profile)
+            if self.tuning is None:                    # not calibrated: the page asks for it first
+                raise ValueError(NEED_CALIBRATION)
             self._check()
             if start == "listen":
                 stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -889,8 +896,8 @@ class WhistleJob:
         rig = None
         try:
             rig = self._connect(profile)
-            if self.tuning is None:                    # not calibrated since the page started
-                self._tune(rig, profile)
+            if self.tuning is None:                    # not calibrated: the page asks for it first
+                raise ValueError(NEED_CALIBRATION)
             self._check()
             rig.stop(force=True)                       # fan off, valve shut: only the whistle in the mic
             time.sleep(.3)                             # the click of the button
@@ -1125,6 +1132,7 @@ button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 .practice i{display:block;width:34px;background:var(--c4);border-radius:4px 4px 0 0}
 .practice b{font-size:13px;color:var(--fg);font-variant-numeric:tabular-nums}
 button.sub{background:transparent;color:var(--fg);border:1px solid var(--line);padding:12px 16px}
+button.sub.need{background:var(--acc);color:var(--onacc);border-color:var(--acc);font-weight:700}
 button:disabled{opacity:.45;cursor:default}
 label{color:var(--mute);font-size:14px}
 .steps{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
@@ -1295,8 +1303,10 @@ async function poll(){
   drawRemain();
   const rec=$("rec"),serverBusy=s.busy&&["tune","play"].includes(ph);
   rec.firstChild.textContent=ph==="record"?"録音終了して演奏":"録音";rec.classList.toggle("record",ph==="record");
-  rec.disabled=s.busy&&ph!=="record";
-  $("again").disabled=s.busy||!s.has_song;
+  const cal=!!s.tuning;
+  rec.disabled=(s.busy&&ph!=="record")||(!cal&&ph!=="record"&&!s.collect);
+  $("again").disabled=s.busy||!s.has_song||!cal;
+  $("cal").classList.toggle("need",!cal);$("cal").textContent=cal?"キャリブレーション":"キャリブレーション（先にこちら）";
   $("again").firstChild.textContent=s.has_song&&s.song_step!==s.step?`同じ録音を ${s.step} で`:"練習：もう一度";
   $("stop").disabled=!s.busy||ph==="record"||serverBusy;
   $("hint").textContent=serverBusy?"いまは基板の EXEC ボタンか Tab5 の「止める」で止まります（この画面の「止める」は演奏の後に届きます）。":"基板の EXEC ボタンは、いつ押しても「すべて止めてリセット」です。録音・演奏・練習はこの画面か Tab5 から。";
@@ -1340,12 +1350,12 @@ const esc=t=>String(t==null?"":t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",
 async function loadArchive(){try{ARC=(await (await fetch("/api/whistle/archive")).json()).items||[]}catch(e){ARC=[]}arcKey="";renderArchive(S)}
 function hear(id,name){const a=$("au");a.src=`/api/whistle/archive/${encodeURIComponent(id)}/${name}.wav`;a.play()}
 function renderArchive(s){
-  const key=JSON.stringify([ARC.map(m=>m.id),s.busy,s.archive,s.step]);if(key===arcKey)return;arcKey=key;
+  const key=JSON.stringify([ARC.map(m=>m.id),s.busy,s.archive,s.step,!!s.tuning]);if(key===arcKey)return;arcKey=key;
   if(!ARC.length){$("arc").innerHTML='<span class="mute">まだありません。PC で <code>python scripts/archive_fetch.py silbo</code>・<code>tit</code>、<code>python scripts/archive_pack.py</code> を実行し、<code>scripts/uno_q_push.sh</code> で送ってください。</span>';return}
   $("arc").innerHTML=ARC.map(m=>{const lic=(m.licence||"").split("/licenses/")[1]||"";
     return `<div class="${m.id===s.archive?"on":""}" data-id="${esc(m.id)}"><b>${esc(m.title)}</b>${m.says?`<q>${esc(m.says)}</q>`:""}
     <span class="mute num" style="font-size:12px">原音 ${(+m.seconds).toFixed(1)} 秒 → 笛 ${(+m.play_seconds).toFixed(1)} 秒（${m.slow} 倍ゆっくり、音程の間隔 ×${(+m.interval_scale).toFixed(2)}）</span>
-    <div class="row"><button class="sub" data-a="source">▶ 原音</button>${m.has_slow?'<button class="sub" data-a="source_slow">▶ 笛の速さ</button>':""}<button class="go" data-a="play" ${s.busy?"disabled":""}>笛で吹く（${esc(s.step||"")}）</button></div>
+    <div class="row"><button class="sub" data-a="source">▶ 原音</button>${m.has_slow?'<button class="sub" data-a="source_slow">▶ 笛の速さ</button>':""}<button class="go" data-a="play" ${s.busy||!s.tuning?"disabled":""}>笛で吹く（${esc(s.step||"")}）</button></div>
     <small>${esc(m.credit)}${lic?` · CC ${esc(lic.replace(/\/$/,"").toUpperCase())}`:""}${m.page?` · <a href="${esc(m.page)}" target="_blank" rel="noopener">出典</a>`:""}</small></div>`}).join("");
   for(const b of $("arc").querySelectorAll("button")){const id=b.closest("[data-id]").dataset.id;
     b.onclick=()=>b.dataset.a==="play"?api("archive_play",{id}):hear(id,b.dataset.a)}}

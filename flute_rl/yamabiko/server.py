@@ -669,10 +669,8 @@ class Server:
                 self._step8_step()                              # step8 runs: it gives the command
             else:
                 self.link.command(self.pwm, self.valve, self.brake)
-            for _ in range(3):                                  # the panel's page: 3 pieces per step at most
-                if not self.panel_out:
-                    break
-                self.link.send(self.panel_out.pop(0))
+            if self.panel_out:                                  # the panel's page: one piece per step (three
+                self.link.send(self.panel_out.pop(0))           # back to back lost pieces in the MCU)
             self.next_step = max(self.next_step + STEP_S, now - STEP_S)
         self.link.poll(max(0.0, min(.002, self.next_step - time.monotonic())))
         st = self.link.status

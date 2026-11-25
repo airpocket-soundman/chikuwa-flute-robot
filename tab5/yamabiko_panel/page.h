@@ -8,7 +8,8 @@
 namespace page {
 
 constexpr int16_t NO_VALUE = -32768;
-constexpr uint8_t FLAG_BUSY = 1, FLAG_HAS_SONG = 2, FLAG_COLLECT = 4, FLAG_SERVER_BUSY = 8, FLAG_ARCHIVE = 16;
+constexpr uint8_t FLAG_BUSY = 1, FLAG_HAS_SONG = 2, FLAG_COLLECT = 4, FLAG_SERVER_BUSY = 8, FLAG_ARCHIVE = 16,
+                  FLAG_CALIBRATED = 32;
 constexpr uint8_t EV_STEP = 0x10, EV_CALIBRATE = 0x11, EV_ARCHIVE = 0x12;
 constexpr uint8_t EV_RECORD = 0x13, EV_FINISH = 0x14, EV_AGAIN = 0x15;   // the panel's record / end / again
 constexpr uint8_t EV_RESET = 0x16;                                      // stop everything and reset
@@ -49,6 +50,11 @@ struct Reader {
 };
 
 inline bool parse(const uint8_t *data, size_t n, Page &pg) {
+  if (n < 3) return false;                       // the last two bytes: the 16-bit sum of the others (a garbled
+  uint16_t sum = 0;                              // read is thrown away and read again)
+  for (size_t i = 0; i < n - 2; i++) sum += data[i];
+  if (sum != (uint16_t)(data[n - 2] | (data[n - 1] << 8))) return false;
+  n -= 2;
   Reader r(data, n);
   Page q;
   q.format = r.u8();

@@ -19,6 +19,7 @@ Page, little endian (the panel's reader is tab5/yamabiko_panel/page.h; keep the 
   u16 number of points, then i16 score [cent] per point, then i16 heard (the last play, in the score's key)
       per point; NO_VALUE where the score rests or nothing was heard.  Points are 10 ms apart x ``stride``.
   u8  stride (steps of 10 ms per point)
+  u16 the 16-bit sum of every byte before it (the panel throws a garbled read away)
 
 Events (the bytes the panel writes after register 0x02):
   EV_STEP index        choose a step              EV_CALIBRATE        calibrate
@@ -35,7 +36,7 @@ import struct
 FORMAT = 1
 NO_VALUE = -32768
 PHASES = ["idle", "prepare", "tune", "record", "analyse", "play", "done", "saved", "error"]
-FLAG_BUSY, FLAG_HAS_SONG, FLAG_COLLECT, FLAG_SERVER_BUSY, FLAG_ARCHIVE = 1, 2, 4, 8, 16
+FLAG_BUSY, FLAG_HAS_SONG, FLAG_COLLECT, FLAG_SERVER_BUSY, FLAG_ARCHIVE, FLAG_CALIBRATED = 1, 2, 4, 8, 16, 32
 EV_STEP, EV_CALIBRATE, EV_ARCHIVE = 0x10, 0x11, 0x12
 EV_RECORD, EV_FINISH, EV_AGAIN = 0x13, 0x14, 0x15     # the panel's record / end and play / again
 EV_RESET = 0x16                                         # stop everything and reset (as the board's button)
@@ -83,7 +84,8 @@ def encode(status, archive=(), heard=None) -> bytes:
     flags = ((FLAG_BUSY if status.get("busy") else 0) | (FLAG_HAS_SONG if status.get("has_song") else 0)
              | (FLAG_COLLECT if status.get("collect") else 0)
              | (FLAG_SERVER_BUSY if status.get("busy") and phase in ("tune", "play") else 0)
-             | (FLAG_ARCHIVE if status.get("archive") else 0))
+             | (FLAG_ARCHIVE if status.get("archive") else 0)
+             | (FLAG_CALIBRATED if status.get("tuning") else 0))
     ids = [a["id"] for a in archive]
     arc = ids.index(status["archive"]) if status.get("archive") in ids else -1
     target, voice = status.get("target") or [], status.get("voice") or []
@@ -110,11 +112,15 @@ def encode(status, archive=(), heard=None) -> bytes:
     points, played_points = points[:room], played_points[:room]
     out += struct.pack("<H", len(points)) + struct.pack(f"<{len(points)}h", *points)
     out += struct.pack(f"<{len(played_points)}h", *played_points) + bytes([stride])
+    out += struct.pack("<H", sum(out) & 0xFFFF)          # the panel checks it (a garbled read is read again)
     return bytes(out)
 
 
 def decode(page: bytes) -> dict:
     """The page back as a dict (the tests, and a model of the panel's reader)."""
+    if (sum(page[:-2]) & 0xFFFF) != struct.unpack("<H", page[-2:])[0]:
+        raise ValueError("the page's sum does not match")
+    page = page[:-2]
     head = struct.Struct("<BBBBBbBHHhhB")
     (fmt, phase, flags, step, n_steps, arc, n_arc, rec_ds, play_ds, home, shift, n_pr) = head.unpack_from(page)
     k = head.size

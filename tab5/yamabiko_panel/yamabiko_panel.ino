@@ -17,7 +17,8 @@
 #include "page.h"
 
 constexpr uint8_t ADDR = 0x42;
-constexpr uint32_t FREQ = 400000;      // 400 kHz (100 kHz made a page take 150 ms; the MCU stretches the clock)
+constexpr uint32_t FREQ = 100000;      // 100 kHz: at 400 kHz the pages came back garbled (the MCU serves the
+                                       // bus from its loop); a page is read a few pieces per pass instead
 constexpr uint32_t POLL_MS = 150;
 constexpr size_t PIECE = 64;
 
@@ -102,7 +103,7 @@ static void poll_page() {                         // every POLL_MS: is there a n
 
 static void read_page_piece() {                   // up to 8 pieces of the new page (about 2 ms each at 400 kHz)
   if (!reading_page) return;
-  for (int k = 0; k < 8 && want_off < want_len; k++) {
+  for (int k = 0; k < 3 && want_off < want_len; k++) {         // ~20 ms a pass at 100 kHz
     size_t n = want_len - want_off < PIECE ? want_len - want_off : PIECE;
     if (!read_at(6 + want_off, buf + want_off, n)) { reading_page = false; return; }
     want_off += n;
@@ -150,9 +151,10 @@ static bool btn_enabled(int i) {
   bool busy = pg.busy(), rec = pg.phase == page::RECORD;
   if (!have_page) return false;
   if (i != B_CAL && (int32_t)(millis() - stop_hold_until) < 0) return false;   // just stopped
+  bool cal = pg.flags & page::FLAG_CALIBRATED;
   switch (i) {
-    case B_REC: return !busy || rec;
-    case B_AGAIN: return !busy && (pg.flags & page::FLAG_HAS_SONG);
+    case B_REC: return rec || (!busy && cal);
+    case B_AGAIN: return !busy && cal && (pg.flags & page::FLAG_HAS_SONG);
     case B_CAL: return !busy;
     case B_STOP: return busy && !rec;
   }
@@ -162,7 +164,9 @@ static bool btn_enabled(int i) {
 static void draw_button(int i) {
   const Rect &r = btn[i];
   bool en = btn_enabled(i), fl = (flash_btn == i && millis() < flash_until_ms);
-  uint16_t col = i == B_REC ? (pg.phase == page::RECORD ? REC : ACC) : i == B_AGAIN ? ACC : i == B_CAL ? CARD : WARN;
+  bool need_cal = have_page && !(pg.flags & page::FLAG_CALIBRATED);
+  uint16_t col = i == B_REC ? (pg.phase == page::RECORD ? REC : ACC) : i == B_AGAIN ? ACC
+               : i == B_CAL ? (need_cal ? ACC : CARD) : WARN;
   if (!en) col = LINE;
   bool down = en && down_btn == i;
   int sink = down ? 3 : 0;
@@ -173,14 +177,16 @@ static void draw_button(int i) {
     cv.drawRoundRect(r.x - 4, r.y - 4, r.w + 8, r.h + 8, 18, ACC);
     cv.drawRoundRect(r.x - 5, r.y - 5, r.w + 10, r.h + 10, 19, ACC);
   }
-  uint16_t tc = (i == B_CAL && en) ? FG : (en ? C_WHITE : MUTE);
-  if (i == B_CAL) cv.drawRoundRect(r.x, r.y, r.w, r.h, 16, LINE);
+  uint16_t tc = (i == B_CAL && en && !need_cal) ? FG : (en ? C_WHITE : MUTE);
+  if (i == B_CAL && !need_cal) cv.drawRoundRect(r.x, r.y, r.w, r.h, 16, LINE);
   cv.setTextColor(tc);
   bool holding = (int32_t)(millis() - stop_hold_until) < 0;
   const char *label[] = {pg.phase == page::RECORD ? "録音終了して演奏" : "録音", "練習：もう一度", "キャリブレーション",
                          holding ? "止めています" : "止める"};
   const char *sub[] = {pg.phase == page::RECORD ? "吹き終わったら" : "口笛を聞かせる", "同じ曲をもう一度",
                        "その日の笛を測る（約 10 秒鳴る）", "動いているものを止める"};
+  if (need_cal && (i == B_REC || i == B_AGAIN)) sub[i] = "先にキャリブレーション";
+  if (need_cal && i == B_CAL) sub[i] = "先にこちら（約 10 秒鳴る）";
   if (pending_btn == i) sub[i] = "受け付けました…";
   cv.setTextDatum(textdatum_t::top_left);
   text_fit(label[i], r.x + 18, r.y + 20 + sink, r.w - 30, &fonts::lgfxJapanGothic_32);
@@ -439,7 +445,9 @@ static void tapped(int x, int y) {
     if (tabs[t].in(x, y)) { tab_archive = t == 1; dirty = true; click_sound(); return; }
   if (listArea.in(x, y) && have_page && !pg.busy()) {
     int i = (y - listArea.y - 6) / row_h();
-    if (tab_archive && i >= 0 && i < (int)pg.archive.size()) { event(page::EV_ARCHIVE, i); click_sound(); }
+    if (tab_archive && i >= 0 && i < (int)pg.archive.size() && (pg.flags & page::FLAG_CALIBRATED)) {
+      event(page::EV_ARCHIVE, i); click_sound();
+    }
     if (!tab_archive && i >= 0 && i < (int)pg.steps.size()) { event(page::EV_STEP, i); click_sound(); }
     dirty = true;
   }
