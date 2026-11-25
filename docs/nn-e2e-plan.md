@@ -217,8 +217,22 @@ python scripts/yamabiko_step_eval.py --steps step3 step4 --targets f80_doremi f8
 |---|---|---|
 | 実機の録音・評価記録 | `runs/real/`（git 外） | 耳の学習データ `runs/ear/dataset.npz`（28 分）もここ |
 | 配備するモデル | `models/stepN/` | `profile.json` が使う重みと設定をまとめる |
-| 学習 | 手元の PC（GPU） | このリポジトリのクラウド環境には PyTorch がない |
+| 学習 | 手元の PC（GPU） | このリポジトリのクラウド環境には PyTorch がない。2026-11-25 から 1 回に 128 台（`--batch 128`、学習率 2e-3）が標準（下） |
+| 学習のログ | `runs/twin_viewer/<出力名>/step_<n>.npz` | 学習中の 13 回ほどの 128 台ぶんの演奏。`scripts/yamabiko_twin_viewer_data.py` で [ツイン学習ビューア](twin_viewer/fleet.html) に入れる |
 | 推論 | UNO Q の Linux 側（NumPy） | `scripts/uno_q_push.sh` で送る |
+
+### 4.1 128 台を標準にした理由（2026-11-25）
+
+step7c の演奏 NN（新ツイン）を同じ曲数で比べた（評価用 48 台の誤差、採用した重み）：
+
+| 台数 × 回数 | 学習率 | 時間 | 誤差 |
+|---|---|---|---|
+| 32 × 1500 | 1e-3 | 51 分 | 48.5 cent |
+| 128 × 375 | 1e-3 | 12 分 | 49.9 cent |
+| 128 × 375 | 2e-3 | 12 分 | 49.5 cent（まだ下がっていた） |
+
+GPU（RTX 5060 Ti）は 32 台では 2 割ほどしか使っておらず、1 回の時間は台数によらずほぼ同じ（10 ms ずつ順に進める部分が律速）。
+同じ曲数なら 4 分の 1 の時間で、精度の差は 1 cent ほど。足りなければ回数を増やす。
 
 ## 5. 用語
 

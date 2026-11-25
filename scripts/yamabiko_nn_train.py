@@ -107,9 +107,12 @@ def main():
                     help="practice: plays of the same song on the same rig per episode, the song memory kept "
                          "between them; later plays weigh more")
     ap.add_argument("--eval-plays", type=int, default=5)
-    ap.add_argument("--dump-steps", type=int, nargs="*", default=[],
-                    help="training steps whose batch (every rig's play) is saved for the twin viewer")
-    ap.add_argument("--dump-dir", default=None, help="where --dump-steps go (step_<n>.npz)")
+    ap.add_argument("--dump-steps", type=int, nargs="*", default=None,
+                    help="training steps whose batch (every rig's play) is saved for the twin viewer "
+                         "(default: about 13 spread over the run; none with --no-dump)")
+    ap.add_argument("--no-dump", action="store_true", help="save no training steps for the twin viewer")
+    ap.add_argument("--dump-dir", default=None,
+                    help="where --dump-steps go (step_<n>.npz; default runs/twin_viewer/<name of --out>)")
     ap.add_argument("--rig-memory", type=int, default=0,
                     help="step7: a rig memory of this size kept across different songs on the same rig (from --init)")
     ap.add_argument("--rig-aux", type=float, default=0.0,
@@ -129,13 +132,21 @@ def main():
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--smooth", type=float, default=.3)
     ap.add_argument("--spread", type=float, default=.12)
-    ap.add_argument("--batch", type=int, default=32)
+    ap.add_argument("--batch", type=int, default=128,
+                    help="rigs played at once (128 since 2026-11-25: as good as 32 x 4 the steps, in a quarter of the time)")
     ap.add_argument("--song-steps", type=int, default=400)
-    ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--lr", type=float, default=2e-3, help="(2e-3 with 128 rigs; it was 1e-3 with 32)")
     ap.add_argument("--eval-every", type=int, default=25)
     ap.add_argument("--seed", type=int, default=20261122)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); device = args.device
+    if args.no_dump:
+        args.dump_steps = []
+    elif args.dump_steps is None:                    # the log for the twin viewer, kept by default
+        args.dump_steps = sorted({s for s in [1, 2, 5, 10, 25, 50] if s <= args.steps}
+                                 | {max(1, round(args.steps * f)) for f in (.1, .2, .3, .4, .5, .6, .8, 1.0)})
+    if args.dump_steps and not args.dump_dir:
+        args.dump_dir = str(pathlib.Path("runs/twin_viewer") / pathlib.Path(args.out).name)
     torch.manual_seed(args.seed); rng = np.random.default_rng(args.seed)
     twin, temp_c, plant_name = load_twin(args.twin, device)
     plant = DifferentiableMotorFlute(PhysicalPlantConfig.named(plant_name, **({"temp_c": temp_c} if temp_c else {})))

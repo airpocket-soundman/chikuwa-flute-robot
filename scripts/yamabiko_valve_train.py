@@ -112,7 +112,7 @@ def main():
                          "heard: open only where the flute sounds within --tol (it learns to stay shut)")
     ap.add_argument("--twin-free", action="store_true", help="step7: no twin position / velocity inputs")
     ap.add_argument("--steps", type=int, default=300)
-    ap.add_argument("--batch", type=int, default=32)
+    ap.add_argument("--batch", type=int, default=128, help="rigs played at once (128 since 2026-11-25)")
     ap.add_argument("--song-steps", type=int, default=400)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--chatter", type=float, default=.05, help="cost of the mean |change| of the valve command")
