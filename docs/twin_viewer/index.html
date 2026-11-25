@@ -210,15 +210,16 @@ scene.add(fanRotor);
 
 
 // the slide: rod in the tube, out to the carriage the actuator rod pushes
-const STROKE = 22;                                        // cm of travel shown
+const STROKE = 22, SLIDE_HOME = 24;                       // cm of travel shown; the carriage moves between
+                                                          // the whistle's end (x 67) and the actuator's holder (x 118)
 const slide = new Voxels();
 slide.box(0, 56, 7, 8, 0, 1, C.rod, .03);                 // the slide rod (from inside the tube out to the carriage)
-slide.box(56, 64, 1, 13, -4, 5, C.white, .03);            // carriage block riding the rail
-slide.box(57, 58, 0, 1, 5, 6, C.bolt, .02).box(62, 63, 0, 1, 5, 6, C.bolt, .02);
-slide.box(64, 92, 8, 9, 0, 1, C.steel, .02);              // actuator rod
+slide.box(56, 64, 4, 13, 0, 5, C.white, .03);             // carriage block joining the two rods
+slide.box(57, 58, 5, 6, 5, 6, C.bolt, .02).box(62, 63, 5, 6, 5, 6, C.bolt, .02);
+slide.box(64, 114, 8, 9, 0, 1, C.steel, .02);             // actuator rod, into the actuator through its holder
 const slider = new THREE.Group();
 slider.add(slide.mesh([0, 0, 0]));
-slider.position.set(48, 0, 0);
+slider.position.set(SLIDE_HOME, 0, 0);
 scene.add(slider);
 
 // wires (not voxels): from the mic, the fan, the servo and the actuator to the boards
@@ -270,7 +271,7 @@ function demo(time) {
   const target = [0, .3, .55, .3, .8, .55, 1, .2][note % 8];
   const pos = (slider.userData.pos ?? 0) + (target - (slider.userData.pos ?? 0)) * .08;
   slider.userData.pos = pos;
-  slider.position.x = 48 + pos * STROKE;                           // the slide follows, a little late
+  slider.position.x = SLIDE_HOME + pos * STROKE;                           // the slide follows, a little late
 }
 
 function resize() {
