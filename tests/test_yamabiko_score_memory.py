@@ -43,6 +43,24 @@ def test_numpy_runtime_matches_torch():
         assert p == pytest.approx(float(torch.sigmoid(vlog[0, i])), abs=1e-4)
 
 
+def test_numpy_runtime_matches_torch_with_extremes():
+    torch.manual_seed(1)
+    cfg = MemoryConfig(ear_dim=8, value=6, keys=16, global_dim=4, hidden=12, extremes=True)
+    model = torch_model(cfg).eval()
+    codes = torch.randn(1, 60, 8) * 2
+    with torch.no_grad():
+        W, G = model.write(codes, torch.ones(1, 60))
+        cents, _ = model.read(W, G, torch.arange(60))
+        p = model.gen(codes)[0, :, 4]
+    assert float(G[0, 4]) <= float(p.max()) + 1e-4 and float(G[0, 5]) >= float(p.min()) - 1e-4
+    assert float(G[0, 4]) > float(G[0, 5])
+    rt = MemoryRuntime(export(model))
+    for c in codes[0].numpy():
+        rt.listen(c)
+    for i in (0, 31, 59):
+        assert rt.recall(i)[0] == pytest.approx(float(cents[0, i]), abs=1e-3)
+
+
 def test_score_from_recording_runs_the_ear_and_the_memory():
     from flute_rl.yamabiko.ear_nn import Ear, EarConfig, export as export_ear, torch_model as ear_model
     from flute_rl.yamabiko.score_memory import score_from_recording

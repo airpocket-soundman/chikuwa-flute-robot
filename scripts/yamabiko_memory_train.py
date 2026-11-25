@@ -188,6 +188,8 @@ def play_scores(model, items, device, twin_path, actuator_path, rigs=16):
                 result = performer.perform(plant, cents, voice, rig_set, batch_twin, torch.Generator(device).manual_seed(0))
             pitch = result["pitch_cents"].cpu().numpy()
             err = pitch - ref_c[None]
+            if not keep.any():
+                continue
             out[name].append(float((np.abs(err)[:, keep] <= 25).mean()))
             key = np.median(err[:, keep], axis=1, keepdims=True)     # the key it played in, as yamabiko_step_eval
             out[name + "_in_key"].append(float((np.abs(err - key)[:, keep] <= 25).mean()))
@@ -210,11 +212,12 @@ def main():
     ap.add_argument("--real", nargs="*", default=[], help="folders of whistles recorded on the rig")
     ap.add_argument("--real-holdout", nargs="*", default=[], help="stems of recordings kept for the test only")
     ap.add_argument("--real-share", type=float, default=.4, help="share of each batch cut from real whistles")
+    ap.add_argument("--extremes", action="store_true", help="also keep a soft highest and lowest pitch (the key)")
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(); dev = args.device
     torch.manual_seed(args.seed)
-    config = MemoryConfig(keys=args.keys, max_hz=args.max_hz)
+    config = MemoryConfig(keys=args.keys, max_hz=args.max_hz, extremes=args.extremes)
     ear = load_ear(args.ear, dev)
     started = time.time()
     train = make(np.random.default_rng(args.seed), args.songs, (3.0, 20.0), ear, config, dev)

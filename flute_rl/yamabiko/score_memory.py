@@ -10,6 +10,9 @@ Reading (playing, instant t):  r_t = W k_t                 (the values written n
 (unit length), so ``k_s . k_t`` is a bump around s = t whose width is about 1 / max_hz.  The appended 1 makes
 the last row of W the bump's mass, which the decoder uses to normalise.  ``G`` is the mean of another code
 over the whole listening, weighted by a learned gate (the notes, not the rests): it tells the decoder where the whistle sits, to move it into the flute's range.
+With ``extremes`` the memory also keeps a soft highest and lowest of a learned pitch-like number p_s over the
+listening (hi = log(sum a_s exp(beta p_s) / A) / beta, lo the same with -p): the rule moves the whistle by the
+middle of its range, which a mean cannot tell.  Two running sums, so their size does not grow with the song.
 Nothing in W grows with the length of the song except the number of terms summed: long songs blur.
 
 The targets taught are those of the rule pipeline today (flute_rl/yamabiko/whistle.py: clean_track, then
@@ -38,6 +41,8 @@ class MemoryConfig:
     seed: int = 0
     low: float = -10.0           # the flute's target range (cents re A4), as the profiles
     high: float = 1200.0
+    extremes: bool = False       # also keep a soft highest and lowest pitch (mem_05 on)
+    beta: float = 10.0
 
 
 def frequencies(config: MemoryConfig) -> np.ndarray:
@@ -77,8 +82,10 @@ def torch_model(config: MemoryConfig = MemoryConfig()):
             self.config = cfg
             self.register_buffer("freqs", torch.tensor(frequencies(cfg), dtype=torch.float32))
             self.enc = nn.Sequential(nn.Linear(cfg.ear_dim, cfg.hidden), nn.ReLU(), nn.Linear(cfg.hidden, cfg.value))
-            self.gen = nn.Sequential(nn.Linear(cfg.ear_dim, cfg.hidden), nn.ReLU(), nn.Linear(cfg.hidden, cfg.global_dim + 1))
-            self.dec = nn.Sequential(nn.Linear(cfg.value + 1 + cfg.global_dim, cfg.hidden), nn.ReLU(),
+            extra = 1 if cfg.extremes else 0
+            self.gen = nn.Sequential(nn.Linear(cfg.ear_dim, cfg.hidden), nn.ReLU(),
+                                     nn.Linear(cfg.hidden, cfg.global_dim + extra + 1))
+            self.dec = nn.Sequential(nn.Linear(cfg.value + 1 + cfg.global_dim + 2 * extra, cfg.hidden), nn.ReLU(),
                                      nn.Linear(cfg.hidden, cfg.hidden), nn.ReLU(), nn.Linear(cfg.hidden, 2))
 
         def code(self, steps):
@@ -93,7 +100,15 @@ def torch_model(config: MemoryConfig = MemoryConfig()):
             W = torch.einsum("blv,lk->bvk", v, k)
             g = self.gen(ear)
             weight = torch.sigmoid(g[..., -1:]) * mask[..., None]          # how much this step says about the key
-            G = (g[..., :-1] * weight).sum(1) / weight.sum(1).clamp_min(1e-3)
+            mass = weight.sum(1).clamp_min(1e-3)
+            gd = self.config.global_dim
+            G = (g[..., :gd] * weight).sum(1) / mass
+            if self.config.extremes:                                        # soft highest and lowest p
+                p, b = g[..., gd], self.config.beta
+                logw = torch.log(weight[..., 0].clamp_min(1e-12))
+                hi = (torch.logsumexp(b * p + logw, 1) - torch.log(mass[:, 0])) / b
+                lo = -(torch.logsumexp(-b * p + logw, 1) - torch.log(mass[:, 0])) / b
+                G = torch.cat([G, hi[:, None], lo[:, None]], 1)
             return W, G
 
         def read(self, W, G, steps):
@@ -113,6 +128,8 @@ def torch_model(config: MemoryConfig = MemoryConfig()):
 def export(model) -> dict:
     a = {"mem.freqs": model.freqs.cpu().numpy().astype(np.float64),
          "mem.low": np.array(model.config.low), "mem.high": np.array(model.config.high)}
+    if model.config.extremes:
+        a["mem.beta"] = np.array(model.config.beta)
     for part in ("enc", "gen", "dec"):
         for i, layer in enumerate(getattr(model, part)):
             if hasattr(layer, "weight"):
@@ -134,8 +151,10 @@ class MemoryRuntime:
         self.turn = np.exp(2j * np.pi * self.freqs * STEP_S)
         self.phasor = np.ones(len(self.freqs), np.complex128)
         self.scale = 1 / np.sqrt(len(self.freqs))
-        self.G = np.zeros(self.a[self._last("gen") + ".w"].shape[0] - 1, np.float64)
+        self.beta = float(self.a["mem.beta"]) if "mem.beta" in self.a else None
+        self.G = np.zeros(self.a[self._last("gen") + ".w"].shape[0] - 1 - (self.beta is not None), np.float64)
         self.A = 0.0
+        self.hi = self.lo = -np.inf                      # log sum a exp(+-beta p)
         self.n = 0
 
     def _last(self, part):
@@ -159,15 +178,23 @@ class MemoryRuntime:
         if self.n % 1000 == 999:
             self.phasor /= np.abs(self.phasor)
         g = self._mlp("gen", np.asarray(ear_code, np.float32))
-        a = 1 / (1 + np.exp(-g[-1]))
-        self.G += a * g[:-1]
+        a = 1 / (1 + np.exp(-np.clip(g[-1], -50.0, 50.0)))
+        gd = len(self.G)
+        self.G += a * g[:gd]
         self.A += a
+        if self.beta is not None:
+            la = np.log(max(a, 1e-12))
+            self.hi = np.logaddexp(self.hi, self.beta * float(g[gd]) + la)
+            self.lo = np.logaddexp(self.lo, -self.beta * float(g[gd]) + la)
         self.n += 1
 
     def recall(self, step):
         """(target cents, voice probability) of the instant ``step`` (10 ms) of the song heard."""
         r = self.W @ position_code(np.array([step]), self.freqs)[0]
         g = self.G / max(self.A, 1e-3)
+        if self.beta is not None:
+            mass = np.log(max(self.A, 1e-3))
+            g = np.r_[g, (self.hi - mass) / self.beta, -(self.lo - mass) / self.beta]
         out = self._mlp("dec", np.concatenate([r, g]).astype(np.float32))
         mid, half = (self.low + self.high) / 2, (self.high - self.low) / 2
         return float(mid + half * out[0]), float(1 / (1 + np.exp(-np.clip(out[1], -50.0, 50.0))))

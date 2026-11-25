@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>やまびこ1号 ボクセル模型</title>
+<style>
+  :root { --bg: #1b1d22; --panel: rgba(20, 22, 27, .78); --text: #e8e6e1; --muted: #9aa0a8; --accent: #f0b429; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", sans-serif; overflow: hidden; }
+  #view { position: fixed; inset: 0; }
+  header { position: fixed; top: 16px; left: 16px; right: 16px; pointer-events: none; }
+  h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: .04em; }
+  header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+  .bar { position: fixed; left: 16px; bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { background: var(--panel); color: var(--text); border: 1px solid #3a3e46; border-radius: 6px;
+    padding: 7px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .label { position: absolute; transform: translate(-50%, -100%); padding: 3px 8px; font-size: 12px;
+    background: var(--panel); border: 1px solid #3a3e46; border-radius: 4px; white-space: nowrap;
+    pointer-events: none; }
+  .label::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 14px; background: #6b717b; }
+  #labels { position: fixed; inset: 0; pointer-events: none; }
+  #labels.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="labels"></div>
+<header>
+  <h1>やまびこ1号 — ボクセル模型</h1>
+  <p>ドラッグで回転・ホイールで拡大。ファン・弁・スライドは別部品（デジタルツインの動きをつなぐ予定）</p>
+</header>
+<div class="bar">
+  <button id="move" aria-pressed="false">動かしてみる</button>
+  <button id="names" aria-pressed="true">部品名</button>
+  <button id="reset">視点を戻す</button>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+// 1 voxel = 1 cm.  x: along the rail (left = mouthpiece), y: up, z: toward the viewer.
+const C = {
+  alu: 0xb9bdc3, aluDark: 0x8e939a, white: 0xf1efe9, whiteShade: 0xdcd9d1, black: 0x26272b, bolt: 0x1c1c1f,
+  blue: 0x2c33b8, servo: 0x2f6fe0, servoLabel: 0xe6c84a, rod: 0xd7d9dc, steel: 0xc9ccd1, actGray: 0x9da1a8,
+  pcbBlue: 0x1f5fbf, pcbGreen: 0x1e8a45, chip: 0x202226, gold: 0xd8b25a, cap: 0x2c2c30, wood: 0x6b4a2f,
+};
+
+class Voxels {
+  constructor() { this.cells = new Map(); }
+  set(x, y, z, color, jitter = .06) {
+    this.cells.set(`${x},${y},${z}`, [x, y, z, color, jitter]);
+  }
+  box(x0, x1, y0, y1, z0, z1, color, jitter) {
+    for (let x = x0; x < x1; x++) for (let y = y0; y < y1; y++) for (let z = z0; z < z1; z++) this.set(x, y, z, color, jitter);
+    return this;
+  }
+  // a cylinder along x: centre (cy, cz), radius r, hollow inside ri
+  cylX(x0, x1, cy, cz, r, color, ri = -1, jitter) {
+    for (let x = x0; x < x1; x++) for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++)
+      for (let z = Math.floor(cz - r); z <= Math.ceil(cz + r); z++) {
+        const d = Math.hypot(y + .5 - cy, z + .5 - cz);
+        if (d <= r && d > ri) this.set(x, y, z, color, jitter);
+      }
+    return this;
+  }
+  // a cylinder along y: centre (cx, cz)
+  cylY(y0, y1, cx, cz, r, color, ri = -1, jitter) {
+    for (let y = y0; y < y1; y++) for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++)
+      for (let z = Math.floor(cz - r); z <= Math.ceil(cz + r); z++) {
+        const d = Math.hypot(x + .5 - cx, z + .5 - cz);
+        if (d <= r && d > ri) this.set(x, y, z, color, jitter);
+      }
+    return this;
+  }
+  mesh(origin = [0, 0, 0]) {
+    const list = [...this.cells.values()];
+    const geo = new THREE.BoxGeometry(.96, .96, .96);
+    const mat = new THREE.MeshStandardMaterial({ roughness: .78, metalness: .05 });
+    const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+    const m = new THREE.Matrix4(), col = new THREE.Color();
+    let seed = list.length * 9301;
+    const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    list.forEach(([x, y, z, color, jitter], i) => {
+      m.makeTranslation(x + .5 - origin[0], y + .5 - origin[1], z + .5 - origin[2]);
+      mesh.setMatrixAt(i, m);
+      col.setHex(color).multiplyScalar(1 - jitter + 2 * jitter * rand());
+      mesh.setColorAt(i, col);
+    });
+    mesh.castShadow = mesh.receiveShadow = true;
+    return mesh;
+  }
+}
+
+// ---------- the scene -------------------------------------------------------------------------------
+const view = document.getElementById("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b1d22);
+const camera = new THREE.PerspectiveCamera(32, 1, 1, 2000);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+const HOME = { pos: new THREE.Vector3(74, 105, 185), target: new THREE.Vector3(74, 4, -10) };
+function home() { camera.position.copy(HOME.pos); controls.target.copy(HOME.target); controls.update(); }
+home();
+
+scene.add(new THREE.HemisphereLight(0xfff4e6, 0x3a3028, .55));
+const sun = new THREE.DirectionalLight(0xffffff, .85);
+sun.position.set(-60, 160, 120);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -120, right: 120, top: 90, bottom: -90, near: 10, far: 500 });
+sun.target.position.set(70, 0, -10);
+scene.add(sun, sun.target);
+
+// the desk: a coarse voxel slab
+const desk = new Voxels();
+for (let x = -20; x < 172; x += 4) for (let z = -48; z < 20; z += 4) {
+  const k = ((x * 7 + z * 13) % 5 + 5) % 5;
+  desk.box(x, x + 4, -4, -2, z, z + 4, [0x6b4a2f, 0x664629, 0x70503a, 0x5f4128, 0x6a4b33][k], .03);
+}
+const deskMesh = desk.mesh([0, 0, 0]);
+deskMesh.scale.set(1, 1, 1);
+scene.add(deskMesh);
+
+const fixed = new Voxels();
+
+// aluminium extrusion along the whole rig, with two slots on the front and top
+fixed.box(-2, 156, -2, 3, -4, 4, C.alu, .04);
+fixed.box(-2, 156, 0, 1, 3, 4, C.aluDark, .02);           // front slot
+fixed.box(-2, 156, 2, 3, -1, 1, C.aluDark, .02);          // top slot
+
+// white clamp blocks on the rail, black bolt heads on the front
+function clamp(x0, x1, y1, zb = -5, zf = 5) {
+  fixed.box(x0, x1, -2, y1, zb, zf, C.white, .03);
+  for (const bx of [x0 + 1, x1 - 2]) fixed.box(bx, bx + 1, 0, 1, zf, zf + 1, C.bolt, .02);
+}
+clamp(30, 42, 12, -5, 5);           // the tube holder
+clamp(66, 71, 4);                   // board stays
+clamp(91, 96, 4);
+clamp(118, 130, 12, -5, 5);         // the actuator's front block
+
+// slide whistle: white mouthpiece, blue tube, white collar at its end
+fixed.cylX(10, 22, 7.5, 0, 2.6, C.white, -1, .03);
+fixed.box(4, 10, 6, 10, -2, 2, C.white, .03);                 // the mouthpiece's flat lip
+fixed.cylX(22, 64, 7.5, 0, 2.6, C.blue, -1, .05);
+fixed.cylX(64, 67, 7.5, 0, 2.9, C.white, -1, .03);
+// tube holder's saddle around the tube (its top half)
+fixed.box(31, 41, 10, 12, -4, 4, C.white, .03);
+
+// the air path: valve box -> elbow -> mouthpiece
+fixed.box(-6, 10, 6, 22, -10, 1, C.white, .03);              // valve box
+fixed.box(-1, 5, 6, 9, 1, 4, C.white, .03);                   // elbow down to the lip
+for (const [y, z] of [[18, 1], [14, 1], [10, 1]]) fixed.box(-3, -2, y, y + 1, z, z + 1, C.bolt, .02);
+fixed.cylY(10, 16, 3, 1.5, 1.6, C.whiteShade, -1, .02);       // valve shaft boss on the front
+
+// centrifugal blower behind the valve box
+fixed.cylY(0, 5, 22, -26, 15, C.white, -1, .03);              // round white base
+fixed.box(0, 12, 6, 17, -16, -10, C.white, .03);              // outlet duct into the valve box
+fixed.cylY(5, 17, 22, -26, 13, C.black, 9.5, .05);            // housing ring
+fixed.cylY(16, 17, 22, -26, 9.6, C.black, 7, .05);            // top plate around the inlet
+fixed.box(30, 32, 5, 22, -16, -14, C.black, .03);             // the housing's post
+
+// servo (SG90) on the valve box's left face
+fixed.box(-10, -6, 9, 21, -9, -2, C.servo, .05);
+fixed.box(-11, -10, 11, 18, -8, -3, C.servoLabel, .04);
+fixed.box(-12, -6, 19, 20, -9, -2, C.servo, .05);             // mounting ears
+
+// microphone board on its white bracket, beside the tube holder
+fixed.box(28, 30, 3, 24, -6, -4, C.white, .03);
+fixed.box(27, 31, 20, 25, -4, -3, C.pcbGreen, .05);
+fixed.box(28, 30, 22, 24, -3, -2, C.chip, .02);               // the MEMS mic can
+
+// Arduino UNO Q (blue) with the board stack (green) on stand-offs
+fixed.box(70, 98, 3, 4, -13, -1, C.pcbBlue, .05);
+for (const [x, z] of [[71, -12], [96, -12], [71, -2], [96, -2]]) fixed.box(x, x + 1, 4, 7, z, z + 1, C.gold, .02);
+fixed.box(68, 100, 7, 8, -14, 0, C.pcbGreen, .05);
+fixed.box(72, 80, 8, 9, -6, -2, C.chip, .02);                 // headers / chips
+fixed.box(84, 87, 8, 13, -12, -9, C.cap, .03);                // electrolytic capacitors
+fixed.box(88, 90, 8, 12, -12, -10, C.cap, .03);
+fixed.box(92, 98, 8, 11, -13, -8, C.chip, .03);               // power jack
+fixed.box(80, 84, 8, 10, -13, -11, C.white, .02);             // connectors
+fixed.box(70, 74, 8, 10, -13, -11, C.white, .02);
+
+// linear actuator: grey body, black end cap at the far right
+fixed.box(128, 160, 6, 11, -3, 3, C.actGray, .04);
+fixed.box(160, 164, 5, 12, -4, 4, C.black, .04);
+fixed.box(134, 136, 3, 6, -2, 2, C.white, .03);              // body support on the rail
+
+scene.add(fixed.mesh());
+
+// ---------- moving parts (each its own group, to be driven by the twin) -----------------------------
+// fan rotor: dark blades inside the housing, spun about its own axis
+const rotor = new Voxels();
+for (let a = 0; a < 24; a++) {
+  const th = a / 24 * 2 * Math.PI;
+  for (let r = 5; r <= 9; r++) {
+    const x = Math.round(Math.cos(th + r * .05) * r), z = Math.round(Math.sin(th + r * .05) * r);
+    rotor.box(x, x + 1, 6, 15, z, z + 1, 0x4a4d55, .08);
+  }
+}
+rotor.cylY(14, 15, 0, 0, 3.2, 0x8a8f99, -1, .05);           // hub
+const fanRotor = new THREE.Group();
+fanRotor.add(rotor.mesh([.5, 0, .5]));
+fanRotor.position.set(22, 0, -26);
+scene.add(fanRotor);
+
+// servo horn and the valve flap it turns (inside the box, seen through the front slot)
+const horn = new Voxels();
+horn.box(-1, 1, 0, 1, -1, 1, C.white, .02).box(-1, 1, 0, 1, 1, 5, C.white, .02);
+const servoHorn = new THREE.Group();
+servoHorn.add(horn.mesh([0, 0, 0]));
+servoHorn.position.set(-8, 21, -5.5);
+scene.add(servoHorn);
+
+const flap = new Voxels();
+flap.box(-3, 3, 0, 1, -3, 3, 0xe25b3a, .04);                  // a red marker for "air on / off"
+const valveFlap = new THREE.Group();
+valveFlap.add(flap.mesh([0, 0, 0]));
+valveFlap.position.set(3, 22, -4.5);
+scene.add(valveFlap);
+
+// the slide: rod in the tube, out to the carriage the actuator rod pushes
+const STROKE = 22;                                        // cm of travel shown
+const slide = new Voxels();
+slide.box(0, 56, 7, 8, 0, 1, C.rod, .03);                 // the slide rod (from inside the tube out to the carriage)
+slide.box(56, 64, 1, 13, -4, 5, C.white, .03);            // carriage block riding the rail
+slide.box(57, 58, 0, 1, 5, 6, C.bolt, .02).box(62, 63, 0, 1, 5, 6, C.bolt, .02);
+slide.box(64, 92, 8, 9, 0, 1, C.steel, .02);              // actuator rod
+const slider = new THREE.Group();
+slider.add(slide.mesh([0, 0, 0]));
+slider.position.set(48, 0, 0);
+scene.add(slider);
+
+// wires (not voxels): from the mic, the fan, the servo and the actuator to the boards
+function wire(points, color) {
+  const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, .35, 6), new THREE.MeshStandardMaterial({ color, roughness: .6 }));
+  tube.castShadow = true;
+  scene.add(tube);
+}
+wire([[29, 24, -3], [40, 22, -8], [60, 14, -10], [74, 9, -8]], 0xd23b2f);
+wire([[29, 24, -4], [42, 20, -12], [62, 12, -12], [76, 9, -9]], 0x2a2a2e);
+wire([[29, 23, -3], [44, 18, -6], [64, 12, -6], [78, 9, -6]], 0xe8c440);
+wire([[30, 18, -30], [52, 4, -26], [70, 6, -18], [82, 9, -12]], 0x3d6fe0);
+wire([[-8, 12, -9], [10, 3, -14], [50, 1, -16], [86, 9, -12]], 0xe07b2f);
+wire([[128, 9, 3], [116, 13, 4], [104, 10, 0], [96, 9, -4]], 0xd23b2f);
+
+// ---------- labels -----------------------------------------------------------------------------------
+const parts = [
+  ["遠心ファン", [22, 19, -26]],
+  ["弁（サーボ SG90）", [-6, 24, -6]],
+  ["スライドホイッスル", [40, 13, 2]],
+  ["スライド（つまみ）", null],
+  ["DC リニアアクチュエータ", [146, 13, 0]],
+  ["Arduino UNO Q ＋ 自作基板", [84, 14, -7]],
+  ["MEMS マイク", [29, 26, -4]],
+];
+const labelBox = document.getElementById("labels");
+const labels = parts.map(([text]) => {
+  const d = document.createElement("div"); d.className = "label"; d.textContent = text; labelBox.appendChild(d); return d;
+});
+const v = new THREE.Vector3();
+function placeLabels() {
+  const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
+  parts.forEach(([, p], i) => {
+    if (p) v.set(...p); else v.set(slider.position.x + 60, 14, 0);
+    v.project(camera);
+    labels[i].style.left = `${(v.x + 1) / 2 * w}px`;
+    labels[i].style.top = `${(1 - v.y) / 2 * h - 14}px`;
+    labels[i].style.display = v.z < 1 ? "" : "none";
+  });
+}
+
+// ---------- a demo motion (until the twin drives it) ------------------------------------------------
+let moving = false, t0 = performance.now();
+function demo(time) {
+  const t = (time - t0) / 1000;
+  fanRotor.rotation.y = -t * 14;                                   // the fan spins
+  const note = Math.floor(t / .6);                                 // a new note every 0.6 s
+  const target = [0, .3, .55, .3, .8, .55, 1, .2][note % 8];
+  const pos = (slider.userData.pos ?? 0) + (target - (slider.userData.pos ?? 0)) * .08;
+  slider.userData.pos = pos;
+  slider.position.x = 48 + pos * STROKE;                           // the slide follows, a little late
+  const open = (t % .6) < .5;                                      // tongue between notes
+  servoHorn.rotation.y = open ? 0 : -Math.PI / 2.5;
+  valveFlap.rotation.y = open ? 0 : Math.PI / 2;
+}
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+function frame(time) {
+  if (moving) demo(time);
+  controls.update();
+  renderer.render(scene, camera);
+  placeLabels();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+const moveBtn = document.getElementById("move"), namesBtn = document.getElementById("names");
+moveBtn.onclick = () => { moving = !moving; moveBtn.setAttribute("aria-pressed", moving); t0 = performance.now(); };
+namesBtn.onclick = () => {
+  const on = labelBox.classList.toggle("hidden") === false; namesBtn.setAttribute("aria-pressed", on);
+};
+document.getElementById("reset").onclick = home;
+</script>
+</body>
+</html>
