@@ -172,7 +172,8 @@ class Step8:
             return
         n = self.memory.n
         self.reads = memory_cache(self.memory)
-        self.mass_ref = max(self.reads(n // 2)[2], 1e-6)
+        self.mass_ref = None          # read once the reads ahead are done (a read now made the whole W: ~20 s on the UNO Q)
+        self._mid = n // 2
         again = self.player is not None and self.played == (id(self.memory), shift)
         if not again:
             self.player = WithValve(runtime_for(dict(self.actuator_arrays)), dict(self.valve_arrays))
@@ -236,6 +237,8 @@ class Step8:
             return {"pwm": 0.0, "valve": False}
         if self._stage is not None:                      # a short warm-up: the rest now
             self._prefetch(all_now=True)
+        if self.mass_ref is None:
+            self.mass_ref = max(self.reads(self._mid)[2], 1e-6)
         if tau < WARM_STEPS + HOMING_STEPS:
             return {"pwm": -1.0, "valve": False}
         if self.t > 0 and heard is not None:

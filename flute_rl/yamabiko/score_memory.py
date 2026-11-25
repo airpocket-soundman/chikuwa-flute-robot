@@ -401,7 +401,8 @@ def score_from_recording(pcm, ear, memory_arrays, lead_steps: int = 60, tail_ste
         cents, p = decode(logits, v, ear.low_cents)
         heard.append(cents if p >= ear.threshold else np.nan)
         memory.listen(code)
-    recalled = np.array([memory.recall(i) for i in range(memory.n)])
+    rows = memory.reads_from_kernel(memory.kernel(memory.kernel_lags(memory.n)), memory.n)   # all at once (fast)
+    recalled = np.array([r[:2] for r in memory.decode_many(rows)])
     if not len(recalled) or not (recalled[:, 1] >= .5).any():
         raise ValueError("no whistle heard")
     cents, voice = recalled[:, 0], recalled[:, 1] >= .5
