@@ -90,7 +90,7 @@
     <div id="view"></div>
     <div id="labels"></div>
     <div class="topbar">
-      <button id="modeAll" aria-pressed="true">32 台</button>
+      <button id="modeAll" aria-pressed="true">全台</button>
       <button id="modeOne" aria-pressed="false">1 台</button>
       <span class="title" id="where"></span>
     </div>
@@ -169,7 +169,7 @@ function deskTexture() {
   c.width = c.height = cells * px;
   const g = c.getContext("2d");
   const woods = ["#6b4a2f", "#664629", "#70503a", "#5f4128", "#6a4b33"];
-  g.fillStyle = "#3a2a1c"; g.fillRect(0, 0, c.width, c.height);              // the gaps between blocks
+  g.fillStyle = "#56402c"; g.fillRect(0, 0, c.width, c.height);              // the gaps between blocks (soft)
   let seed = 7;
   const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   for (let x = 0; x < cells; x++) for (let y = 0; y < cells; y++) {
@@ -184,7 +184,9 @@ function deskTexture() {
   return t;
 }
 const DESK_TEX = deskTexture();
-const mark = new THREE.Mesh(new THREE.BoxGeometry(186, 1, 76),
+const DESK = { x0: -16, x1: 168, z0: -56, z1: 16 };              // the voxel desk of one rig (cm)
+DESK.w = DESK.x1 - DESK.x0; DESK.d = DESK.z1 - DESK.z0;
+const mark = new THREE.Mesh(new THREE.BoxGeometry(184, .4, 72),
   new THREE.MeshBasicMaterial({ color: 0xf0b429, transparent: true, opacity: .22 }));
 scene.add(mark);
 const CENTER = new THREE.Vector3(), fleetView = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
@@ -216,21 +218,19 @@ function buildFleet(n) {
     fleet.ledOpen.setMatrixAt(i, M.makeTranslation(x + R.LEDS.open, R.LEDS.y, z + R.LEDS.z));
   }
   group.add(fleet.ledShut, fleet.ledOpen);
-  const deskW = COLS * DX - 14, deskD = 74;
-  const top = DESK_TEX.clone(); top.needsUpdate = true; top.repeat.set(deskW / 32, deskD / 32);
+  // one desk per rig, the size of the one-rig view's voxel desk (DESK), so the two line up
+  const top = DESK_TEX.clone(); top.needsUpdate = true; top.repeat.set(DESK.w / 32, DESK.d / 32);
   const side = new THREE.MeshLambertMaterial({ color: 0x4e3826 });
-  const deskMat = [side, side, new THREE.MeshLambertMaterial({ map: top }), side, side, side];
-  for (let r = 0; r < N / COLS; r++) {
-    const desk = new THREE.Mesh(new THREE.BoxGeometry(deskW, 2, deskD), deskMat);
-    desk.position.set((COLS - 1) * DX / 2 + 72, -3, r * DZ - 16);
-    group.add(desk);
-  }
+  fleet.desks = new THREE.InstancedMesh(new THREE.BoxGeometry(DESK.w, 2, DESK.d),
+    [side, side, new THREE.MeshLambertMaterial({ map: top }), side, side, side], N);
+  group.add(fleet.desks);
   scene.add(group); fleet.group = group;
   CENTER.set((COLS - 1) * DX / 2 + 75, 0, (N / COLS - 1) * DZ / 2 - 10);
   fitFleet();
   labelBox.innerHTML = "";
   tags = Array.from({ length: N }, () => { const d = document.createElement("div"); d.className = "tag"; labelBox.appendChild(d); return d; });
   $("cells").style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+  $("modeAll").textContent = `${N} 台`;
   camera.position.copy(fleetView.pos); controls.target.copy(fleetView.target); controls.update();
   showLook();
 }
@@ -243,7 +243,7 @@ const heroRotor = new THREE.Group(); heroRotor.add(parts.rotor.mesh([.5, 0, .5])
 heroRotor.position.set(R.FAN[0], 0, R.FAN[2]); hero.add(heroRotor);
 {
   const desk = new R.Voxels();
-  for (let x = -16; x < 168; x += 4) for (let z = -56; z < 16; z += 4) {
+  for (let x = DESK.x0; x < DESK.x1; x += 4) for (let z = DESK.z0; z < DESK.z1; z += 4) {
     const k = ((x * 7 + z * 13) % 5 + 5) % 5;
     desk.box(x, x + 4, -4, -2, z, z + 4, [0x6b4a2f, 0x664629, 0x70503a, 0x5f4128, 0x6a4b33][k], .03);
   }
@@ -281,6 +281,12 @@ function placeHero() {
     }
     set.fixed.instanceMatrix.needsUpdate = true;
   }
+  for (let i = 0; i < N; i++) {
+    const [xi, , zi] = origin(i);
+    fleet.desks.setMatrixAt(i, one && i === S.sel ? ZERO
+      : M.makeTranslation(xi + (DESK.x0 + DESK.x1) / 2, -3, zi + (DESK.z0 + DESK.z1) / 2));
+  }
+  fleet.desks.instanceMatrix.needsUpdate = true;
 }
 
 // the fine look when there are few rigs or one is looked at, else the coarse one
@@ -397,7 +403,7 @@ function selectRig(i) {
   rows.push(`<tr><td>この曲の誤差</td><td>${r.mae} cent</td></tr>`, `<tr><td>±25 cent 以内</td><td>${Math.round(100 * r.hit)}%</td></tr>`);
   $("params").innerHTML = rows.join("");
   $("cells").querySelectorAll("div").forEach(d => d.classList.toggle("sel", +d.dataset.i === i));
-  const [x, , z] = origin(i); mark.position.set(x + 74, -1.6, z - 16);
+  const [x, , z] = origin(i); mark.position.set(x + (DESK.x0 + DESK.x1) / 2, -1.7, z + (DESK.z0 + DESK.z1) / 2);
   placeHero();
   $("where").textContent = `#${i + 1} を選択中`;
   if (S.mode === "one") goOne(i);
