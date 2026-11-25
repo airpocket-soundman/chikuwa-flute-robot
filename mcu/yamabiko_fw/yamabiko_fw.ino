@@ -51,7 +51,7 @@
 //
 // Panel: the Tab5 is the I2C controller, this MCU the target at PANEL_ADDR on I2C4, remapped to PF14 / PF15
 // (the core's I2C4 pins are PD12 / PD13, and its Zephyr build has no I2C target support, so the registers
-// are served from loop(), with clock stretching holding the bus while a transfer waits).  The Tab5 writes
+// are served from loop(), a step per pass, with clock stretching holding the bus between the steps).  The Tab5 writes
 //   0x01 n           n presses of the EXEC button (1 or 2, 150 ms apart): record / end / stop, 2 = again
 //   0x02 bytes...    an event for the Linux side (choose a step, calibrate, play an archive clip), sent on
 //   0x03 lo hi       where the next read starts
@@ -490,9 +490,11 @@ static void info() {
            (unsigned long)(timer_clk(true) / fan_top), max_pwm, valve_pos_open, valve_pos_closed, valve_move_ms,
            (int)(servo_us + 0.5f));
   send_text(s);
-  snprintf(s, sizeof(s), "PANEL i2c4 %s addr 0x%02x timingr 0x%08lx transfers %lu errors %lu page v%u %u bytes",
+  snprintf(s, sizeof(s), "PANEL i2c4 %s addr 0x%02x timingr 0x%08lx transfers %lu errors %lu page v%u %u bytes "
+           "scl %d sda %d isr 0x%05lx",
            panel_ok ? "PF14/PF15" : "off", PANEL_ADDR, (unsigned long)I2C4->TIMINGR, (unsigned long)panel_xfers,
-           (unsigned long)panel_errors, panel_ver[panel_cur], panel_len[panel_cur]);
+           (unsigned long)panel_errors, panel_ver[panel_cur], panel_len[panel_cur],
+           (int)((GPIOF->IDR >> 14) & 1), (int)((GPIOF->IDR >> 15) & 1), (unsigned long)(I2C4->ISR & 0xFFFFFu));
   send_text(s);
 }
 
@@ -677,48 +679,70 @@ static void panel_written(const uint8_t *b, uint8_t n) {
   }
 }
 
-// One whole transfer once the address matched: the controller waits (clock stretching) while this runs,
-// so a transfer of 32 bytes at 100-400 kHz keeps the loop for about 1-3 ms.
+// A step of the transfer in progress, every pass of loop(): never waits.  Between bytes the controller is held
+// by clock stretching until the next pass (tens of microseconds; a pass with audio to filter takes up to ~2 ms).
+// A transfer that makes no progress for PANEL_STALL_MS (the controller gave up) is dropped and the peripheral
+// reset.  (The first version served a whole transfer in a loop of its own and held loop() up to 30 ms when the
+// Tab5 gave up, which lost link bytes.)
+#define PANEL_STALL_MS 20u
+static uint8_t panel_w[40];
+static uint8_t panel_wn;
+static bool panel_active, panel_reading;
+static uint32_t panel_seen_ms;
+
+static void panel_reset() {
+  I2C4->CR1 &= ~I2C_CR1_PE;
+  while (I2C4->CR1 & I2C_CR1_PE) {}
+  I2C4->CR1 |= I2C_CR1_PE;
+  panel_active = false;
+  panel_wn = 0;
+  panel_errors++;
+}
+
 static void panel_poll() {
   if (!panel_ok) return;
-  uint32_t isr = I2C4->ISR;
-  if (!(isr & I2C_ISR_ADDR)) {
-    if (isr & (I2C_ISR_STOPF | I2C_ISR_NACKF | I2C_ISR_BERR | I2C_ISR_OVR))
-      I2C4->ICR = I2C_ICR_STOPCF | I2C_ICR_NACKCF | I2C_ICR_BERRCF | I2C_ICR_OVRCF;
-    return;
-  }
-  uint8_t w[40];
-  uint8_t wn = 0;
-  bool reading = false;
-  uint32_t t0 = millis();
-  for (;;) {
-    isr = I2C4->ISR;
-    if (isr & I2C_ISR_ADDR) {                                // start, or a repeated start
-      if (wn) { panel_written(w, wn); wn = 0; }
-      reading = (isr & I2C_ISR_DIR) != 0;
-      if (reading) I2C4->ISR |= I2C_ISR_TXE;                 // drop a byte left from an earlier read
-      I2C4->ICR = I2C_ICR_ADDRCF;
-      t0 = millis();
+  for (int k = 0; k < 4; k++) {                              // a few events per pass (stop, address, a byte)
+    uint32_t isr = I2C4->ISR;
+    // The stop of the last transfer first: a stop and the next start can both be pending, and taking the start
+    // first then the stop dropped the new transfer with SCL held low (the bus hung).
+    if (isr & I2C_ISR_STOPF) {
+      I2C4->ICR = I2C_ICR_STOPCF | I2C_ICR_NACKCF;
+      if (panel_active && !panel_reading && panel_wn) panel_written(panel_w, panel_wn);
+      if (panel_active) panel_xfers++;
+      panel_wn = 0;
+      panel_active = false;
       continue;
     }
-    if (!reading && (isr & I2C_ISR_RXNE)) {
-      uint8_t v = (uint8_t)I2C4->RXDR;
-      if (wn < sizeof(w)) w[wn++] = v;
+    if (isr & I2C_ISR_ADDR) {                                // start, or a repeated start
+      if (panel_active && !panel_reading && panel_wn) panel_written(panel_w, panel_wn);
+      panel_wn = 0;
+      panel_reading = (isr & I2C_ISR_DIR) != 0;
+      if (panel_reading) I2C4->ISR |= I2C_ISR_TXE;           // drop a byte left from an earlier read
+      I2C4->ICR = I2C_ICR_ADDRCF;
+      panel_active = true;
+      panel_seen_ms = millis();
+      continue;
     }
-    if (reading && (isr & I2C_ISR_TXIS)) I2C4->TXDR = panel_byte(panel_ptr++);
-    if (isr & I2C_ISR_NACKF) I2C4->ICR = I2C_ICR_NACKCF;
-    if (isr & I2C_ISR_STOPF) { I2C4->ICR = I2C_ICR_STOPCF; break; }
-    if (isr & (I2C_ISR_BERR | I2C_ISR_OVR)) I2C4->ICR = I2C_ICR_BERRCF | I2C_ICR_OVRCF;
-    if (millis() - t0 > 25u) {                               // the controller went away: start over
-      I2C4->CR1 &= ~I2C_CR1_PE;
-      while (I2C4->CR1 & I2C_CR1_PE) {}
-      I2C4->CR1 |= I2C_CR1_PE;
-      panel_errors++;
+    if (!panel_active) {
+      if (isr & (I2C_ISR_NACKF | I2C_ISR_BERR | I2C_ISR_OVR))
+        I2C4->ICR = I2C_ICR_NACKCF | I2C_ICR_BERRCF | I2C_ICR_OVRCF;
+      if (!(isr & I2C_ISR_BUSY)) panel_seen_ms = millis();
+      else if (millis() - panel_seen_ms > PANEL_STALL_MS) panel_reset();   // busy with no transfer of ours
       return;
     }
+    bool moved = false;
+    if (!panel_reading && (isr & I2C_ISR_RXNE)) {
+      uint8_t v = (uint8_t)I2C4->RXDR;
+      if (panel_wn < sizeof(panel_w)) panel_w[panel_wn++] = v;
+      moved = true;
+    }
+    if (panel_reading && (isr & I2C_ISR_TXIS)) { I2C4->TXDR = panel_byte(panel_ptr++); moved = true; }
+    if (isr & I2C_ISR_NACKF) I2C4->ICR = I2C_ICR_NACKCF;
+    if (isr & (I2C_ISR_BERR | I2C_ISR_OVR)) I2C4->ICR = I2C_ICR_BERRCF | I2C_ICR_OVRCF;
+    if (moved) { panel_seen_ms = millis(); continue; }
+    if (millis() - panel_seen_ms > PANEL_STALL_MS) panel_reset();   // the controller went away: start over
+    return;
   }
-  if (wn) panel_written(w, wn);
-  panel_xfers++;
 }
 
 // ---- audio ------------------------------------------------------------------------

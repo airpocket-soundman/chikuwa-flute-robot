@@ -156,6 +156,7 @@ class Link:
         for off in range(0, len(page), 32):
             piece = page[off:off + 32]
             self.send(b"U" + struct.pack("<H", off) + piece + bytes(32 - len(piece)))
+            time.sleep(.002)          # paced: sent back to back, the pieces overran the MCU's receive buffer
         self.send(b"V" + struct.pack("<HH", len(page), version & 0xFFFF))
 
     def limit(self, max_pwm: float) -> None:
