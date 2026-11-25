@@ -208,7 +208,7 @@ scene.add(fanRotor);
 
 // (the servo horn and the valve it turns are inside the box, not shown)
 // two LEDs on the box's top, front edge, to show the valve (added for the viewer): red = shut, green = open
-function led(x, color) {
+function led(x, color, dim) {
   const mat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: color, emissiveIntensity: 0, roughness: .3 });
   const m = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1, 1.6), mat);
   m.position.set(x, 15.5, -12.2);
@@ -216,13 +216,13 @@ function led(x, color) {
   const glow = new THREE.PointLight(color, 0, 14);
   glow.position.set(x, 17, -12.2);
   scene.add(glow);
-  return { mat, glow, color: new THREE.Color(color) };
+  return { mat, glow, dim };
 }
-const ledShut = led(2.5, 0xff1a10), ledOpen = led(5.5, 0x14e03a);
+const ledShut = led(2.5, 0xff1a10, 0x4a1210), ledOpen = led(5.5, 0x14e03a, 0x103f1a);
 function setValve(open) {
   for (const [l, on] of [[ledShut, !open], [ledOpen, open]]) {
     l.mat.emissiveIntensity = on ? 1 : 0;
-    l.mat.color.set(on ? 0x000000 : 0x2a2a2a);
+    l.mat.color.set(on ? 0x000000 : l.dim);                       // off: a dark red / dark green
     l.glow.intensity = on ? .5 : 0;
   }
 }
