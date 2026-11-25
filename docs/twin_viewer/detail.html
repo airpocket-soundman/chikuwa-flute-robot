@@ -37,18 +37,23 @@
 </head>
 <body>
 <div id="view"></div>
+<canvas id="sprite" style="position:fixed;inset:0;display:none;cursor:grab"></canvas>
 <div id="labels"></div>
 <header>
   <h1>やまびこ1号 — 詳細模型</h1>
   <p>ケーブルまで描いた模型に、ダミーの演奏データ（ドレミファミレド）を流しています。ドラッグで回転、ホイールで拡大。</p>
 </header>
 <div class="bar">
+  <button id="modeVoxel" aria-pressed="true">ボクセル</button>
+  <button id="modeSprite" aria-pressed="false">スプライトスタック</button>
+  <button id="bench">重さを測る</button>
   <button id="names" aria-pressed="true">部品名</button>
   <button id="home">視点を戻す</button>
   <button onclick="location.href='index.html'">簡単な模型</button>
   <button onclick="location.href='fleet.html'">学習ビューア</button>
 </div>
 <div class="readout" id="readout"></div>
+<div class="readout" id="perf" style="top:auto;bottom:250px;font-size:12px"></div>
 <div class="dock">
   <div class="transport">
     <button id="play">▶ 再生</button>
@@ -67,6 +72,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="rig.js?v=4"></script>
+<script src="sprite_stack.js?v=2"></script>
 <script>
 const R = window.YamabikoRig, $ = (id) => document.getElementById(id);
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -157,6 +163,95 @@ function setValve(open) {
   }
 }
 
+// ---------- sprite stacking: the same model as piles of slices on a 2D canvas -----------------------------
+let MODE = "voxel";
+const SC = $("sprite"), SV = new SpriteStack.View(SC);
+let STACKS = null;
+function buildStacks() {
+  const t0 = performance.now();
+  STACKS = {
+    fixed: SpriteStack.build([{ voxels: desk, unit: 1 }, { voxels: built.fixed, unit: 1 }, { voxels: fine, unit: FINE }]),
+    slide: SpriteStack.build([{ voxels: built.slide, unit: 1 }]),
+    rotor: SpriteStack.build([{ voxels: built.rotor, unit: 1 }]),
+  };
+  STACKS.ms = performance.now() - t0;
+  STACKS.pixels = Object.values(STACKS).filter(q => q.layers).reduce((a, q) => a + q.layers.length * q.layers[0].width * q.layers[0].height, 0);
+  STACKS.count = Object.values(STACKS).filter(q => q.layers).reduce((a, q) => a + q.layers.length, 0);
+}
+function drawSprites(k) {
+  SV.clear("#17191d");
+  const st = STACKS, sx = slider.position.x;
+  // every stack's layers by height, lowest first, so higher slices cover lower ones
+  const items = [];
+  for (const [name, q] of [["fixed", st.fixed], ["slide", st.slide], ["rotor", st.rotor]])
+    for (let i = 0; i < q.layers.length; i++) items.push([q.y0 + i * SpriteStack.RES, name, i]);
+  items.sort((a, b) => a[0] - b[0]);
+  for (const [, name, i] of items) {
+    if (name === "fixed") SV.layer(st.fixed, i);
+    else if (name === "slide") SV.layer(st.slide, i, sx, 0);
+    else SV.layer(st.rotor, i, R.FAN[0], R.FAN[2], -fanRotor.rotation.y, 0, 0);
+  }
+  // the LEDs: small squares on the valve box's top
+  const g = SV.g; g.setTransform(1, 0, 0, 1, 0, 0);
+  for (const [x, on, lit, dim] of [[R.LEDS.shut, !D.air[k], "#ff2a1a", "#4a1210"], [R.LEDS.open, !!D.air[k], "#22ff55", "#103f1a"]]) {
+    const [px, py] = SV.project(x, R.LEDS.y + .6, R.LEDS.z), r = SV.scale * .8;
+    g.fillStyle = on ? lit : dim; g.fillRect(px - r, py - r * .7, 2 * r, 1.4 * r);
+    if (on) { g.fillStyle = on ? lit + "44" : ""; g.beginPath(); g.arc(px, py, r * 3, 0, 7); g.fill(); }
+  }
+}
+function setMode(m) {
+  MODE = m;
+  if (m === "sprite" && !STACKS) buildStacks();
+  renderer.domElement.style.display = m === "voxel" ? "" : "none";
+  SC.style.display = m === "sprite" ? "" : "none";
+  $("modeVoxel").setAttribute("aria-pressed", m === "voxel"); $("modeSprite").setAttribute("aria-pressed", m === "sprite");
+  perf.n = 0; perf.ms = 0;
+}
+$("modeVoxel").onclick = () => setMode("voxel");
+$("modeSprite").onclick = () => setMode("sprite");
+// the sprite view's own handling: drag to turn and tilt, wheel to zoom
+{
+  let drag = null;
+  SC.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY, SV.yaw, SV.pitch]; SC.setPointerCapture(e.pointerId); SC.style.cursor = "grabbing"; });
+  SC.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    SV.yaw = drag[2] + (e.clientX - drag[0]) * .008;
+    SV.pitch = Math.min(Math.max(drag[3] + (e.clientY - drag[1]) * .006, THREE.MathUtils.degToRad(25)), THREE.MathUtils.degToRad(88));
+  });
+  SC.addEventListener("pointerup", () => { drag = null; SC.style.cursor = "grab"; });
+  SC.addEventListener("wheel", (e) => { e.preventDefault(); SV.scale = Math.min(Math.max(SV.scale * Math.exp(-e.deltaY * .001), .5), 60); }, { passive: false });
+}
+// how heavy each is: the time to draw a frame, shown live, and a fair test with the GPU waited for
+const perf = { ms: 0, n: 0 };
+function showPerf() {
+  const what = MODE === "voxel"
+    ? `三角形 ${(renderer.info.render.triangles / 1e6).toFixed(2)} 百万枚、描画命令 ${renderer.info.render.calls}`
+    : `絵 ${STACKS.count} 枚（${(STACKS.pixels / 1e6).toFixed(1)} 百万画素）、drawImage ${SV.drawn} 回`;
+  $("perf").innerHTML = `表示: <b>${MODE === "voxel" ? "ボクセル" : "スプライトスタック"}</b><br>描画 ${perf.ms.toFixed(1)} ms / フレーム（CPU 側）<br>${what}`
+    + (perf.bench ? `<br>測定: ${perf.bench}` : "");
+}
+async function benchmark() {
+  const frames = 90, out = {};
+  const gl = renderer.getContext(), px = new Uint8Array(4);
+  for (const m of ["voxel", "sprite"]) {
+    setMode(m);
+    await new Promise(r => requestAnimationFrame(r));
+    const t0 = performance.now();
+    // draw the frames one after another and wait for the GPU once at the end (waiting every frame would
+    // move a 2D canvas off the GPU and make it look slower than it is)
+    for (let f = 0; f < frames; f++) {
+      fanRotor.rotation.y += .1;
+      if (m === "voxel") renderer.render(scene, camera); else drawSprites(Math.floor(P.t));
+    }
+    if (m === "voxel") gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); else SV.g.getImageData(0, 0, 1, 1);
+    out[m] = (performance.now() - t0) / frames;
+  }
+  setMode("voxel");
+  perf.bench = `ボクセル ${out.voxel.toFixed(1)} ms、スプライト ${out.sprite.toFixed(1)} ms（1 フレーム、GPU 待ちこみ、${frames} 回の平均）`;
+  return out;
+}
+$("bench").onclick = () => { $("bench").textContent = "測定中…"; benchmark().then(() => { $("bench").textContent = "重さを測る"; }); };
+
 // ---------- labels ---------------------------------------------------------------------------------------
 const PARTS = [...R.PARTS, ["電源", [112, 3, -34]]];
 const labelBox = $("labels");
@@ -166,6 +261,11 @@ function placeLabels() {
   const w = innerWidth, h = innerHeight;
   PARTS.forEach(([, p], i) => {
     p ? v3.set(...p) : v3.set(slider.position.x + 60, 15, 2);
+    if (MODE === "sprite") {
+      const [x, y] = SV.project(v3.x, v3.y, v3.z), dpr = SC.width / innerWidth;
+      labels[i].style.left = `${x / dpr}px`; labels[i].style.top = `${y / dpr - 12}px`; labels[i].style.display = "";
+      return;
+    }
     v3.project(camera);
     labels[i].style.left = `${(v3.x + 1) / 2 * w}px`; labels[i].style.top = `${(1 - v3.y) / 2 * h - 12}px`;
     labels[i].style.display = v3.z < 1 ? "" : "none";
@@ -273,7 +373,10 @@ function frame(now) {
     audio.tone.frequency.setTargetAtTime(hz, t0, .005); audio.over.frequency.setTargetAtTime(hz * 2, t0, .005);
     audio.gain.gain.setTargetAtTime(P.playing && D.sounding[k] ? .12 : 0, t0, .01);
   }
-  controls.update(); renderer.render(scene, camera); placeLabels();
+  const r0 = performance.now();
+  if (MODE === "voxel") { controls.update(); renderer.render(scene, camera); } else drawSprites(k);
+  const ms = performance.now() - r0; perf.ms = perf.n++ ? perf.ms * .95 + ms * .05 : ms;
+  placeLabels(); showPerf();
   requestAnimationFrame(frame);
 }
 function setPlaying(on) { if (on && P.t >= D.steps - 1) P.t = 0; P.playing = on; $("play").textContent = on ? "❚❚ 停止" : "▶ 再生"; }
@@ -285,7 +388,12 @@ $("sound").onclick = () => soundOn(!audio.on);
 $("home").onclick = goHome;
 $("names").onclick = () => { const on = labelBox.classList.toggle("hidden") === false; $("names").setAttribute("aria-pressed", on); };
 addEventListener("keydown", (e) => { if (e.code === "Space" && e.target.tagName !== "SELECT") { e.preventDefault(); setPlaying(!P.playing); } });
-function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); drawGraph(); }
+function resize() {
+  renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  const dpr = Math.min(devicePixelRatio, 2); SC.width = innerWidth * dpr; SC.height = innerHeight * dpr;
+  SC.style.width = innerWidth + "px"; SC.style.height = innerHeight + "px"; SV.scale = Math.min(innerWidth / 230, 8) * dpr;
+  drawGraph();
+}
 addEventListener("resize", resize); resize();
 requestAnimationFrame(frame);
 </script>
