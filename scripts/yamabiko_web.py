@@ -3,19 +3,18 @@
     python3 scripts/yamabiko_web.py [--port 8080]      # then open http://<UNO Q address>:8080/
 
 The whistle copy runs any step (models/<step>/profile.json: classic, step1, step2, ...), chosen on the page
-and remembered in runs/web_step.txt.  The board's EXEC button drives it: press to record, press again to end
-the recording and play, press while calibrating or playing to stop (WhistleJob).  The page's big button does
-the same.  Started at boot by the UNO Q's crontab (@reboot, after the command server).
+and remembered in runs/web_step.txt.  The board's EXEC button stops everything and resets, whenever it is pressed (2026-11-25); recording, playing
+and practice start from this page and the touch panel (Tab5) only.
 
 The page also plays archive clips (a whistled language, Silbo Gomero, and Japanese tit calls): the example is
 heard from the page (the clip, and the clip at the flute's speed) and the flute plays its score with the chosen
-step; pressing twice plays it again.  The clips are made on the PC by scripts/archive_pack.py into
+step; "again" plays it again (practice).  The clips are made on the PC by scripts/archive_pack.py into
 runs/archive_pack/ and copied by scripts/uno_q_push.sh.
 
 The touch panel (M5Stack Tab5 on the B board's I2C, tab5/yamabiko_panel/) shows the same: PanelBridge sends
 it a page (flute_rl/yamabiko/panel.py) whenever the status changes and acts on what it asks for (choose a
-step, calibrate, play an archive clip).  Its record / again / stop buttons are presses of the EXEC button
-in the MCU, so they work as the board's button does, also while the flute plays.
+step, calibrate, play an archive clip).  Its "stop" is a press of the EXEC button in the MCU (it
+reaches the server while it plays); "record", "end and play" and "again" are events the bridge acts on.
 
 Talks to the command server (scripts/yamabiko_server.py) on the same board, as one connection: while the
 page drives the outputs, other clients (yamabiko_remote.py, the button jog) are refused until it lets go.
@@ -317,6 +316,8 @@ class WhistleJob:
         self.collect_kind, self.collect_seconds = "whistle", MAX_RECORD_S
         self.takes = self._load_takes()
         self.panel = None         # PanelBridge, when the touch panel runs
+        self.server_busy = False  # step8 runs: the server takes the board button itself
+        self.drop_recording = False
         self._restore_song()
 
     # ----- the chosen step ---------------------------------------------------------------------------
@@ -361,7 +362,10 @@ class WhistleJob:
     def start(self, quantize=False, step=None):
         if step:
             self.choose(step) if step != self.step else None
-        return self._launch(self._run, bool(quantize), self.profiles[self.step])
+        profile = self.profiles[self.step]
+        if profile.get("heads_path"):                 # step8 / step8p: one object listens, plays, practises
+            return self._launch(self._step8, profile, "listen", first="step8 の準備中")
+        return self._launch(self._run, bool(quantize), profile)
 
     def calibrate(self, step=None):
         if step and step != self.step:
@@ -387,35 +391,15 @@ class WhistleJob:
         self._set(press={"n": self.presses, "action": action, "double": presses >= 2})
 
     def press(self, presses=1):
-        """The board button: ``presses`` within DOUBLE_S of each other (1 or 2)."""
-        phase = self.state.get("phase")
-        if self.collect:                               # data collection: every press starts or ends a take
-            if not self.busy():
-                self._pressed("record", 1)
-                try:
-                    self.start_take()
-                except ValueError as exc:
-                    self._set(phase="idle", message=str(exc))
-            elif phase == "record":
-                self._pressed("finish", 1)
-                self.finish()
-            return
+        """The board's EXEC button: it stops everything and resets, whatever runs (2026-11-25: recording and
+        playing start from the page and the panel only).  The server stops a tune or a play by itself on the same
+        press; here the job is told to stop, a recording is dropped, and the page goes back to idle."""
+        self._pressed("stop", presses)
+        self.stopped = True
+        self.end_recording.set()
+        self.drop_recording = True
         if not self.busy():
-            if time.monotonic() < getattr(self, "quiet_until", 0.0):
-                self._set(message="止めました（止めた直後の押下は、続きの「止める」として扱います）")
-                return
-            action = "replay" if presses >= 2 else "record"
-            self._pressed(action, presses)
-            try:
-                self.replay() if presses >= 2 else self.start(self.state.get("quantize", False))
-            except ValueError as exc:
-                self._set(phase="idle", message=str(exc))
-        elif phase == "record":
-            self._pressed("finish", presses)
-            self.finish()
-        else:
-            self._pressed("stop", presses)
-            self.stop()
+            self._set(phase="idle", message="EXEC ボタン：すべて止めてリセットしました", record_began=None)
 
     def _restore_song(self):
         """After a restart, the last whistle recorded is the song again: any step can play it (it is heard again
@@ -430,7 +414,7 @@ class WhistleJob:
         stamp = last.stem[:-len("_whistle")]
         self.song = {"step": None, "path": None, "voice": None, "stamp": stamp, "pcm": pcm, "sr": sr, "quantize": False}
         self.wavs["whistle"] = wav_bytes(pcm, sr)
-        self._set(message=f"最後の録音（{stamp}）を読み込みました。2 回押すと、選んだ版で吹きます")
+        self._set(message=f"最後の録音（{stamp}）を読み込みました。「もう一度」で、選んだ版が吹きます")
 
     # ----- archive clips (scripts/archive_pack.py) ---------------------------------------------------
     def archive_list(self):
@@ -585,8 +569,13 @@ class WhistleJob:
     def replay(self, step=None):
         """Play the last recorded song again, without recording (practice)."""
         if self.song is None:
-            raise ValueError("まだ録音がありません。1 回押して録音してください")
-        return self._launch(self._replay, self.profiles[self.step], first="もう一度（練習）")
+            raise ValueError("まだ録音がありません。「録音」から始めてください")
+        profile = self.profiles[self.step]
+        if profile.get("heads_path") or self.song.get("step8"):
+            if not (profile.get("heads_path") and self.song.get("step8") == profile["name"]):
+                raise ValueError(f"{profile['name']} で聞いた曲がありません。「録音」から、{profile['name']} に聞かせてください")
+            return self._launch(self._step8, profile, "again", first="もう一度（練習）")
+        return self._launch(self._replay, profile, first="もう一度（練習）")
 
     def calibrate_at_start(self, wait_s=180.0):
         """Once after the page starts (the board just booted): wait for the command server, then calibrate."""
@@ -611,7 +600,7 @@ class WhistleJob:
             rig, seen = None, None
             while True:
                 time.sleep(period_s)
-                if self.state.get("phase") in self.BUSY_SERVER:
+                if self.state.get("phase") in self.BUSY_SERVER or self.server_busy:
                     continue                           # the server is busy and watches the button itself
                 try:
                     if rig is None:
@@ -636,21 +625,7 @@ class WhistleJob:
                 if count != seen:
                     presses = (count - seen) % 256
                     seen = count
-                    if not self.busy():                # idle: wait for a second press
-                        until = time.monotonic() + self.DOUBLE_S
-                        while time.monotonic() < until and presses < 2:
-                            time.sleep(.05)
-                            try:
-                                now = rig.status().get("button_count")
-                            except Exception:          # noqa: BLE001
-                                break
-                            if now is not None and now != seen:
-                                presses += (now - seen) % 256
-                                seen = now
-                    try:
-                        self.press(presses)
-                    except ValueError:
-                        pass
+                    self.press(presses)                # the board button: stop everything and reset
         threading.Thread(target=go, daemon=True).start()
 
     def status(self):
@@ -764,7 +739,7 @@ class WhistleJob:
         else:
             self.practice.append(None if rel is None else round(rel, 1))
             memory = "（この版は練習の記憶を持っていないので、毎回同じように吹きます）" if not result.get("song_memory") else ""
-            message = f"できました（練習 {n} 回目）。2 回押すともう一度、1 回押すと新しく録音します{memory}"
+            message = f"できました（練習 {n} 回目）。「もう一度」で練習、「録音」で新しい曲{memory}"
         heard = [round(float(x - shift - key), 1) if ok else None for x, ok in zip(h, v)]   # in the target's key
         if not result.get("stopped"):
             self.plays = (self.plays + [{"n": n, "heard": heard, "error": None if rel is None else round(rel, 1)}])[-8:]
@@ -788,6 +763,96 @@ class WhistleJob:
         except Exception as exc:                       # noqa: BLE001
             self._set(phase="error", message=str(exc))
         finally:
+            self._release(rig)
+
+    def _step8(self, profile, start):
+        """step8 / step8p: the server runs the one object every 10 ms (cmd_step8).  "listen": it listens until
+        the board button, then plays what it heard and stops by itself; "again": it plays the song it holds again
+        with the record of its last play (practice).  The server takes the button meanwhile."""
+        import numpy as np
+        rig = None
+        try:
+            rig = self._connect(profile)
+            if self.tuning is None:
+                self._tune(rig, profile)
+            self._check()
+            if start == "listen":
+                stamp = time.strftime("%Y%m%d_%H%M%S")
+                self.practice, self.plays = [], []
+                self._set(whistle=None, cleaned=None, target=None, voice=None, report=None, heard=None,
+                          relative_mae=None, plays_n=0, plays_id=None, archive=None)
+                self._set(phase="record", message=f"{profile['name']}：口笛をどうぞ。吹き終わったら「録音終了して演奏」"
+                                                   "（そのまま演奏して、終わると止まります）",
+                          record_began=time.monotonic(), max_seconds=60.0)
+            else:
+                stamp = self.song["stamp"]
+                self._set(phase="play", message=f"もう一度（練習 {len(self.practice) + 1} 回目、止めるで止まります）")
+            if self.panel:
+                self.panel.push_now()
+            n = len(self.practice) + 1
+            out = WHISTLE_DIR / f"{stamp}_{profile['name']}_play{n}.npz"
+            WHISTLE_DIR.mkdir(parents=True, exist_ok=True)
+            self.end_recording.clear()
+            rig.call("step8_start", start=start, ear_runtime=profile["ear_runtime_path"],
+                     memory_runtime=profile["memory_runtime_path"], runtime=profile["runtime_path"],
+                     valve_runtime=profile["valve_runtime_path"], heads=profile["heads_path"],
+                     shift_cents=self.shift_for(profile), out=str(out), max_seconds=150)
+            finished_sent = False
+            while True:
+                st = rig.call("step8_status")
+                if not st["active"]:
+                    result = st["result"] or {}
+                    break
+                if self.stopped:
+                    rig.call("step8_stop")
+                    continue
+                if st["mode"] == "listen" and self.end_recording.is_set() and not finished_sent:
+                    rig.call("step8_finish")
+                    finished_sent = True
+                if st["mode"] == "play" and self.state.get("phase") != "play":
+                    self._set(phase="play", message=f"演奏中（練習 {len(self.practice) + 1} 回目、止めるで止まります）")
+                    if self.panel:
+                        self.panel.push_now()
+                time.sleep(.1)
+            self._note_buttons(rig)
+            if result.get("stopped") in ("button", "stop"):
+                raise Stopped("止めました" if result["stopped"] == "stop" else "EXEC ボタン：すべて止めてリセットしました")
+            if not result.get("played"):
+                self._set(phase="idle", message="何も聞こえなかったので吹きませんでした。「録音」から、もう一度どうぞ")
+                return
+            played = np.load(out)
+            h, v = played["0/heard"][0], played["0/valid"][0]
+            tc, tv = played["0/target_cents"][0], played["0/target_voice"][0]
+            if "0/pcm" in played and len(played["0/pcm"]):
+                self.wavs["flute"] = wav_bytes(played["0/pcm"], int(played["sr"]))
+            m = v & tv
+            key = float(np.median((h - tc)[m])) if m.any() else 0.0
+            rel = float(np.abs(h - tc - key)[m].mean()) if m.any() else None
+            self.song = {"step": profile["name"], "path": None, "voice": tv, "stamp": stamp, "pcm": None, "sr": None,
+                         "quantize": False, "fixed": True, "step8": profile["name"]}
+            if result.get("stopped"):
+                self._pressed("stop", 1)
+                message = "ボタンで止めました"
+            else:
+                self.practice.append(None if rel is None else round(rel, 1))
+                message = (f"できました（練習 {len(self.practice)} 回目）。「もう一度」で練習、「録音」で新しい曲"
+                           f"（{profile['name']} が 1 つの実行部で聞いて、覚えて、吹きました）")
+            heard = [round(float(x - key), 1) if ok else None for x, ok in zip(h, v)]
+            if not result.get("stopped"):
+                self.plays = (self.plays + [{"n": len(self.practice), "heard": heard,
+                                             "error": None if rel is None else round(rel, 1)}])[-8:]
+            self._set(phase="done", message=message, target=[round(float(x), 1) for x in tc], voice=[bool(x) for x in tv],
+                      heard=[round(float(x), 1) if ok else None for x, ok in zip(h, v)], key=key, relative_mae=rel,
+                      shift=float(result.get("shift_cents", 0.0)), stamp=stamp, plays_n=len(self.plays),
+                      plays_id=f"{stamp}:{profile['name']}:{len(self.practice)}:{time.time():.0f}",
+                      plays_step=profile["name"], whistle=None, cleaned=None,
+                      report={"memory": True, "listened_steps": result.get("listened_steps")})
+        except Stopped as exc:
+            self._set(phase="idle", message=str(exc))
+        except Exception as exc:                       # noqa: BLE001
+            self._set(phase="error", message=str(exc))
+        finally:
+            self.server_busy = False
             self._release(rig)
 
     def _release(self, rig):
@@ -816,8 +881,11 @@ class WhistleJob:
                       plays_n=0, plays_id=None, archive=None)   # a new song: the last one's graphs go
             self._set(phase="record", message="口笛をどうぞ。吹き終わったらボタンを押してください",
                       record_began=time.monotonic(), max_seconds=MAX_RECORD_S)
+            self.drop_recording = False
             self.end_recording.wait(MAX_RECORD_S)
             self._check()
+            if self.drop_recording:
+                raise Stopped("EXEC ボタン：すべて止めてリセットしました")
             pcm, sr, _ = rig.audio_since(start)
             if len(pcm) > sr:
                 pcm = pcm[:-int(.25 * sr)]             # the click of the second press
@@ -927,7 +995,7 @@ class PanelBridge:
         self.remote, self.sent = None, None
 
     def _act(self, events):
-        from flute_rl.yamabiko.panel import EV_ARCHIVE, EV_CALIBRATE, EV_STEP
+        from flute_rl.yamabiko.panel import EV_AGAIN, EV_ARCHIVE, EV_CALIBRATE, EV_FINISH, EV_RECORD, EV_STEP
         for ev in events:
             if not ev:
                 continue
@@ -938,6 +1006,12 @@ class PanelBridge:
                         self.whistle.choose(names[ev[1]])
                 elif ev[0] == EV_CALIBRATE:
                     self.whistle.calibrate()
+                elif ev[0] == EV_RECORD:              # the panel's buttons (the board's button only stops)
+                    self.whistle.start(self.whistle.state.get("quantize", False))
+                elif ev[0] == EV_FINISH:
+                    self.whistle.finish()
+                elif ev[0] == EV_AGAIN:
+                    self.whistle.replay()
                 elif ev[0] == EV_ARCHIVE and len(ev) > 1:
                     items = self.whistle.archive_list()
                     if ev[1] < len(items):
@@ -1057,18 +1131,18 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
     <div class="track"><div class="fill" id="remainFill"></div><div class="knob" id="remainKnob"></div></div>
   </div>
   <div class="flow" id="flow">
-    <div data-p="idle"><b>① 1 回押す</b>録音が始まります（新しい曲）</div>
-    <div data-p="record"><b>② 吹き終わったら 1 回押す</b>録音を終えて、聞き取りと演奏へ</div>
-    <div data-p="again"><b>③ 2 回押す</b>録音せずにもう一度。練習を重ねるほどうまくなります</div>
+    <div data-p="idle"><b>① 録音</b>口笛を聞かせます（新しい曲）</div>
+    <div data-p="record"><b>② 録音終了して演奏</b>吹き終わったら。聞き取って、笛が吹きます</div>
+    <div data-p="again"><b>③ もう一度</b>同じ曲をもう一度。練習を重ねるほどうまくなります</div>
   </div>
   <div class="row">
-    <button id="rec" class="act">録音<small>基板のボタン 1 回</small></button>
-    <button id="again" class="act">練習：もう一度<small>基板のボタン 2 回</small></button>
-    <button id="stop" class="act">止める<small>動いている間に 1 回</small></button>
+    <button id="rec" class="act">録音<small>口笛を聞かせる</small></button>
+    <button id="again" class="act">練習：もう一度<small>同じ曲をもう一度</small></button>
+    <button id="stop" class="act">止める<small>動いているものを止める</small></button>
   </div>
   <div id="collectBox" hidden style="display:flex;flex-direction:column;gap:10px">
     <div class="row">
-      <button id="take" class="act">録音<small>基板のボタン 1 回</small></button>
+      <button id="take" class="act">録音<small>口笛などを録る</small></button>
       <button id="del" class="sub">最後の録音を消す</button>
       <label>種類 <select id="kind"><option value="whistle">口笛</option><option value="quiet">無音・部屋の音</option><option value="other">話し声など</option></select></label>
       <label>1 本の長さ <select id="secs"><option>10</option><option>20</option><option selected>30</option></select> 秒まで</label>
@@ -1098,7 +1172,7 @@ svg{width:100%;height:auto;display:block}.legend span{display:inline-block;margi
 
 <section id="arcBox">
   <h2>アーカイブの声を吹く <span class="mute">口笛言語（シルボ・ゴメロ）とシジュウカラ</span></h2>
-  <div class="mute" style="margin-bottom:8px">「原音」でアーカイブの声を、「笛の速さ」で笛が吹く速さに伸ばした声を、この画面から聞けます。「笛で吹く」で選んだ版が吹きます（その後、基板のボタン 2 回でもう一度）。</div>
+  <div class="mute" style="margin-bottom:8px">「原音」でアーカイブの声を、「笛の速さ」で笛が吹く速さに伸ばした声を、この画面から聞けます。「笛で吹く」で選んだ版が吹きます（その後、「練習：もう一度」で練習）。</div>
   <div class="arc" id="arc"><span class="mute">読み込み中</span></div>
 </section>
 
@@ -1201,7 +1275,7 @@ async function poll(){
   $("again").disabled=s.busy||!s.has_song;
   $("again").firstChild.textContent=s.has_song&&s.song_step!==s.step?`同じ録音を ${s.step} で`:"練習：もう一度";
   $("stop").disabled=!s.busy||ph==="record"||serverBusy;
-  $("hint").textContent=serverBusy?"いまは基板の EXEC ボタンで止められます（画面からは届きません）。":"基板の EXEC ボタンと、この画面のボタンは同じ働きです。版の選択だけはこの画面で行います。";
+  $("hint").textContent=serverBusy?"いまは基板の EXEC ボタンか Tab5 の「止める」で止まります（この画面の「止める」は演奏の後に届きます）。":"基板の EXEC ボタンは、いつ押しても「すべて止めてリセット」です。録音・演奏・練習はこの画面か Tab5 から。";
   if(s.press&&s.press.n!==lastPress){if(lastPress!==null){const b=$(s.collect?"take":{record:"rec",finish:"rec",replay:"again",stop:"stop"}[s.press.action]);
       if(b){b.classList.remove("flash");void b.offsetWidth;b.classList.add("flash");setTimeout(()=>b.classList.remove("flash"),700)}}lastPress=s.press.n}
   const pr=s.practice||[];const key2=JSON.stringify(pr);

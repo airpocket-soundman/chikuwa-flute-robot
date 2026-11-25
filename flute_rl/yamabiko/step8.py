@@ -1,16 +1,22 @@
 """step8 (first stage, 8a): the whole robot as one object called every 10 ms.
 
     out = Step8(profile).tick(frame, button)     # frame: the last 320 microphone samples, button: 0 / 1
+    out = step8.tick(frame, double=1)            # a double press: play the song heard last again (practice)
 
 Inside, the networks trained in steps 5 to 7 are joined, and two small new ones decide what to do:
 
   ear (step5)        every frame -> pitch heard, and its hidden code
   memory (step6)     while listening the code is written into W; while playing the score is read back from it
   actuator + valve   (step7) PWM and air from the score read back, the pitch heard and what they did before
-  conductor          a tiny MLP: button, "finished" and the mode it chose before -> idle / listen / play,
-                     and the fan's duty
+  conductor          a tiny MLP: button, double press, "finished", whether a song is held and the mode it
+                     chose before -> idle / listen / play, and the fan's duty (the first heads had no double
+                     press and no song input: both kinds load)
   end                a small MLP: from how much was written around the play head and whether it sounded,
                      "the song has finished"
+
+Practice (step8p, on step7_practice's actuator): a double press while idle plays the song heard last again,
+and the actuator is kept from the play before with its record of that play (where it was off, what it heard,
+the PWM it gave), which it reads to play better; listening to a new song starts over.
 
 Nothing between listening and playing is an array: the actuator's look-ahead reads the memory at the instants it
 needs (each read once, then kept).  Still rules for now (as the plan says, kept outside the networks first):
@@ -107,12 +113,18 @@ class Step8:
         self.end_p = 0.0
         self.memory = None
         self.player = None
+        self.played = None          # (memory, shift) the player last played: the same again is practice
+        self.plays = 0              # plays of the song held (1 = the first)
         self.tau = 0
 
     # ----- the two new small networks ----------------------------------------------------------------
-    def conductor(self, button):
+    def conductor(self, button, double=0):
         h = self.h
-        x = np.r_[float(button), self.end_p, np.eye(3)[self.mode]].astype(np.float32)
+        has_song = float(self.memory is not None and self.memory.n >= 10)
+        if h["s8.cond.0.w"].shape[1] == 7:                     # with the double press (practice)
+            x = np.r_[float(button), float(double), self.end_p, has_song, np.eye(3)[self.mode]].astype(np.float32)
+        else:
+            x = np.r_[float(button) or float(double), self.end_p, np.eye(3)[self.mode]].astype(np.float32)
         y = np.maximum(h["s8.cond.0.w"] @ x + h["s8.cond.0.b"], 0.0)
         out = h["s8.cond.2.w"] @ y + h["s8.cond.2.b"]
         return int(np.argmax(out[:3])), float(sigmoid(out[3]))
@@ -123,16 +135,17 @@ class Step8:
         return float(sigmoid(self.h["s8.end.2.w"] @ y + self.h["s8.end.2.b"])[0])
 
     # ----- every 10 ms -----------------------------------------------------------------------------------
-    def tick(self, frame, button=0, shift: float = 0.0, heard=None):
-        mode, fan = self.conductor(button)
+    def tick(self, frame, button=0, shift: float = 0.0, heard=None, double=0):
+        mode, fan = self.conductor(button, double)
         if mode != self.mode:
             self.end_p = 0.0
             if mode == LISTEN:
                 self.memory = MemoryRuntime(self.memory_arrays)
+                self.player, self.played, self.plays = None, None, 0     # a new song: practice starts over
             if mode == PLAY:
                 self._start_play(shift)
             self.mode = mode
-        out = {"mode": MODES[self.mode], "fan": fan, "pwm": 0.0, "valve": False, "end": self.end_p}
+        out = {"mode": MODES[self.mode], "fan": fan, "pwm": 0.0, "valve": False, "end": self.end_p, "play": self.plays}
         hear = self.mode == LISTEN or (self.mode == PLAY and heard is None)
         if hear and frame is not None:
             x = np.asarray(frame)
@@ -146,6 +159,10 @@ class Step8:
                 heard = (cents, p >= self.ear.threshold)
         if self.mode == PLAY and self.player is not None:
             out.update(self._play_step(heard))
+            if heard is not None:
+                out["heard"] = (float(heard[0]), bool(heard[1]))
+            if "t" in out:                               # the score at the play head (for the page's graphs)
+                out["target"] = (float(self.player.cents[out["t"]]), bool(self.player.voice[out["t"]]))
         return out
 
     def _start_play(self, shift):
@@ -156,18 +173,69 @@ class Step8:
         n = self.memory.n
         self.reads = memory_cache(self.memory)
         self.mass_ref = max(self.reads(n // 2)[2], 1e-6)
-        self.player = WithValve(runtime_for(dict(self.actuator_arrays)), dict(self.valve_arrays))
+        again = self.player is not None and self.played == (id(self.memory), shift)
+        if not again:
+            self.player = WithValve(runtime_for(dict(self.actuator_arrays)), dict(self.valve_arrays))
         cents, voice = Recalled(self.memory, n, shift, "cents"), Recalled(self.memory, n, shift, "voice")
-        self.player.prepare(np.zeros(len(cents)), np.zeros(len(cents), bool), keep_song_memory=False)
+        # practice: the same song again keeps the actuator's record of the play before (step7_practice reads it)
+        self.player.prepare(np.zeros(len(cents)), np.zeros(len(cents), bool), keep_song_memory=again)
+        self.played = (id(self.memory), shift)
+        self.plays = self.plays + 1 if again else 1
         for part in (self.player, self.player.act):           # the look-ahead reads the memory, no array
             part.cents, part.voice = cents, voice
         self.max_cents = self.high + shift + self.max_cents_above
         self.t = 0
+        # the reads the play will make (the song, its tail and what the end network looks past it), done ahead
+        # in pieces while the fan spins up, as one convolution (one read per instant at 10 ms was too slow on the
+        # UNO Q): the kernel in pieces, then the convolution, then the decoding in pieces.  Kept for the next play.
+        self._upto = n + 4 * TAIL_STEPS + max(END_LOOK) + 1
+        if all(i in self.memory._reads for i in range(self._upto)):
+            self._stage = None
+        else:
+            self._stage = "kernel"
+            self._lags = self.memory.kernel_lags(self._upto)
+            self._g, self._parts, self._next = [], [], 0
+            width = len(self.memory._V[0])
+            self._cols = [slice(c, min(c + 16, width)) for c in range(0, width, 16)]   # the convolution in pieces
+            budget = max(1, WARM_STEPS - 40 - len(self._cols))
+            self._lags_per_tick = max(1, -(-len(self._lags) // (budget // 3)))
+            self._rows_per_tick = max(1, -(-self._upto // (2 * budget // 3)))
+
+    def _prefetch(self, all_now=False):
+        """A piece of the reads ahead (all that is left with ``all_now``)."""
+        while self._stage is not None:
+            if self._stage == "kernel":
+                k = len(self._lags) if all_now else self._lags_per_tick
+                done = sum(len(x) for x in self._g)
+                self._g.append(self.memory.kernel(self._lags[done:done + k]))
+                if done + k >= len(self._lags):
+                    self._g = np.concatenate(self._g)
+                    self._stage = "convolve"
+            elif self._stage == "convolve":
+                todo = self._cols[len(self._parts):] if all_now else self._cols[len(self._parts):len(self._parts) + 1]
+                for cols in todo:
+                    self._parts.append(self.memory.reads_from_kernel(self._g, self._upto, cols))
+                if len(self._parts) == len(self._cols):
+                    self._rows = np.concatenate(self._parts, 1)
+                    self._stage = "decode"
+            else:
+                k = self._upto if all_now else self._rows_per_tick
+                a, b = self._next, min(self._next + k, self._upto)
+                for i, r in zip(range(a, b), self.memory.decode_many(self._rows[a:b])):
+                    self.memory._reads.setdefault(i, r)
+                self._next = b
+                if b >= self._upto:
+                    self._stage = None
+            if not all_now:
+                return
 
     def _play_step(self, heard):
         tau = self.tau; self.tau += 1
         if tau < WARM_STEPS:
+            self._prefetch()
             return {"pwm": 0.0, "valve": False}
+        if self._stage is not None:                      # a short warm-up: the rest now
+            self._prefetch(all_now=True)
         if tau < WARM_STEPS + HOMING_STEPS:
             return {"pwm": -1.0, "valve": False}
         if self.t > 0 and heard is not None:

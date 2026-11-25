@@ -1,0 +1,22 @@
+{
+  "name": "step8p",
+  "title": "step8p: step8 の 1 つの実行部に step7_practice の演奏 NN（前の回の記録を読んで直す）をのせ、2 回押しで練習",
+  "ear": "nn",
+  "ear_runtime": "ear_06_runtime.npz",
+  "doc": "docs/step8.md",
+  "runtime": "nn_f80_t7_ilc_01_runtime.npz",
+  "valve_runtime": "valve_t7_free_runtime.npz",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  },
+  "common_ear": true,
+  "memory_runtime": "mem_06_runtime.npz",
+  "heads": "step8p_heads.npz"
+}

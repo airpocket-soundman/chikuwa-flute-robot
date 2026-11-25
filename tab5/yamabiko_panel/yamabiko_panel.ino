@@ -17,8 +17,8 @@
 #include "page.h"
 
 constexpr uint8_t ADDR = 0x42;
-constexpr uint32_t FREQ = 100000;      // 100 kHz: a long cable and the MCU's clock stretching are fine
-constexpr uint32_t POLL_MS = 200;
+constexpr uint32_t FREQ = 400000;      // 400 kHz (100 kHz made a page take 150 ms; the MCU stretches the clock)
+constexpr uint32_t POLL_MS = 150;
 constexpr size_t PIECE = 64;
 
 static M5Canvas cv(&M5.Display);
@@ -29,6 +29,10 @@ static uint32_t last_ok_ms = 0, last_poll_ms = 0, phase_since_ms = 0, flash_unti
 static uint8_t last_phase = 255;
 static int flash_btn = -1;
 static uint32_t stop_hold_until = 0;
+static int pending_btn = -1;                      // a button pressed, its request on its way to the UNO Q
+static uint32_t pending_until = 0;
+static uint8_t pending_phase = 255;
+static uint16_t pending_ver = 0;
 static int down_btn = -1, down_tab = -1, down_row = -1;   // what the finger is on now (the pressed look)   // after the stop: record / again / stop wait
 static bool tab_archive = false;
 static bool dirty = true;
@@ -81,22 +85,34 @@ static bool header(uint16_t &ver, uint16_t &len) {
   len = h[4] | (h[5] << 8);
   return len <= sizeof(buf);
 }
-static void poll_page() {
+static uint16_t want_ver, want_len;              // a new page being read, a piece per loop pass
+static size_t want_off;
+static bool reading_page = false;
+
+static void poll_page() {                         // every POLL_MS: is there a new page?
   uint16_t ver, len;
   if (!header(ver, len)) return;
   last_ok_ms = millis();
   if (ver == shown_ver && have_page) return;
-  for (size_t off = 0; off < len; off += PIECE) {
-    size_t n = len - off < PIECE ? len - off : PIECE;
-    if (!read_at(6 + off, buf + off, n)) return;
+  want_ver = ver; want_len = len; want_off = 0; reading_page = true;
+}
+
+static void read_page_piece() {                   // one piece of the new page (about 2 ms at 400 kHz)
+  if (!reading_page) return;
+  if (want_off < want_len) {
+    size_t n = want_len - want_off < PIECE ? want_len - want_off : PIECE;
+    if (!read_at(6 + want_off, buf + want_off, n)) { reading_page = false; return; }
+    want_off += n;
+    return;
   }
+  reading_page = false;
   uint16_t ver2, len2;
-  if (!header(ver2, len2) || ver2 != ver) return;   // changed while read: next time
+  if (!header(ver2, len2) || ver2 != want_ver) return;   // changed while read: next time
   page::Page q;
-  if (!page::parse(buf, len, q)) return;
+  if (!page::parse(buf, want_len, q)) return;
   pg = q;
-  page_len = len;
-  shown_ver = ver;
+  page_len = want_len;
+  shown_ver = want_ver;
   pages_read++;
   have_page = true;
   if (pg.phase != last_phase) { last_phase = pg.phase; phase_since_ms = millis(); }
@@ -150,14 +166,19 @@ static void draw_button(int i) {
   if (en && !down) cv.fillRoundRect(r.x + 2, r.y + 5, r.w, r.h, 16, darker(BG, 85));   // a shadow under it
   if (down) col = darker(col == CARD ? ACC2 : col);
   cv.fillRoundRect(r.x, r.y + sink, r.w, r.h, 16, col);
-  if (fl) cv.drawRoundRect(r.x - 4, r.y - 4, r.w + 8, r.h + 8, 18, ACC);
+  if (fl || pending_btn == i) {                  // pressed: a ring until the UNO Q answers
+    cv.drawRoundRect(r.x - 4, r.y - 4, r.w + 8, r.h + 8, 18, ACC);
+    cv.drawRoundRect(r.x - 5, r.y - 5, r.w + 10, r.h + 10, 19, ACC);
+  }
   uint16_t tc = (i == B_CAL && en) ? FG : (en ? C_WHITE : MUTE);
   if (i == B_CAL) cv.drawRoundRect(r.x, r.y, r.w, r.h, 16, LINE);
   cv.setTextColor(tc);
   bool holding = (int32_t)(millis() - stop_hold_until) < 0;
   const char *label[] = {pg.phase == page::RECORD ? "録音終了して演奏" : "録音", "練習：もう一度", "キャリブレーション",
                          holding ? "止めています" : "止める"};
-  const char *sub[] = {"基板のボタン 1 回", "基板のボタン 2 回", "その日の笛を測る（約 10 秒鳴る）", "動いている間に"};
+  const char *sub[] = {pg.phase == page::RECORD ? "吹き終わったら" : "口笛を聞かせる", "同じ曲をもう一度",
+                       "その日の笛を測る（約 10 秒鳴る）", "動いているものを止める"};
+  if (pending_btn == i) sub[i] = "受け付けました…";
   cv.setTextDatum(textdatum_t::top_left);
   text_fit(label[i], r.x + 18, r.y + 20 + sink, r.w - 30, &fonts::lgfxJapanGothic_32);
   cv.setFont(&fonts::lgfxJapanGothic_16);
@@ -376,9 +397,12 @@ static void tapped(int x, int y) {
   if (log_on) Serial.printf("tap %d %d at %lu ms\n", x, y, (unsigned long)millis());
   for (int i = 0; i < B_N; i++) {
     if (!btn[i].in(x, y) || !btn_enabled(i)) continue;
-    if (i == B_REC || i == B_STOP) press(1);
-    else if (i == B_AGAIN) press(2);
+    if (i == B_STOP) press(1);                                      // as the EXEC button: stop everything
+    else if (i == B_REC) event(pg.phase == page::RECORD ? page::EV_FINISH : page::EV_RECORD);
+    else if (i == B_AGAIN) event(page::EV_AGAIN);
     else event(page::EV_CALIBRATE);
+    pending_btn = i; pending_until = millis() + 4000; pending_phase = pg.phase; pending_ver = shown_ver;
+    draw();                                                          // at once: the press is seen before any answer
     if (i == B_STOP) stop_hold_until = millis() + 2000;
     click_sound();
     flash_btn = i;
@@ -521,6 +545,7 @@ void setup() {
 void loop() {
   M5.update();
   api_poll();
+  read_page_piece();
   auto t = M5.Touch.getDetail();
   finger_on(t.x, t.y, t.isPressed());
   if (t.wasClicked()) tapped(t.x, t.y);
@@ -534,6 +559,10 @@ void loop() {
     static bool was_holding = false;
     bool holding = (int32_t)(now - stop_hold_until) < 0;
     if (holding != was_holding) { was_holding = holding; dirty = true; }
+  }
+  if (pending_btn >= 0 && (pg.phase != pending_phase || (int32_t)(millis() - pending_until) > 0)) {
+    pending_btn = -1;
+    dirty = true;
   }
   if (dirty) draw();
   delay(5);

@@ -1,0 +1,15 @@
+{
+  "conductor": {
+    "mode_accuracy": 1.0,
+    "fan_max_error": 0.054746389389038086
+  },
+  "end_synthetic": {
+    "mean_s": -0.07,
+    "abs_mean_s": 0.08499999999999999,
+    "early_over_0.3s": 0.125,
+    "late_over_0.5s": 0.0,
+    "songs": 64
+  },
+  "memory": "models/step8/mem_06.pt",
+  "ear": "models/step8/ear_06.pt"
+}

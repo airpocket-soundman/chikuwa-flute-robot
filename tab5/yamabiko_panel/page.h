@@ -10,6 +10,7 @@ namespace page {
 constexpr int16_t NO_VALUE = -32768;
 constexpr uint8_t FLAG_BUSY = 1, FLAG_HAS_SONG = 2, FLAG_COLLECT = 4, FLAG_SERVER_BUSY = 8, FLAG_ARCHIVE = 16;
 constexpr uint8_t EV_STEP = 0x10, EV_CALIBRATE = 0x11, EV_ARCHIVE = 0x12;
+constexpr uint8_t EV_RECORD = 0x13, EV_FINISH = 0x14, EV_AGAIN = 0x15;   // the panel's record / end / again
 static const char *PHASES[] = {"idle", "prepare", "tune", "record", "analyse", "play", "done", "saved", "error"};
 static const char *PHASE_JA[] = {"待機中", "準備中", "キャリブレーション中", "録音中", "聞き取り中",
                                  "演奏中", "完了", "保存しました", "エラー"};

@@ -197,14 +197,23 @@ def export(model) -> dict:
 
 
 class MemoryRuntime:
-    """NumPy: ``listen(ear_code)`` every 10 ms while the whistle sounds, then ``recall(step)``."""
+    """NumPy: ``listen(ear_code)`` every 10 ms while the whistle sounds, then ``recall(step)``.
+
+    For the UNO Q (2026-11-25: 8.7 ms per write and 6.1 ms per read into a 129 x 8192 W, and its NumPy's matrix
+    products too slow to batch them): W k_t = sum_s v_s (k_s . k_t), and k_s . k_t = g(t - s) with
+    g(d) = sum_f cos(2 pi f d dt) / keys depends on the difference only.  So writing keeps the values v_s (129
+    numbers) and reading is a convolution of them with g, done for many instants at once with FFTs
+    (``kernel`` / ``reads_from_kernel``, in pieces small enough for step8's 10 ms).  The same sums as W; ``W`` is
+    still there, made from the values when something asks for it (the PC, the tests)."""
 
     def __init__(self, arrays):
         self.a = {k: np.asarray(v) for k, v in arrays.items()}
         self.freqs = self.a["mem.freqs"]
         self.low, self.high = float(self.a["mem.low"]), float(self.a["mem.high"])
         value = self.a[self._last("enc") + ".w"].shape[0]
-        self.W = np.zeros((value + 1, 2 * len(self.freqs)), np.float32)
+        self._W = np.zeros((value + 1, 2 * len(self.freqs)), np.float32)
+        self._V = []                                     # every value written (v_s with its 1), in order
+        self._in_W = 0                                   # how many of them W holds
         # the position code turns by a fixed angle every step: keep it as phasors and rotate them
         self.turn = np.exp(2j * np.pi * self.freqs * STEP_S)
         self.phasor = np.ones(len(self.freqs), np.complex128)
@@ -233,10 +242,21 @@ class MemoryRuntime:
                 x = np.maximum(x, 0.0)
         return x
 
+    @property
+    def W(self):
+        """The written matrix sum_s v_s k_s^T (made from the values kept, as far as it is behind)."""
+        if self._in_W < len(self._V):
+            steps = np.arange(self._in_W, len(self._V))
+            self._W += np.stack(self._V[self._in_W:]).T @ position_code(steps, self.freqs)
+            self._in_W = len(self._V)
+        return self._W
+
+    def _flush(self):
+        pass
+
     def listen(self, ear_code):
-        k = (np.concatenate([self.phasor.real, self.phasor.imag]) * self.scale).astype(np.float32)
         v = np.append(self._mlp("enc", np.asarray(ear_code, np.float32)), np.float32(1.0)).astype(np.float32)
-        self.W += np.outer(v, k)
+        self._V.append(v)
         self.phasor *= self.turn
         if self.n % 1000 == 999:
             self.phasor /= np.abs(self.phasor)
@@ -268,7 +288,88 @@ class MemoryRuntime:
     def read(self, step):
         """(target cents, voice probability, mass): ``mass`` is how much was written around ``step`` (the last
         row of W read back), about the same inside the listening and near 0 past its end (step8's end)."""
-        r = self.W @ position_code(np.array([step]), self.freqs)[0]
+        self._flush()
+        return self._decode(self.W @ position_code(np.array([step]), self.freqs)[0])
+
+    def kernel(self, lags):
+        """g(d) for the differences ``lags`` (consecutive is fastest): the position codes' dot product."""
+        lags = np.asarray(lags, np.int64)
+        if not len(lags):
+            return np.zeros(0)
+        first = int(lags[0])
+        if np.array_equal(lags, np.arange(first, first + len(lags))):
+            z = np.exp(2j * np.pi * self.freqs * STEP_S * first) * self.turn ** np.arange(len(lags))[:, None]
+            return z.real.sum(1) / len(self.freqs)
+        return np.cos(2 * np.pi * lags[:, None] * STEP_S * self.freqs[None]).sum(1) / len(self.freqs)
+
+    def kernel_lags(self, steps_to):
+        """The differences t - s the reads of instants 0 .. steps_to - 1 need (as ``reads_from_kernel`` wants)."""
+        return np.arange(-(self.n - 1), steps_to)
+
+    def reads_from_kernel(self, g, steps_to, cols=None):
+        """W k_t for t = 0 .. steps_to - 1, by one FFT convolution of the values kept with g (from ``kernel`` of
+        ``kernel_lags(steps_to)``): rows of value + 1 numbers, as ``W @ position_code``.  ``cols``: only these
+        of the value + 1 numbers (to do it in pieces)."""
+        V = np.stack(self._V).astype(np.float64)            # (n, value + 1)
+        if cols is not None:
+            V = V[:, cols]
+        n = len(V)
+        size = 1 << int(np.ceil(np.log2(n + len(g))))
+        y = np.fft.irfft(np.fft.rfft(V, size, axis=0) * np.fft.rfft(g, size)[:, None], size, axis=0)
+        return y[n - 1:n - 1 + steps_to].astype(np.float32)   # y[m] = sum_s v_s g(m - (n - 1) - s): m = t + n - 1
+
+    def _mlp_rows(self, part, X):
+        names = sorted({k[:-2] for k in self.a if k.startswith(f"mem.{part}") and k.endswith(".w")},
+                       key=lambda s: int(s[len(f"mem.{part}"):]))
+        for i, name in enumerate(names):
+            X = X @ self.a[name + ".w"].T + self.a[name + ".b"]
+            if i < len(names) - 1:
+                X = np.maximum(X, 0.0)
+        return X
+
+    def decode_many(self, rows):
+        """``read`` of instants whose W k_t rows are given, all at once (one matrix product per layer)."""
+        rows = np.asarray(rows, np.float32)
+        if not len(rows):
+            return []
+        g = self._global()
+        X = np.concatenate([rows, np.repeat(g[None].astype(np.float32), len(rows), 0)], 1)
+        out = self._mlp_rows("dec", X)
+        voice = 1 / (1 + np.exp(-np.clip(out[:, 1], -50.0, 50.0)))
+        if self.key:
+            shift = KEY_MID + KEY_HALF * float(self._mlp("key", g.astype(np.float32))[0])
+            cents = np.clip(RAW_MID + RAW_HALF * out[:, 0] + shift, self.low, self.high)
+        else:
+            cents = (self.low + self.high) / 2 + (self.high - self.low) / 2 * out[:, 0]
+        return [(float(c), float(v), float(m)) for c, v, m in zip(cents, voice, rows[:, -1])]
+
+    def _global(self):
+        """What the decoder reads besides W k_t: the mean code G, the extremes and the histogram."""
+        g = self.G / max(self.A, 1e-3)
+        if self.beta is not None:
+            mass = np.log(max(self.A, 1e-3))
+            g = np.r_[g, (self.hi - mass) / self.beta, -(self.lo - mass) / self.beta]
+        if self.bins:
+            g = np.r_[g, self.H / max(self.A, 1e-3)]
+        return g
+
+    def read_many(self, steps):
+        """``read`` of every instant in ``steps`` (consecutive is fastest), with one matrix product."""
+        steps = np.asarray(steps, np.int64)
+        if not len(steps):
+            return []
+        self._flush()
+        first = int(steps.min())
+        span = int(steps.max()) - first + 1
+        if span <= 4 * len(steps):                       # turn the phasors from the first instant
+            z = np.exp(2j * np.pi * self.freqs * STEP_S * first) * self.turn ** np.arange(span)[:, None]
+            codes = (np.concatenate([z.real, z.imag], 1) * self.scale).astype(np.float32)[steps - first]
+        else:
+            codes = position_code(steps, self.freqs)
+        r = codes @ self.W.T
+        return [self._decode(row) for row in r]
+
+    def _decode(self, r):
         g = self.G / max(self.A, 1e-3)
         if self.beta is not None:
             mass = np.log(max(self.A, 1e-3))

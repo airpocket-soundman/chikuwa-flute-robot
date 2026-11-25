@@ -73,3 +73,40 @@ python scripts/yamabiko_step8_train.py --memory runs/memory/mem_06.pt --ear mode
 2. **8b：全体の微調整**：耳・記憶・演奏・弁を PyTorch で 1 本につなぎ、1 話を丸ごと流して一緒に学習する。
 3. **ONNX 1 本への書き出し**と、UNO Q のサーバーで `Step8.tick` を 10 ms ごとに回す（実機の評価は許可待ち）。
 4. ファンの立ち上がりと原点出しを NN の出力に移す（ファンの強さを連続で変えられるシミュレーターが要る）。
+
+## step8p — step7_practice をもとにした step8（2026-11-25）
+
+step8 の 1 つの実行部（`Step8`）の演奏 NN・弁 NN を、実機で練習によって classic_ear を追い越した step7_practice のもの
+（`nn_f80_t7_ilc_01`・`valve_t7_free`）に替えた。耳（ear_06）と記憶（mem_06）は step8 と同じ。`models/step8p/`。
+
+- **練習**: 新しく聞き直さない限り、演奏 NN と「前の回の演奏の記録」を次の演奏に持ち越す（step7_practice が読む記録）
+- **もう一度**: 切り替え役（`step8p_heads`）に「2 回押し（＝もう一度）」と「曲を覚えているか」の入力を足して学び直した
+  （閉ループの正解率 100 %）。待機中の「もう一度」で、覚えている曲を練習として吹く
+- **シミュレーター**（6 曲 × 4 台 × 3 回、72 話）: step7_practice が記憶から思い出した楽譜を練習を引き継いで吹く場合と同じ成績
+  （1 回目 0.317 対 0.317、2 回目 0.358 対 0.348、3 回目 0.344 対 0.345）。72 話すべて自分で止まった（ずれ平均 0.01 秒）。
+  模擬機体は毎回同じに外れるので、練習の上達はシミュレーターでは小さい（実機で確かめる）
+
+```
+python scripts/yamabiko_step8_train.py --ear models/step8/ear_06.pt --memory models/step8/mem_06.pt --out models/step8p/step8p_heads
+python scripts/yamabiko_step8_sim.py --step step8p --baseline step7_practice --songs 6 --rigs 4 --plays 3
+```
+
+### UNO Q で 10 ms に間に合わせる
+
+| 処理 | 前 | 後 |
+|---|---|---|
+| 記憶への書き込み（1 歩） | 8.7 ms（129 × 8192 の行列に足す） | 値を並べるだけ（聞いている間の 1 歩は全部で平均 7.2 ms） |
+| 記憶からの読み出し（1 時刻） | 6.1 ms | 吹く前のファンの準備中に、曲全体を FFT の畳み込みでまとめて読む |
+| 演奏の 1 歩 | 平均 11.5 ms・最大 34 ms | 平均 7.4 ms・99 % で 8.1 ms |
+
+W k_t = Σ_s v_s (k_s · k_t) で、k_s · k_t は時刻の差だけの関数 g(t − s) なので、読み出しは書いた値の列と g の畳み込みになる
+（`MemoryRuntime.kernel` / `reads_from_kernel` / `decode_many`）。答えは W の形と同じ（PyTorch 版との差 0.002 cent 以内）。
+PC の学習と ONNX は W の形のまま。
+
+### 実機での動かし方
+
+演奏サーバーが step8p をループの中で 10 ms ごとに回す（`step8_start` / `step8_finish` / `step8_stop` / `step8_status`）。
+画面の「録音」で聞き始め、「録音終了して演奏」で吹いて、終わると自分で止まる。「練習：もう一度」で練習。
+**基板の EXEC ボタンは、いつ押しても「すべて止めてリセット」**（2026-11-25 から。録音・演奏の開始は Web と Tab5 の画面だけ）。
+
+まだ: 実機で人が口笛を吹いての評価（練習で上達するか）、ONNX 1 本への書き出しを練習の記録込みに直すこと。

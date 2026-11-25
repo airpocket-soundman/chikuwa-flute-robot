@@ -1,6 +1,7 @@
 """PC or UNO Q: whole step8 episodes in the NumPy simulator, against step7c playing the rule's score.
 
     python scripts/yamabiko_step8_sim.py --step models/step8 --songs 8 --rigs 8
+    python scripts/yamabiko_step8_sim.py --step step8p --baseline step7_practice --plays 3   # practice
 
 One episode: 0.5 s idle (room noise) -> the button -> a whistle (synthetic, or cut from the rig's held-out
 recordings with --real) heard through the ear into the memory -> the button -> step8 plays it on a simulated
@@ -14,6 +15,9 @@ lead and tail):
   end_s              when step8 stopped minus when the score ends (s; negative = too early)
 and the same hits for step7c playing the rule's score itself (the array score, today's step7c), and step7c
 playing the score recalled from the memory as one array (score_from_recording, today's step6/7 copy).
+With ``--plays N`` the song is played N times on the same rig: the first by the button, then after a short idle
+by a double press (practice: step8p keeps its actuator and the record of the play before), and the baseline
+plays its scores N times keeping its song memory (as the server's practice); the hits are given per play.
 """
 from __future__ import annotations
 
@@ -94,8 +98,9 @@ def whistles(args, rng):
     return out
 
 
-def episode(step8, frames, rig, room_rng):
-    """Listen to ``frames`` then play on ``rig`` until step8 stops: emitted pitch per actuator step, end step."""
+def episode(step8, frames, rig, room_rng, plays=1):
+    """Listen to ``frames`` then play on ``rig`` until step8 stops, ``plays`` times (the first by the button, the
+    others by a double press after 0.3 s idle): [(emitted pitch per actuator step, end step)] per play."""
     s8 = copy.deepcopy(step8)
     s8.reset()
     for _ in range(50):                                        # idle with the room
@@ -103,25 +108,32 @@ def episode(step8, frames, rig, room_rng):
     for i, f in enumerate(frames):
         out = s8.tick(f, button=1 if i == 0 else 0)
     assert out["mode"] == "listen", out
-    emitted, heard, end_at, s8_last_t = {}, None, None, 0
     rig.reset(rig.rng.uniform(0, .8))
-    for k in range(WARM_STEPS + HOMING_STEPS + 60 * 100):
-        out = s8.tick(None, button=1 if k == 0 else 0, heard=heard)
-        if out["mode"] != "play":
-            end_at = s8_last_t
-            break
-        c, sounding, h, valid = rig.step(out["pwm"], out["valve"])
-        heard = (h, valid)
-        if "t" in out:
-            emitted[out["t"]] = c
-            s8_last_t = out["t"]
-        elif k >= WARM_STEPS + HOMING_STEPS:
-            s8_last_t = k
-    t_max = max(emitted) + 1 if emitted else 0
-    em = np.full(t_max, np.nan)
-    for t, c in emitted.items():
-        em[t] = c
-    return em, end_at
+    results = []
+    for p in range(plays):
+        if p:
+            for _ in range(30):                                # idle, then the double press
+                s8.tick(room_rng.normal(0, 3e-4, FRAME))
+        emitted, heard, end_at, s8_last_t = {}, None, None, 0
+        for k in range(WARM_STEPS + HOMING_STEPS + 60 * 100):
+            press = k == 0
+            out = s8.tick(None, button=1 if press and p == 0 else 0, double=1 if press and p else 0, heard=heard)
+            if out["mode"] != "play":
+                end_at = s8_last_t
+                break
+            c, sounding, h, valid = rig.step(out["pwm"], out["valve"])
+            heard = (h, valid)
+            if "t" in out:
+                emitted[out["t"]] = c
+                s8_last_t = out["t"]
+            elif k >= WARM_STEPS + HOMING_STEPS:
+                s8_last_t = k
+        t_max = max(emitted) + 1 if emitted else 0
+        em = np.full(t_max, np.nan)
+        for t, c in emitted.items():
+            em[t] = c
+        results.append((em, end_at))
+    return results
 
 
 def main():
@@ -134,6 +146,7 @@ def main():
     ap.add_argument("--real-holdout", nargs="*", default=["20261124_111404", "20261124_111830"])
     ap.add_argument("--seed", type=int, default=5)
     ap.add_argument("--json", default=None)
+    ap.add_argument("--plays", type=int, default=1, help="times the song is played (practice from the second)")
     args = ap.parse_args()
     profiles = load_profiles()
     p8, base = profiles[args.step], profiles[args.baseline]
@@ -157,19 +170,21 @@ def main():
         mem = listened.memory
         rec = np.array([mem.recall(i) for i in range(mem.n)])
         arr_c, arr_v = framed(rec[:, 0], rec[:, 1] >= .5)
-        for r, rig in enumerate(rigs_around(constants, twin, args.rigs, seed=900 + len(rows))):
-            em, end_at = episode(step8, frames, rig, np.random.default_rng(r))
-            h8 = hits(em, ref_c, keep)
+        seed = 900 + len(rows)
+        for r, rig in enumerate(rigs_around(constants, twin, args.rigs, seed=seed)):
+            runs = episode(step8, frames, rig, np.random.default_rng(r), args.plays)
             outs = {}
             for label, (c, v) in (("rule", (ref_c, ref_v)), ("memory_array", (arr_c, arr_v))):
                 runtime = WithValve(runtime_for(dict(np.load(base["runtime_path"]))), dict(np.load(base["valve_runtime_path"])))
-                rig2 = rigs_around(constants, twin, args.rigs, seed=900 + len(rows))[r]
-                o = play(runtime, rig2, c, v)
-                outs[label] = hits(o["emitted"], ref_c, keep)
-            rows.append({"song": name, "rig": r, "step8_hit": h8[0], "step8_in_key": h8[1],
-                         "rule_hit": outs["rule"][0], "rule_in_key": outs["rule"][1],
-                         "array_hit": outs["memory_array"][0], "array_in_key": outs["memory_array"][1],
-                         "end_s": None if end_at is None else (end_at - should_end) / 100})
+                rig2 = rigs_around(constants, twin, args.rigs, seed=seed)[r]
+                outs[label] = [hits(play(runtime, rig2, c, v, keep_song_memory=k > 0)["emitted"], ref_c, keep)
+                               for k in range(args.plays)]
+            for k, (em, end_at) in enumerate(runs):
+                h8 = hits(em, ref_c, keep)
+                rows.append({"song": name, "rig": r, "play": k + 1, "step8_hit": h8[0], "step8_in_key": h8[1],
+                             "rule_hit": outs["rule"][k][0], "rule_in_key": outs["rule"][k][1],
+                             "array_hit": outs["memory_array"][k][0], "array_in_key": outs["memory_array"][k][1],
+                             "end_s": None if end_at is None else (end_at - should_end) / 100})
         last = rows[-1]
         print(f"{name}: step8 {last['step8_hit']:.2f}/{last['step8_in_key']:.2f}  rule {last['rule_hit']:.2f}/"
               f"{last['rule_in_key']:.2f}  array {last['array_hit']:.2f}/{last['array_in_key']:.2f}  end {last['end_s']}",
@@ -177,6 +192,9 @@ def main():
     keys = ["step8_hit", "step8_in_key", "array_hit", "array_in_key", "rule_hit", "rule_in_key"]
     ends = np.array([r["end_s"] for r in rows if r["end_s"] is not None])
     summary = {k: float(np.mean([r[k] for r in rows])) for k in keys}
+    if args.plays > 1:
+        summary["per_play"] = {str(n): {k: float(np.mean([r[k] for r in rows if r["play"] == n])) for k in keys}
+                               for n in range(1, args.plays + 1)}
     summary.update(episodes=len(rows), ended=len(ends), end_mean_s=float(ends.mean()) if len(ends) else None,
                    end_abs_mean_s=float(np.abs(ends).mean()) if len(ends) else None)
     print(json.dumps(summary, indent=2))

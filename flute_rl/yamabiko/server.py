@@ -116,6 +116,9 @@ class Server:
         self.fan_on, self.fan_duty = False, 0.0
         self.link.command(0.0, False)
         self.owner = None
+        ses = getattr(self, "step8_session", None)
+        if ses is not None and not why.startswith("step8"):    # the owner went away, the server stops, ...
+            self._step8_end(ses, why or "safe")
 
     def take(self, client):
         if self.owner is not None and self.owner is not client:
@@ -381,6 +384,124 @@ class Server:
                 "song_memory": bool(getattr(getattr(runtime, "act", runtime), "nn_slot", 0)
                                     or getattr(getattr(runtime, "act", runtime), "nn_prev", False))}
 
+    # ----- step8 / step8p: one object run inside the loop every 10 ms ------------------------------------
+    # The object (flute_rl/yamabiko/step8.py) hears the microphone's last 20 ms itself and gives the PWM, the
+    # valve and the fan.  It runs in the server's own 10 ms step, so the connection that started it can still
+    # send "finish" (the listening ends: play what was heard) and "stop" while it runs.  The board's button
+    # stops it (it stops everything).  The object is kept for the next start (the song and the actuator's record
+    # of its last play: "again" is practice) and made anew when the networks asked for change.
+
+    def cmd_step8_start(self, client, req):
+        """``start``: "listen" or "again"; the runtimes' paths (ear_runtime, memory_runtime, runtime,
+        valve_runtime, heads); ``shift_cents``; ``out`` (where the play's record goes); ``max_seconds``."""
+        from .step8 import Step8
+        self.take(client)
+        key = tuple(req[k] for k in ("ear_runtime", "memory_runtime", "runtime", "valve_runtime", "heads"))
+        held = getattr(self, "step8_held", None)
+        if held is None or held[0] != key:
+            from .ear_nn import Ear
+            load = lambda path: dict(np.load(path))            # noqa: E731
+            held = (key, Step8(Ear(load(req["ear_runtime"])), load(req["memory_runtime"]), load(req["runtime"]),
+                               load(req["valve_runtime"]), load(req["heads"])))
+            self.step8_held = held
+        s8 = held[1]
+        again = req.get("start", "listen") == "again"
+        if again and (s8.memory is None or s8.memory.n < 10):
+            raise ValueError("no song held: listen first")
+        if s8.mode != 0:
+            s8.mode = 0                                         # a session cut off before: start from idle
+        self.link.start()
+        self.step8_session = {
+            "s8": s8, "shift": float(req.get("shift_cents", 0.0)), "out": req.get("out"),
+            "until": time.monotonic() + float(req.get("max_seconds", 150.0)),
+            "input": (0, 1) if again else (1, 0), "pressed": self.buttons(), "fan": None, "modes": [],
+            "stopped": None, "audio_start": None, "late": 0,
+            "log": {k: [] for k in ("heard", "valid", "target_cents", "target_voice", "pwm", "valve")}}
+        self.step8_result = None
+        return {"started": True, "start": "again" if again else "listen"}
+
+    def cmd_step8_finish(self, client, req):
+        """The listening ends: the object plays what it heard (as the button of step8 did)."""
+        ses = getattr(self, "step8_session", None)
+        if ses is None:
+            raise ValueError("step8 is not running")
+        if ses["s8"].mode == 1:
+            ses["input"] = (1, 0)
+        return {"mode": ("idle", "listen", "play")[ses["s8"].mode]}
+
+    def cmd_step8_stop(self, client, req):
+        ses = getattr(self, "step8_session", None)
+        if ses is not None:
+            self._step8_end(ses, "stop")
+        return {"stopped": ses is not None}
+
+    def cmd_step8_status(self, client, req):
+        """While it runs: mode, plays, the play head; once it ended: ``result`` (once)."""
+        ses = getattr(self, "step8_session", None)
+        if ses is not None:
+            s8 = ses["s8"]
+            return {"active": True, "mode": ("idle", "listen", "play")[s8.mode], "plays": int(s8.plays),
+                    "listened_steps": int(s8.memory.n) if s8.memory is not None else 0,
+                    "t": len(ses["log"]["pwm"])}
+        result, self.step8_result = getattr(self, "step8_result", None), None
+        return {"active": False, "result": result}
+
+    def _step8_step(self):
+        """One 10 ms step of the running object (called by tick, in place of the plain command)."""
+        ses = self.step8_session
+        s8 = ses["s8"]
+        if time.monotonic() > ses["until"]:
+            return self._step8_end(ses, "time")
+        b, d = ses["input"]
+        ses["input"] = (0, 0)
+        now = self.buttons()
+        if ses["pressed"] is not None and now not in (None, ses["pressed"]):
+            self.log("step8 stopped by the board button")
+            return self._step8_end(ses, "button")
+        out = s8.tick(self.link.audio.latest(320), button=b, double=d, shift=ses["shift"])
+        ses["modes"].append(out["mode"])
+        fan = round(float(out["fan"]), 2) if out["mode"] == "play" else 0.0
+        if fan != ses["fan"]:
+            self.fan_on, self.fan_duty = fan > .05, fan
+            self.link.fan(fan > .05, fan)
+            ses["fan"] = fan
+        self.pwm, self.valve, self.brake = float(out["pwm"]), bool(out["valve"]), False
+        self.link.command(self.pwm, self.valve, False)
+        if "t" in out:
+            if ses["audio_start"] is None:
+                ses["audio_start"] = self.link.audio.end
+            log = ses["log"]
+            h = out.get("heard", (float("nan"), False))
+            tc, tv = out["target"]
+            log["heard"].append(h[0] if h[1] else 0.0); log["valid"].append(bool(h[1]))
+            log["target_cents"].append(tc); log["target_voice"].append(tv)
+            log["pwm"].append(out["pwm"]); log["valve"].append(out["valve"])
+        if out["mode"] == "idle" and len(ses["modes"]) > 1:
+            self._step8_end(ses, None)
+
+    def _step8_end(self, ses, why):
+        """The object is idle again (or stopped): outputs to safe, the play's record written, the result kept."""
+        self.step8_session = None
+        ses["s8"].mode = 0
+        self.safe(f"step8 {why or 'done'}")
+        log = ses["log"]
+        heard, valid = np.array(log["heard"], np.float32), np.array(log["valid"], bool)
+        tc, tv = np.array(log["target_cents"], np.float32), np.array(log["target_voice"], bool)
+        m = valid & tv
+        out_path = ses["out"] if len(heard) else None
+        if out_path:
+            pathlib.Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(out_path, count=1, shift_cents=ses["shift"], sr=SR, **{
+                "0/heard": heard[None], "0/valid": valid[None], "0/target_cents": tc[None], "0/target_voice": tv[None],
+                "0/pwm": np.array(log["pwm"], np.float32)[None], "0/valve": np.array(log["valve"], np.float32)[None],
+                "0/pcm": self.link.audio.span(ses["audio_start"], self.link.audio.end)
+                if ses["audio_start"] else np.zeros(0, np.int16)})
+        s8 = ses["s8"]
+        self.step8_result = {"played": bool(len(heard)), "plays": int(s8.plays), "stopped": why,
+                             "listened_steps": int(s8.memory.n) if s8.memory is not None else 0,
+                             "heard_error_cents": float(np.abs(heard[m] - tc[m]).mean()) if m.any() else None,
+                             "out": out_path, "shift_cents": ses["shift"], "modes": sorted(set(ses["modes"]))}
+
     def cmd_tune(self, client, req):
         """Today's flute: the home note and one sweep out to the far end and back at ``pwm`` (the end switch
         cuts the current).  Returns the heard track, the home and top pitch, and ``shift_cents``: how far the
@@ -542,7 +663,10 @@ class Server:
             self.safe(f"no message for {self.lease} s")
         now = time.monotonic()
         if now >= self.next_step:
-            self.link.command(self.pwm, self.valve, self.brake)
+            if getattr(self, "step8_session", None) is not None:
+                self._step8_step()                              # step8 runs: it gives the command
+            else:
+                self.link.command(self.pwm, self.valve, self.brake)
             self.next_step = max(self.next_step + STEP_S, now - STEP_S)
         self.link.poll(max(0.0, min(.002, self.next_step - time.monotonic())))
         st = self.link.status

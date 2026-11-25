@@ -23,6 +23,9 @@ Page, little endian (the panel's reader is tab5/yamabiko_panel/page.h; keep the 
 Events (the bytes the panel writes after register 0x02):
   EV_STEP index        choose a step              EV_CALIBRATE        calibrate
   EV_ARCHIVE index     play an archive clip
+  EV_RECORD            record (a new song)    EV_FINISH           end the recording and play    EV_AGAIN   again
+The panel's "stop" is not an event: it is a press of the EXEC button in the MCU, which reaches the server even
+while it plays (the board's button stops everything and resets, 2026-11-25).
 """
 from __future__ import annotations
 
@@ -34,6 +37,7 @@ NO_VALUE = -32768
 PHASES = ["idle", "prepare", "tune", "record", "analyse", "play", "done", "saved", "error"]
 FLAG_BUSY, FLAG_HAS_SONG, FLAG_COLLECT, FLAG_SERVER_BUSY, FLAG_ARCHIVE = 1, 2, 4, 8, 16
 EV_STEP, EV_CALIBRATE, EV_ARCHIVE = 0x10, 0x11, 0x12
+EV_RECORD, EV_FINISH, EV_AGAIN = 0x13, 0x14, 0x15     # the panel's record / end and play / again
 MAX_POINTS = 240
 MAX_BYTES = 3072                       # PANEL_MAX in the firmware
 LIMITS = {"message": 150, "step": 24, "archive": 72}

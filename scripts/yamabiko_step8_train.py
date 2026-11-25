@@ -3,9 +3,10 @@
     python scripts/yamabiko_step8_train.py --ear models/step5/ear_06.pt --memory runs/memory/mem_05.pt \
         --out models/step8/step8_heads
 
-conductor   a tiny GRU: (button pressed this tick, "finished" from the end network) -> idle / listen / play and
-            the fan's duty.  Taught on random sequences of presses: idle -press-> listen -press-> play
-            -finished or press-> idle; the fan at 0.8 while playing, off otherwise (as the server today).
+conductor   a tiny MLP: (button pressed this tick, a double press, "finished" from the end network, a song held,
+            the mode before) -> idle / listen / play and the fan's duty.  Taught on random sequences of presses:
+            idle -press-> listen -press-> play -finished or press-> idle, and idle -double press-> play again
+            when a song is held (practice, step8p); the fan at 0.8 while playing, off otherwise (as the server).
 end         a small MLP: from the memory read around the play head (voice probability and how much was written
             there, step8.end_features), "the song has finished": the play head is past the last note heard
             plus the tail.  Taught on synthetic whistles (and the rig's whistles with --real) heard by the ear
@@ -34,56 +35,79 @@ FAN = .8
 
 
 def conductor_episode(rng, length=600):
-    """Random presses and "finished" signals, and the modes and fan they should give.  "finished" is only ever
-    above 0 while playing (step8 clears it when the mode changes); it stays high once it fires."""
-    button = (rng.random(length) < .03).astype(np.float32)
+    """Random presses (single and double) and "finished" signals, and the modes and fan they should give, as the
+    play page does: idle -press-> listen -press-> play -finished or a press-> idle, and idle -double press->
+    play again when a song is held (practice).  A press while listening with nothing heard yet goes back to
+    idle.  "finished" is only above 0 while playing (step8 clears it when the mode changes) and stays high once
+    it fires.  ``song``: a song is held (the memory has heard at least 0.1 s)."""
+    r = rng.random(length)
+    button = (r < .025).astype(np.float32)
+    double = ((r >= .025) & (r < .04)).astype(np.float32)
     end = np.zeros(length, np.float32)
+    song = np.zeros(length, np.float32)
     mode = np.zeros(length, np.int64)
-    m, fired = 0, False
+    m, fired, held, listened = 0, False, False, 0
     for t in range(length):
+        if m == 1:
+            listened += 1
+            if listened > 10:
+                held = True
         if m == 2:
             if not fired and rng.random() < .02:
                 fired = True
             end[t] = rng.uniform(.6, 1.0) if fired else (rng.uniform(0, .45) if rng.random() < .3 else 0.0)
-        if button[t]:
-            m, fired = (m + 1) % 3, False
-        elif m == 2 and end[t] >= .5:
-            m, fired = 0, False
+        song[t] = float(held)
+        if m == 0:
+            if button[t]:
+                m, held, listened = 1, False, 0          # a new song: the one held is let go
+                song[t] = 0.0
+            elif double[t] and held:
+                m = 2
+        elif m == 1:
+            if button[t] or double[t]:
+                m = 2 if held else 0
+        else:
+            if button[t] or double[t] or end[t] >= .5:
+                m = 0
+        if m != 2:
+            fired = False
         mode[t] = m
-    return button, end, mode
+    return button, double, end, song, mode
 
 
 class Conductor(nn.Module):
-    """(button, finished, the mode chosen before as one-hot) -> 3 mode logits and the fan's logit."""
+    """(button, double press, finished, a song held, the mode chosen before as one-hot) -> 3 mode logits and the
+    fan's logit."""
 
-    def __init__(self, hidden=16):
+    def __init__(self, hidden=24):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(5, hidden), nn.ReLU(), nn.Linear(hidden, 4))
+        self.net = nn.Sequential(nn.Linear(7, hidden), nn.ReLU(), nn.Linear(hidden, 4))
 
-    def forward(self, button, end, prev):
-        return self.net(torch.cat([torch.stack([button, end], -1), F.one_hot(prev, 3).float()], -1))
+    def forward(self, button, double, end, song, prev):
+        return self.net(torch.cat([torch.stack([button, double, end, song], -1), F.one_hot(prev, 3).float()], -1))
 
 
-def train_conductor(device, steps=2000):
+def train_conductor(device, steps=4000):
     """Taught on the steps of random sequences (the mode before is the true one), checked by running whole
     sequences on its own choices."""
     model = Conductor().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=3e-3)
     rng = np.random.default_rng(3)
     for step in range(steps):
-        b, e, m = zip(*[conductor_episode(rng) for _ in range(32)])
-        b, e, m = (torch.tensor(np.stack(x), device=device) for x in (b, e, m))
+        b, d, e, g, m = zip(*[conductor_episode(rng) for _ in range(32)])
+        b, d, e, g, m = (torch.tensor(np.stack(x), device=device) for x in (b, d, e, g, m))
         prev = torch.cat([torch.zeros_like(m[:, :1]), m[:, :-1]], 1)
-        out = model(b, e, prev)
-        loss = F.cross_entropy(out[..., :3].reshape(-1, 3), m.reshape(-1))             + F.binary_cross_entropy_with_logits(out[..., 3], (m == 2).float() * FAN)
+        out = model(b, d, e, g, prev)
+        loss = F.cross_entropy(out[..., :3].reshape(-1, 3), m.reshape(-1)) \
+            + F.binary_cross_entropy_with_logits(out[..., 3], (m == 2).float() * FAN)
         opt.zero_grad(); loss.backward(); opt.step()
     with torch.no_grad():
-        b, e, m = zip(*[conductor_episode(np.random.default_rng(99 + k), 2000) for k in range(16)])
-        b, e, m = (torch.tensor(np.stack(x), device=device) for x in (b, e, m))
+        b, d, e, g, m = zip(*[conductor_episode(np.random.default_rng(99 + k), 2000) for k in range(16)])
+        b, d, e, g, m = (torch.tensor(np.stack(x), device=device) for x in (b, d, e, g, m))
         prev = torch.zeros(len(m), dtype=torch.long, device=device)
         chosen, fan = [], []
         for t in range(m.shape[1]):                              # closed loop: its own choice fed back
-            out = model(b[:, t], e[:, t], prev)
+            out = model(b[:, t], d[:, t], e[:, t], g[:, t], prev)
             prev = out[:, :3].argmax(-1)
             chosen.append(prev); fan.append(torch.sigmoid(out[:, 3]))
         chosen, fan = torch.stack(chosen, 1), torch.stack(fan, 1)
