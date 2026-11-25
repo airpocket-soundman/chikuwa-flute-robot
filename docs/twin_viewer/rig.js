@@ -50,6 +50,15 @@
       mesh.castShadow = mesh.receiveShadow = true;
       return mesh;
     }
+    // a coarser copy: every k x k x k block one voxel (its first voxel's colour), drawn scaled by k
+    downsample(k) {
+      const out = new Voxels();
+      for (const [x, y, z, color, jitter] of this.cells.values()) {
+        const key = `${Math.floor(x / k)},${Math.floor(y / k)},${Math.floor(z / k)}`;
+        if (!out.cells.has(key)) out.cells.set(key, [Math.floor(x / k), Math.floor(y / k), Math.floor(z / k), color, jitter]);
+      }
+      return out;
+    }
     // one geometry of only the faces nobody covers (for drawing many rigs at once), vertex colours
     geometry(origin = [0, 0, 0]) {
       const pos = [], nor = [], col = [];
@@ -124,16 +133,16 @@
     fixed.box(28, 30, 3, 24, -6, -4, C.white, .03);
     fixed.box(27, 31, 20, 25, -4, -3, C.pcbGreen, .05);
     fixed.box(28, 30, 22, 24, -3, -2, C.chip, .02);
-    // Arduino UNO Q (blue) with the board stack (green) on stand-offs
-    fixed.box(70, 98, 3, 4, -13, -1, C.pcbBlue, .05);
-    for (const [x, z] of [[71, -12], [96, -12], [71, -2], [96, -2]]) fixed.box(x, x + 1, 4, 7, z, z + 1, C.gold, .02);
-    fixed.box(68, 100, 7, 8, -14, 0, C.pcbGreen, .05);
-    fixed.box(72, 80, 8, 9, -6, -2, C.chip, .02);
-    fixed.box(84, 87, 8, 13, -12, -9, C.cap, .03);
-    fixed.box(88, 90, 8, 12, -12, -10, C.cap, .03);
-    fixed.box(92, 98, 8, 11, -13, -8, C.chip, .03);
-    fixed.box(80, 84, 8, 10, -13, -11, C.white, .02);
-    fixed.box(70, 74, 8, 10, -13, -11, C.white, .02);
+    // Arduino UNO Q (blue) with the board stack (green) on stand-offs, behind the whistle
+    fixed.box(70, 98, 3, 4, -23, -11, C.pcbBlue, .05);
+    for (const [x, z] of [[71, -22], [96, -22], [71, -12], [96, -12]]) fixed.box(x, x + 1, 4, 7, z, z + 1, C.gold, .02);
+    fixed.box(68, 100, 7, 8, -24, -10, C.pcbGreen, .05);
+    fixed.box(72, 80, 8, 9, -16, -12, C.chip, .02);
+    fixed.box(84, 87, 8, 13, -22, -19, C.cap, .03);
+    fixed.box(88, 90, 8, 12, -22, -20, C.cap, .03);
+    fixed.box(92, 98, 8, 11, -23, -18, C.chip, .03);
+    fixed.box(80, 84, 8, 10, -23, -21, C.white, .02);
+    fixed.box(70, 74, 8, 10, -23, -21, C.white, .02);
     // linear actuator: grey body, black end cap at the far right
     fixed.box(128, 160, 6, 11, -3, 3, C.actGray, .04);
     fixed.box(160, 164, 5, 12, -4, 4, C.black, .04);

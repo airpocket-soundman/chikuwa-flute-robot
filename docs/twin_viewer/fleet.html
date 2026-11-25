@@ -65,7 +65,7 @@
 <main>
   <aside class="left">
     <h1>ツイン学習ビューア</h1>
-    <div class="sub">学習中に保存した回の、32 台ぶんの演奏を再生します。各台はツインの値を少しずつ変えた機体で、それぞれ違う曲を吹いています。</div>
+    <div class="sub">学習中に保存した回の、全台（32 台または 128 台）の演奏を再生します。各台はツインの値を少しずつ変えた機体で、それぞれ違う曲を吹いています。</div>
     <div class="sub" style="margin-top:4px"><a href="index.html" style="color:var(--accent)">1 台の模型を見る</a></div>
     <h2>学習の記録</h2>
     <select id="run"></select>
@@ -73,7 +73,7 @@
     <canvas id="curve" class="chart" height="120"></canvas>
     <h2>保存した回</h2>
     <div id="steps" class="chips"></div>
-    <h2>この回の 32 台</h2>
+    <h2 id="cellsTitle">この回の 32 台</h2>
     <div class="stats">
       <div class="stat"><b id="sMae">–</b><span>誤差 cent</span></div>
       <div class="stat"><b id="sHit">–</b><span>±25 cent 以内</span></div>
@@ -131,7 +131,8 @@
 <script src="rig.js"></script>
 <script>
 const R = window.YamabikoRig;
-const N = 32, COLS = 4, DX = 195, DZ = 92;
+let N = 32, COLS = 4;                       // set from the data (32 or 128 rigs)
+const DX = 195, DZ = 92;
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -142,44 +143,137 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 view.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x17191d);
-const camera = new THREE.PerspectiveCamera(30, 1, 5, 6000);
+const camera = new THREE.PerspectiveCamera(30, 1, .5, 40000);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+controls.minDistance = 2; controls.maxDistance = 20000;
+controls.addEventListener("start", () => { camGoal = null; });   // the hand wins over a camera move in progress
 scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3028, .75));
 const sun = new THREE.DirectionalLight(0xffffff, .45); sun.position.set(-1, 2, 1.5); scene.add(sun);
 
 const origin = (i) => [(i % COLS) * DX, 0, Math.floor(i / COLS) * DZ];
 const parts = R.build();
 const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-const fixedMesh = new THREE.InstancedMesh(parts.fixed.geometry(), mat, N);
-const slideMesh = new THREE.InstancedMesh(parts.slide.geometry(), mat, N);
-const rotorMesh = new THREE.InstancedMesh(parts.rotor.geometry([.5, 0, .5]), mat, N);
 const ledGeo = new THREE.BoxGeometry(1.6, 1, 1.6);
-const ledShut = new THREE.InstancedMesh(ledGeo, new THREE.MeshBasicMaterial(), N);
-const ledOpen = new THREE.InstancedMesh(ledGeo, new THREE.MeshBasicMaterial(), N);
-const M = new THREE.Matrix4(), Q = new THREE.Matrix4();
-for (let i = 0; i < N; i++) {
-  const [x, , z] = origin(i);
-  fixedMesh.setMatrixAt(i, M.makeTranslation(x, 0, z));
-  ledShut.setMatrixAt(i, M.makeTranslation(x + R.LEDS.shut, R.LEDS.y, z + R.LEDS.z));
-  ledOpen.setMatrixAt(i, M.makeTranslation(x + R.LEDS.open, R.LEDS.y, z + R.LEDS.z));
-}
-scene.add(fixedMesh, slideMesh, rotorMesh, ledShut, ledOpen);
-// desk under each row, and a highlight under the chosen rig
-const deskMat = new THREE.MeshLambertMaterial({ color: 0x5f4430 });
-for (let r = 0; r < N / COLS; r++) {
-  const desk = new THREE.Mesh(new THREE.BoxGeometry(COLS * DX - 14, 2, 74), deskMat);
-  desk.position.set((COLS - 1) * DX / 2 + 72, -3, r * DZ - 16);
-  scene.add(desk);
-}
+const M = new THREE.Matrix4(), Q = new THREE.Matrix4(), SC = new THREE.Matrix4();
+// two looks of every part: fine (every voxel) and coarse (2 x 2 x 2 voxels as one), for many rigs at a distance
+const GEO = {
+  fine: { k: 1, fixed: parts.fixed.geometry(), slide: parts.slide.geometry(), rotor: parts.rotor.geometry([.5, 0, .5]) },
+  coarse: { k: 2, fixed: parts.fixed.downsample(2).geometry(), slide: parts.slide.downsample(2).geometry(),
+            rotor: parts.rotor.downsample(2).geometry([.25, 0, .25]) },
+};
+const fleet = { group: null, sets: {}, ledShut: null, ledOpen: null };
 const mark = new THREE.Mesh(new THREE.BoxGeometry(186, 1, 76),
   new THREE.MeshBasicMaterial({ color: 0xf0b429, transparent: true, opacity: .22 }));
 scene.add(mark);
+const CENTER = new THREE.Vector3(), fleetView = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
+const labelBox = $("labels");
+let tags = [];
 
-const CENTER = new THREE.Vector3((COLS - 1) * DX / 2 + 75, 0, (N / COLS - 1) * DZ / 2 - 10);
-const fleetView = { pos: new THREE.Vector3(CENTER.x, 760, CENTER.z + 700), target: CENTER.clone().add(new THREE.Vector3(0, 0, 30)) };
+function buildFleet(n) {
+  if (fleet.group && n === N) return;
+  if (fleet.group) scene.remove(fleet.group);
+  N = n; COLS = n > 32 ? 8 : 4;
+  const group = new THREE.Group();
+  fleet.sets = {};
+  for (const [name, g] of Object.entries(GEO)) {
+    const set = { k: g.k, fixed: new THREE.InstancedMesh(g.fixed, mat, N), slide: new THREE.InstancedMesh(g.slide, mat, N),
+                  rotor: new THREE.InstancedMesh(g.rotor, mat, N) };
+    SC.makeScale(g.k, g.k, g.k);
+    for (let i = 0; i < N; i++) {
+      const [x, , z] = origin(i);
+      set.fixed.setMatrixAt(i, M.makeTranslation(x, 0, z).multiply(SC));
+    }
+    group.add(set.fixed, set.slide, set.rotor);
+    fleet.sets[name] = set;
+  }
+  fleet.ledShut = new THREE.InstancedMesh(ledGeo, new THREE.MeshBasicMaterial(), N);
+  fleet.ledOpen = new THREE.InstancedMesh(ledGeo, new THREE.MeshBasicMaterial(), N);
+  for (let i = 0; i < N; i++) {
+    const [x, , z] = origin(i);
+    fleet.ledShut.setMatrixAt(i, M.makeTranslation(x + R.LEDS.shut, R.LEDS.y, z + R.LEDS.z));
+    fleet.ledOpen.setMatrixAt(i, M.makeTranslation(x + R.LEDS.open, R.LEDS.y, z + R.LEDS.z));
+  }
+  group.add(fleet.ledShut, fleet.ledOpen);
+  const deskMat = new THREE.MeshLambertMaterial({ color: 0x5f4430 });
+  for (let r = 0; r < N / COLS; r++) {
+    const desk = new THREE.Mesh(new THREE.BoxGeometry(COLS * DX - 14, 2, 74), deskMat);
+    desk.position.set((COLS - 1) * DX / 2 + 72, -3, r * DZ - 16);
+    group.add(desk);
+  }
+  scene.add(group); fleet.group = group;
+  CENTER.set((COLS - 1) * DX / 2 + 75, 0, (N / COLS - 1) * DZ / 2 - 10);
+  fitFleet();
+  labelBox.innerHTML = "";
+  tags = Array.from({ length: N }, () => { const d = document.createElement("div"); d.className = "tag"; labelBox.appendChild(d); return d; });
+  $("cells").style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+  camera.position.copy(fleetView.pos); controls.target.copy(fleetView.target); controls.update();
+  showLook();
+}
+// ---------- the one-rig view: the chosen rig in the first model's look (blocks, shadows, glowing LEDs) -------
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const hero = new THREE.Group(); hero.visible = false; scene.add(hero);
+hero.add(parts.fixed.mesh());
+const heroSlide = new THREE.Group(); heroSlide.add(parts.slide.mesh()); hero.add(heroSlide);
+const heroRotor = new THREE.Group(); heroRotor.add(parts.rotor.mesh([.5, 0, .5]));
+heroRotor.position.set(R.FAN[0], 0, R.FAN[2]); hero.add(heroRotor);
+{
+  const desk = new R.Voxels();
+  for (let x = -16; x < 168; x += 4) for (let z = -56; z < 16; z += 4) {
+    const k = ((x * 7 + z * 13) % 5 + 5) % 5;
+    desk.box(x, x + 4, -4, -2, z, z + 4, [0x6b4a2f, 0x664629, 0x70503a, 0x5f4128, 0x6a4b33][k], .03);
+  }
+  const m = desk.mesh(); m.castShadow = false; hero.add(m);
+}
+const heroLed = (x, color, dim) => {
+  const mat = new THREE.MeshStandardMaterial({ color: dim, emissive: color, emissiveIntensity: 0, roughness: .3 });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1, 1.6), mat); m.position.set(x, R.LEDS.y, R.LEDS.z); hero.add(m);
+  const glow = new THREE.PointLight(color, 0, 14); glow.position.set(x, R.LEDS.y + 1.5, R.LEDS.z); hero.add(glow);
+  return { mat, glow, dim };
+};
+const heroShut = heroLed(R.LEDS.shut, 0xff1a10, 0x4a1210), heroOpen = heroLed(R.LEDS.open, 0x14e03a, 0x103f1a);
+function heroValve(open) {
+  for (const [l, on] of [[heroShut, !open], [heroOpen, open]]) {
+    l.mat.emissiveIntensity = on ? 1 : 0; l.mat.color.set(on ? 0x000000 : l.dim); l.glow.intensity = on ? .5 : 0;
+  }
+}
+const heroSun = new THREE.DirectionalLight(0xffffff, .6);
+heroSun.castShadow = true; heroSun.shadow.mapSize.set(2048, 2048);
+Object.assign(heroSun.shadow.camera, { left: -120, right: 120, top: 90, bottom: -90, near: 10, far: 500 });
+heroSun.visible = false; scene.add(heroSun, heroSun.target);
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+// in the one-rig view the hero stands where the chosen rig is, and that rig's simple copy is hidden
+function placeHero() {
+  const one = S.mode === "one";
+  hero.visible = heroSun.visible = one; mark.visible = !one;
+  const [x, , z] = origin(S.sel);
+  hero.position.set(x, 0, z);
+  heroSun.position.set(x - 60, 160, z + 120); heroSun.target.position.set(x + 70, 0, z - 10);
+  for (const set of Object.values(fleet.sets)) {
+    SC.makeScale(set.k, set.k, set.k);
+    for (let i = 0; i < N; i++) {
+      const [xi, , zi] = origin(i);
+      set.fixed.setMatrixAt(i, one && i === S.sel ? ZERO : M.makeTranslation(xi, 0, zi).multiply(SC));
+    }
+    set.fixed.instanceMatrix.needsUpdate = true;
+  }
+}
+
+// the fine look when there are few rigs or one is looked at, else the coarse one
+function look() { return N <= 32 || S.mode === "one" ? "fine" : "coarse"; }
+function showLook() {
+  for (const [name, set] of Object.entries(fleet.sets)) for (const m of [set.fixed, set.slide, set.rotor]) m.visible = name === look();
+  if (fleet.group) placeHero();
+}
 let camGoal = null;
-function goFleet() { camGoal = { pos: fleetView.pos.clone(), target: fleetView.target.clone() }; }
+// far enough that every rig fits the view (its width and its depth), seen from the front and above
+function fitFleet() {
+  const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), tanH = tanV * camera.aspect;
+  const d = Math.max((COLS * DX / 2 + 30) / tanH * 1.15, (N / COLS * DZ / 2 + 60) / tanV * 1.25);
+  fleetView.target.copy(CENTER).add(new THREE.Vector3(0, 0, 20));
+  fleetView.pos.copy(fleetView.target).add(new THREE.Vector3(0, .78 * d, .62 * d));
+}
+function goFleet() { fitFleet(); camGoal = { pos: fleetView.pos.clone(), target: fleetView.target.clone() }; }
 function goOne(i) {
   const [x, , z] = origin(i);
   const t = new THREE.Vector3(x + 74, 4, z - 10);
@@ -188,13 +282,6 @@ function goOne(i) {
   const d = Math.max(110 / Math.tan(half), 200);
   camGoal = { pos: t.clone().add(new THREE.Vector3(0, .5 * d, .87 * d)), target: t };
 }
-camera.position.copy(fleetView.pos); controls.target.copy(fleetView.target); controls.update();
-
-// labels over the rigs (number and this step's error)
-const labelBox = $("labels");
-const tags = Array.from({ length: N }, (_, i) => {
-  const d = document.createElement("div"); d.className = "tag"; labelBox.appendChild(d); return d;
-});
 
 // ---------- state ------------------------------------------------------------------------------------
 const S = { runs: [], run: null, index: null, cache: {}, data: null, step: null, sel: 0, t: 0, playing: false,
@@ -219,6 +306,9 @@ async function loadStep(step) {
   const meta = S.index.saved.find(s => s.step === step);
   S.cache[step] = S.cache[step] || await getJSON(`data/${S.run}/${meta.file}`);
   S.data = S.cache[step]; S.step = step;
+  buildFleet(S.data.rigs.length);
+  if (S.sel >= N) S.sel = 0;
+  $("cellsTitle").textContent = `この回の ${N} 台`;
   for (const r of S.data.rigs) for (const k of ["voice", "air", "sounding", "valid"]) if (typeof r[k] === "string")
     r[k] = Uint8Array.from(r[k], c => c === "1");
   $("steps").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", +b.dataset.step === step));
@@ -284,6 +374,7 @@ function selectRig(i) {
   $("params").innerHTML = rows.join("");
   $("cells").querySelectorAll("div").forEach(d => d.classList.toggle("sel", +d.dataset.i === i));
   const [x, , z] = origin(i); mark.position.set(x + 74, -1.6, z - 16);
+  placeHero();
   $("where").textContent = `#${i + 1} を選択中`;
   if (S.mode === "one") goOne(i);
   drawGraphs();
@@ -392,15 +483,34 @@ function frame(now) {
     }
     const k = Math.floor(S.t);
     fanAngle -= dt * (S.playing ? 14 : 2);
+    const set = fleet.sets[look()];
+    SC.makeScale(set.k, set.k, set.k);
+    const one = S.mode === "one";
+    // the coarse look's valve box is a little taller: its LEDs sit on top of it, a little bigger
+    const ledY = set.k === 2 ? 16.6 : R.LEDS.y, LS = new THREE.Matrix4().makeScale(set.k === 2 ? 1.5 : 1, 1, set.k === 2 ? 1.5 : 1);
     for (let i = 0; i < N; i++) {
       const r = S.data.rigs[i], [x, , z] = origin(i);
-      slideMesh.setMatrixAt(i, M.makeTranslation(x + R.slideX(r.position[k] / 1000), 0, z));
-      rotorMesh.setMatrixAt(i, M.makeTranslation(x + R.FAN[0], 0, z + R.FAN[2]).multiply(Q.makeRotationY(fanAngle + i)));
-      ledShut.setColorAt(i, r.air[k] ? dim.shut : dim.shutOn);
-      ledOpen.setColorAt(i, r.air[k] ? dim.openOn : dim.open);
+      if (one && i === S.sel) {
+        set.slide.setMatrixAt(i, ZERO); set.rotor.setMatrixAt(i, ZERO);
+        fleet.ledShut.setMatrixAt(i, ZERO); fleet.ledOpen.setMatrixAt(i, ZERO);
+        continue;
+      }
+      set.slide.setMatrixAt(i, M.makeTranslation(x + R.slideX(r.position[k] / 1000), 0, z).multiply(SC));
+      set.rotor.setMatrixAt(i, M.makeTranslation(x + R.FAN[0], 0, z + R.FAN[2]).multiply(Q.makeRotationY(fanAngle + i)).multiply(SC));
+      fleet.ledShut.setMatrixAt(i, M.makeTranslation(x + R.LEDS.shut, ledY, z + R.LEDS.z).multiply(LS));
+      fleet.ledOpen.setMatrixAt(i, M.makeTranslation(x + R.LEDS.open, ledY, z + R.LEDS.z).multiply(LS));
+      fleet.ledShut.setColorAt(i, r.air[k] ? dim.shut : dim.shutOn);
+      fleet.ledOpen.setColorAt(i, r.air[k] ? dim.openOn : dim.open);
     }
-    for (const m of [slideMesh, rotorMesh]) m.instanceMatrix.needsUpdate = true;
-    for (const m of [ledShut, ledOpen]) m.instanceColor.needsUpdate = true;
+    for (const m of [fleet.ledShut, fleet.ledOpen]) m.instanceMatrix.needsUpdate = true;
+    if (one) {
+      const r = S.data.rigs[S.sel];
+      heroSlide.position.x = R.slideX(r.position[k] / 1000);
+      heroRotor.rotation.y = fanAngle;
+      heroValve(!!r.air[k]);
+    }
+    for (const m of [set.slide, set.rotor]) m.instanceMatrix.needsUpdate = true;
+    for (const m of [fleet.ledShut, fleet.ledOpen]) m.instanceColor.needsUpdate = true;
     $("time").textContent = `${(S.t * S.data.dt).toFixed(2)} / ${((S.data.steps - 1) * S.data.dt).toFixed(2)} s`;
     drawPlayheads(); updateSound(k);
     // labels
@@ -442,8 +552,8 @@ $("seek").oninput = (e) => { S.t = +e.target.value; };
 $("speed").onchange = (e) => { S.speed = +e.target.value; };
 $("sound").onclick = () => soundOn(!audio.on);
 $("run").onchange = (e) => loadRun(e.target.value);
-$("modeAll").onclick = () => { S.mode = "all"; $("modeAll").setAttribute("aria-pressed", true); $("modeOne").setAttribute("aria-pressed", false); goFleet(); };
-$("modeOne").onclick = () => { S.mode = "one"; $("modeOne").setAttribute("aria-pressed", true); $("modeAll").setAttribute("aria-pressed", false); goOne(S.sel); };
+$("modeAll").onclick = () => { S.mode = "all"; showLook(); $("modeAll").setAttribute("aria-pressed", true); $("modeOne").setAttribute("aria-pressed", false); goFleet(); };
+$("modeOne").onclick = () => { S.mode = "one"; showLook(); $("modeOne").setAttribute("aria-pressed", true); $("modeAll").setAttribute("aria-pressed", false); goOne(S.sel); };
 addEventListener("keydown", (e) => { if (e.code === "Space" && e.target.tagName !== "SELECT") { e.preventDefault(); setPlaying(!S.playing); } });
 // click a rig in the scene to choose it
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
@@ -454,7 +564,8 @@ renderer.domElement.addEventListener("pointerup", (e) => {
   const rect = renderer.domElement.getBoundingClientRect();
   mouse.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1);
   ray.setFromCamera(mouse, camera);
-  const hit = ray.intersectObjects([fixedMesh, slideMesh])[0];
+  const set = fleet.sets[look()];
+  const hit = ray.intersectObjects([set.fixed, set.slide])[0];
   if (hit && hit.instanceId != null) selectRig(hit.instanceId);
 });
 
