@@ -49,6 +49,9 @@
   .tag { position: absolute; transform: translate(-50%, -100%); font-size: 10px; padding: 1px 5px; border-radius: 3px;
     background: rgba(23, 25, 29, .8); border: 1px solid var(--line); white-space: nowrap; }
   .tag.sel { border-color: var(--accent); color: var(--accent); }
+  .part { position: absolute; transform: translate(-50%, -100%); font-size: 11px; padding: 2px 7px; border-radius: 4px;
+    background: rgba(23, 25, 29, .85); border: 1px solid var(--line); white-space: nowrap; }
+  .part::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 10px; background: #6b717b; }
   canvas.chart { width: 100%; display: block; background: #1a1d21; border-radius: 6px; }
   .legend { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 11px; margin: 4px 0; }
   .legend i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; }
@@ -89,9 +92,11 @@
   <section class="center">
     <div id="view"></div>
     <div id="labels"></div>
+    <div id="partLabels" style="position:absolute;inset:0;pointer-events:none"></div>
     <div class="topbar">
       <button id="modeAll" aria-pressed="true">全台</button>
       <button id="modeOne" aria-pressed="false">1 台</button>
+      <button id="partNames" aria-pressed="true" title="1 台表示のときの部品名">部品名</button>
       <span class="title" id="where"></span>
     </div>
     <div class="transport">
@@ -149,7 +154,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="rig.js"></script>
+<script src="rig.js?v=3"></script>
 <script>
 const R = window.YamabikoRig;
 let N = 32, COLS = 4;                       // set from the data (32 or 128 rigs)
@@ -332,6 +337,23 @@ function goOne(i) {
   const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect);
   const d = Math.max(110 / Math.tan(half), 200);
   camGoal = { pos: t.clone().add(new THREE.Vector3(0, .5 * d, .87 * d)), target: t };
+}
+
+// the parts' names, over the chosen rig in the one-rig view (the 部品名 button shows / hides them)
+const partBox = $("partLabels");
+const partTags = R.PARTS.map(([t]) => { const d = document.createElement("div"); d.className = "part"; d.textContent = t; partBox.appendChild(d); return d; });
+let partsOn = true;
+function placeParts(k) {
+  const show = partsOn && S.mode === "one" && !camGoal;
+  partBox.style.display = show ? "" : "none";
+  if (!show) return;
+  const [x0, , z0] = origin(S.sel), w = view.clientWidth, h = view.clientHeight, r = S.data.rigs[S.sel];
+  R.PARTS.forEach(([, p], i) => {
+    p ? v3.set(x0 + p[0], p[1], z0 + p[2]) : v3.set(x0 + R.slideX(r.position[k] / 1000) + 60, 15, z0 + 2);
+    v3.project(camera);
+    partTags[i].style.left = `${(v3.x + 1) / 2 * w}px`; partTags[i].style.top = `${(1 - v3.y) / 2 * h - 10}px`;
+    partTags[i].style.display = v3.z < 1 ? "" : "none";
+  });
 }
 
 // ---------- state ------------------------------------------------------------------------------------
@@ -678,7 +700,7 @@ function frame(now) {
     for (const m of [set.slide, set.rotor]) m.instanceMatrix.needsUpdate = true;
     for (const m of [fleet.ledShut, fleet.ledOpen]) m.instanceColor.needsUpdate = true;
     $("time").textContent = `${(S.t * S.data.dt).toFixed(2)} / ${((S.data.steps - 1) * S.data.dt).toFixed(2)} s`;
-    drawPlayheads(); updateSound(k);
+    drawPlayheads(); updateSound(k); placeParts(k);
     // labels
     const w = view.clientWidth, h = view.clientHeight;
     for (let i = 0; i < N; i++) {
@@ -716,6 +738,7 @@ function setPlaying(on) {
 $("play").onclick = () => setPlaying(!S.playing);
 $("seek").oninput = (e) => { S.t = +e.target.value; };
 $("speed").onchange = (e) => { S.speed = +e.target.value; };
+$("partNames").onclick = () => { partsOn = !partsOn; $("partNames").setAttribute("aria-pressed", partsOn); };
 $("loop").onclick = () => { S.loop = !S.loop; $("loop").setAttribute("aria-pressed", S.loop); };
 $("sound").onclick = () => soundOn(!audio.on);
 $("run").onchange = (e) => loadRun(e.target.value);

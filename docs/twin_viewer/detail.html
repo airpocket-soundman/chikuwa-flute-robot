@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>やまびこ1号 詳細模型</title>
+<style>
+  :root { --bg: #17191d; --panel: rgba(23, 25, 29, .86); --line: #343840; --text: #e8e6e1; --muted: #9aa0a8;
+    --accent: #f0b429; --target: #8a9099; --played: #4fa3ff; --air: #2fd16a; --fan: #7dd3fc; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", sans-serif; font-size: 13px; }
+  #view { position: fixed; inset: 0; }
+  header { position: fixed; top: 14px; left: 16px; right: 16px; pointer-events: none; }
+  h1 { margin: 0; font-size: 17px; }
+  header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+  .bar { position: fixed; left: 16px; top: 64px; display: flex; gap: 6px; flex-wrap: wrap; }
+  button, select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 10px; font: inherit; cursor: pointer; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .dock { position: fixed; left: 16px; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px 10px 10px; }
+  .transport { display: flex; gap: 8px; align-items: center; }
+  .transport input[type=range] { flex: 1; accent-color: var(--accent); }
+  .time { color: var(--muted); min-width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
+  canvas#graph { display: block; width: 100%; height: 150px; margin-top: 8px; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .legend i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  .readout { position: fixed; right: 16px; top: 64px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; font-variant-numeric: tabular-nums; line-height: 1.7; min-width: 180px; }
+  .readout b { color: var(--accent); font-weight: 600; }
+  .label { position: absolute; transform: translate(-50%, -100%); padding: 2px 7px; font-size: 11px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 4px; white-space: nowrap; pointer-events: none; }
+  #labels { position: fixed; inset: 0; pointer-events: none; }
+  #labels.hidden { display: none; }
+  @media (max-width: 700px) { .readout { top: auto; bottom: 250px; } canvas#graph { height: 110px; } }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="labels"></div>
+<header>
+  <h1>やまびこ1号 — 詳細模型</h1>
+  <p>ケーブルまで描いた模型に、ダミーの演奏データ（ドレミファミレド）を流しています。ドラッグで回転、ホイールで拡大。</p>
+</header>
+<div class="bar">
+  <button id="names" aria-pressed="true">部品名</button>
+  <button id="home">視点を戻す</button>
+  <button onclick="location.href='index.html'">簡単な模型</button>
+  <button onclick="location.href='fleet.html'">学習ビューア</button>
+</div>
+<div class="readout" id="readout"></div>
+<div class="dock">
+  <div class="transport">
+    <button id="play">▶ 再生</button>
+    <input id="seek" type="range" min="0" max="100" value="0" step="1">
+    <select id="speed"><option value="0.25">0.25 倍</option><option value="0.5">0.5 倍</option><option value="1" selected>1 倍</option>
+      <option value="2">2 倍</option><option value="4">4 倍</option><option value="8">8 倍</option><option value="16">16 倍</option><option value="32">32 倍</option></select>
+    <button id="loop" aria-pressed="true">🔁 くり返し</button>
+    <button id="sound" aria-pressed="false">🔇 音 オフ</button>
+    <span class="time" id="time"></span>
+  </div>
+  <canvas id="graph"></canvas>
+  <div class="legend"><span><i style="background:var(--target)"></i>目標の音程</span><span><i style="background:var(--played)"></i>出た音程</span>
+    <span><i style="background:#c9ccd1"></i>台車の位置</span><span><i style="background:var(--air)"></i>弁 開</span><span><i style="background:var(--fan)"></i>ファン</span></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="rig.js?v=3"></script>
+<script>
+const R = window.YamabikoRig, $ = (id) => document.getElementById(id);
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// ---------- scene ------------------------------------------------------------------------------------
+const view = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x17191d);
+const camera = new THREE.PerspectiveCamera(32, 1, .3, 20000);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.minDistance = 2; controls.maxDistance = 10000;
+const HOME = { pos: new THREE.Vector3(70, 95, 150), target: new THREE.Vector3(74, 2, -14) };
+const goHome = () => { camera.position.copy(HOME.pos); controls.target.copy(HOME.target); controls.update(); };
+goHome();
+scene.add(new THREE.HemisphereLight(0xfff4e6, 0x3a3028, .55));
+const sun = new THREE.DirectionalLight(0xffffff, .85);
+sun.position.set(-60, 170, 120); sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.bias = -.0005;
+Object.assign(sun.shadow.camera, { left: -130, right: 130, top: 100, bottom: -100, near: 10, far: 520 });
+sun.target.position.set(74, 0, -14); scene.add(sun, sun.target);
+
+const built = R.build();
+// desk: 1 cm blocks of wood, a shade per 4 x 4 tile
+const desk = new R.Voxels();
+for (let x = -24; x < 176; x += 4) for (let z = -64; z < 20; z += 4) {
+  const k = ((x * 7 + z * 13) % 5 + 5) % 5;
+  desk.box(x, x + 4, -4, -2, z, z + 4, [0x6b4a2f, 0x664629, 0x70503a, 0x5f4128, 0x6a4b33][k], .03);
+}
+scene.add(desk.mesh());
+scene.add(built.fixed.mesh());
+const fanRotor = new THREE.Group(); fanRotor.add(built.rotor.mesh([.5, 0, .5]));
+fanRotor.position.set(R.FAN[0], 0, R.FAN[2]); scene.add(fanRotor);
+const slider = new THREE.Group(); slider.add(built.slide.mesh()); scene.add(slider);
+
+// ---------- the finer details: cables in 0.5 cm blocks, connectors -------------------------------------
+const FINE = .5;
+const fine = new R.Voxels();                       // in 0.5 cm units, drawn at half size
+const put = (p, color, jitter = .05) => fine.set(Math.round(p.x / FINE), Math.round(p.y / FINE), Math.round(p.z / FINE), color, jitter);
+// a cable of several strands along a smooth path: ribbon (side by side) or twisted
+function cable(points, colors, { twist = 0, gap = .55 } = {}) {
+  const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+  const len = curve.getLength(), steps = Math.ceil(len / .2);
+  const up = new THREE.Vector3(0, 1, 0), side = new THREE.Vector3(), nrm = new THREE.Vector3(), p = new THREE.Vector3();
+  for (let i = 0; i <= steps; i++) {
+    const u = i / steps, at = curve.getPointAt(u), tan = curve.getTangentAt(u);
+    side.crossVectors(tan, up); if (side.lengthSq() < 1e-6) side.set(1, 0, 0); side.normalize();
+    nrm.crossVectors(side, tan).normalize();
+    colors.forEach((c, j) => {
+      const off = (j - (colors.length - 1) / 2) * gap, a = twist * u * len + j * 2 * Math.PI / colors.length;
+      if (twist) p.copy(at).addScaledVector(side, Math.cos(a) * gap * .7).addScaledVector(nrm, Math.sin(a) * gap * .7);
+      else p.copy(at).addScaledVector(side, off);
+      put(p, c);
+    });
+  }
+}
+const W = { red: 0xd23b2f, black: 0x232327, yellow: 0xe8c440, blue: 0x3d6fe0, white: 0xe8e6e0, orange: 0xe07b2f, brown: 0x6b3f22 };
+// microphone: 4 wires from the mic board down to the boards' header
+cable([[28.5, 22.5, -3.5], [31, 26, -6], [40, 22, -12], [58, 14, -16], [72, 9.5, -15]], [W.red, W.black, W.yellow, W.white]);
+// fan: a twisted 4-wire cable round to the boards
+cable([[17, 10, -37], [26, 6, -36], [42, 2, -32], [62, 3, -27], [81, 9.5, -22]], [W.red, W.black, W.yellow, W.blue], { twist: 1.4 });
+// servo: brown / red / orange from the servo on the valve box
+cable([[6.5, 17, -16], [12, 19, -20], [24, 12, -26], [48, 4, -28], [71, 9.5, -22]], [W.brown, W.red, W.orange]);
+// actuator: red and black from its end cap to the motor driver
+cable([[161, 9, -3.5], [158, 13, -8], [140, 14, -14], [118, 12, -18], [99.5, 9.5, -18]], [W.red, W.black]);
+// power: a thick black cable from the jack off the back of the desk
+for (const d of [-.35, .35]) cable([[97.5, 9.5, -20.5 + d], [104, 4, -28 + d], [118, -1.4, -40 + d], [150, -1.4, -60 + d]], [W.black]);
+// connectors on the boards (where the cables land) and on the mic board
+const conn = (x0, x1, y0, y1, z0, z1, c) => { for (let x = x0; x < x1; x += FINE) for (let y = y0; y < y1; y += FINE) for (let z = z0; z < z1; z += FINE) put(new THREE.Vector3(x, y, z), c, .02); };
+conn(70.5, 74, 8, 9.5, -16.5, -13.5, 0xf2f0ea); conn(79.5, 83, 8, 9.5, -23.5, -20.5, 0xf2f0ea);
+conn(69.5, 73, 8, 9.5, -23.5, -20.5, 0xf2f0ea); conn(97.5, 100.5, 8, 9.5, -19.5, -16.5, 0x2a6a3a);
+conn(27.5, 30.5, 21.5, 23, -4, -3, 0xf2f0ea);
+const fineMesh = fine.mesh(); fineMesh.scale.setScalar(FINE); scene.add(fineMesh);
+
+// LEDs on the valve box: red = shut, green = open
+function led(x, color, dim) {
+  const mat = new THREE.MeshStandardMaterial({ color: dim, emissive: color, emissiveIntensity: 0, roughness: .3 });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1, 1.6), mat); m.position.set(x, R.LEDS.y, R.LEDS.z); scene.add(m);
+  const glow = new THREE.PointLight(color, 0, 14); glow.position.set(x, R.LEDS.y + 1.5, R.LEDS.z); scene.add(glow);
+  return { mat, glow, dim };
+}
+const ledShut = led(R.LEDS.shut, 0xff1a10, 0x4a1210), ledOpen = led(R.LEDS.open, 0x14e03a, 0x103f1a);
+function setValve(open) {
+  for (const [l, on] of [[ledShut, !open], [ledOpen, open]]) {
+    l.mat.emissiveIntensity = on ? 1 : 0; l.mat.color.set(on ? 0x000000 : l.dim); l.glow.intensity = on ? .5 : 0;
+  }
+}
+
+// ---------- labels ---------------------------------------------------------------------------------------
+const PARTS = [...R.PARTS, ["電源", [112, 3, -34]]];
+const labelBox = $("labels");
+const labels = PARTS.map(([t]) => { const d = document.createElement("div"); d.className = "label"; d.textContent = t; labelBox.appendChild(d); return d; });
+const v3 = new THREE.Vector3();
+function placeLabels() {
+  const w = innerWidth, h = innerHeight;
+  PARTS.forEach(([, p], i) => {
+    p ? v3.set(...p) : v3.set(slider.position.x + 60, 15, 2);
+    v3.project(camera);
+    labels[i].style.left = `${(v3.x + 1) / 2 * w}px`; labels[i].style.top = `${(1 - v3.y) / 2 * h - 12}px`;
+    labels[i].style.display = v3.z < 1 ? "" : "none";
+  });
+}
+
+// ---------- dummy play data (same fields as the training records) ------------------------------------------
+// ドレミファミレド, with the fan's spin-up and homing before it, as the server plays a song
+function dummy() {
+  const dt = .01, notes = [[0, .5], [200, .5], [400, .5], [500, .5], [400, .5], [200, .5], [0, 1.0]];
+  const WARM = 300, HOME_S = 130, LEAD = 60, TAIL = 60;
+  const cents = [], voice = [];
+  for (let i = 0; i < WARM + HOME_S + LEAD; i++) { cents.push(notes[0][0]); voice.push(0); }
+  for (const [c, s] of notes) { const n = Math.round(s / dt); for (let i = 0; i < n; i++) { cents.push(c); voice.push(i < n - 6 ? 1 : 0); } }
+  for (let i = 0; i < TAIL; i++) { cents.push(notes[notes.length - 1][0]); voice.push(0); }
+  const T = cents.length, posOf = (c) => (c + 10) / 1210;            // the twin's flute: about -10 .. 1200 cent over the stroke
+  const position = [], pitch = [], air = [], sounding = [], fan = [], pwm = [];
+  let x = .5, v = 0;
+  for (let k = 0; k < T; k++) {
+    let u = 0;
+    if (k < WARM) u = 0; else if (k < WARM + HOME_S) u = -1;
+    else { const ahead = cents[Math.min(k + 12, T - 1)]; u = Math.max(-1, Math.min(1, 6 * (posOf(ahead) - x) - 1.2 * v)); }
+    // a slow plunger with friction: velocity follows the command, stops in a small dead band
+    v += (u * .9 - v) * .12; if (Math.abs(u) < .06) v *= .5;
+    x = Math.max(0, Math.min(1, x + v * dt * 1.6));
+    const f = k < WARM ? .8 * (1 - Math.exp(-k / 80)) : .8;
+    const open = k >= WARM + HOME_S && voice[Math.min(k + 3, T - 1)] === 1;      // the valve opens a little ahead
+    position.push(Math.round(x * 1000)); pwm.push(Math.round(u * 1000)); fan.push(f);
+    air.push(open ? 1 : 0);
+    const sounds = open && f > .6;
+    sounding.push(sounds ? 1 : 0);
+    pitch.push(Math.round(x * 1210 - 10 + (f - .8) * 90));
+  }
+  return { dt, steps: T, cents, voice, pitch, position, pwm, air, sounding, fan, warm: WARM, homing: HOME_S };
+}
+const D = dummy();
+$("seek").max = D.steps - 1;
+
+// ---------- graph ----------------------------------------------------------------------------------------
+let graphImg = null;
+function drawGraph() {
+  const c = $("graph"), dpr = Math.min(devicePixelRatio, 2), w = c.clientWidth, h = c.clientHeight;
+  c.width = w * dpr; c.height = h * dpr; const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const T = D.steps, X = k => 40 + (w - 46) * k / (T - 1), Y = v => 6 + (h - 34) * (1 - (v + 100) / 800);
+  g.font = "10px sans-serif"; g.fillStyle = css("--muted"); g.strokeStyle = "#2b2f36";
+  for (let v = 0; v <= 600; v += 200) { g.beginPath(); g.moveTo(40, Y(v)); g.lineTo(w - 6, Y(v)); g.stroke(); g.fillText(v, 6, Y(v) + 3); }
+  for (let s = 0; s * 100 < T; s += 2) g.fillText(s + "s", X(s * 100) - 6, h - 2);
+  g.fillStyle = "rgba(255,255,255,.04)"; g.fillRect(X(0), 0, X(D.warm) - X(0), h - 26);
+  g.fillStyle = "rgba(255,255,255,.08)"; g.fillRect(X(D.warm), 0, X(D.warm + D.homing) - X(D.warm), h - 26);
+  g.fillStyle = css("--muted"); g.fillText("ファン立ち上げ", X(20), 14); g.fillText("原点出し", X(D.warm) + 4, 14);
+  const seg = (arr, on, col, lw) => { g.strokeStyle = col; g.lineWidth = lw; g.beginPath(); let pen = false;
+    for (let k = 0; k < T; k++) { if (on && !on[k]) { pen = false; continue; } pen ? g.lineTo(X(k), Y(arr[k])) : g.moveTo(X(k), Y(arr[k])); pen = true; } g.stroke(); };
+  seg(D.cents, D.voice, css("--target"), 4);
+  seg(D.position.map(p => p / 1000 * 600), null, "#c9ccd1", 1);
+  seg(D.pitch, D.sounding, css("--played"), 1.6);
+  for (let k = 0; k < T; k++) if (D.air[k]) { g.fillStyle = css("--air"); g.fillRect(X(k), h - 24, (w - 46) / T + .5, 5); }
+  g.strokeStyle = css("--fan"); g.lineWidth = 1.2; g.beginPath();
+  D.fan.forEach((f, k) => { const y = h - 12 - f * 8; k ? g.lineTo(X(k), y) : g.moveTo(X(k), y); }); g.stroke();
+  g.fillStyle = css("--muted"); g.fillText("弁", 24, h - 18); g.fillText("ファン", 6, h - 8);
+  graphImg = { img: g.getImageData(0, 0, c.width, c.height), X, g };
+}
+function playhead(t) {
+  if (!graphImg) return;
+  const { g, img, X } = graphImg;
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.putImageData(img, 0, 0); g.restore();
+  g.strokeStyle = css("--accent"); g.beginPath(); g.moveTo(X(t), 0); g.lineTo(X(t), 999); g.stroke();
+}
+
+// ---------- sound --------------------------------------------------------------------------------------
+const audio = { ctx: null, on: false };
+function soundOn(on) {
+  audio.on = on; $("sound").setAttribute("aria-pressed", on); $("sound").textContent = on ? "🔊 音 オン" : "🔇 音 オフ";
+  if (on && !audio.ctx) {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)(), gain = ctx.createGain(); gain.gain.value = 0;
+    const tone = ctx.createOscillator(); tone.type = "triangle"; const over = ctx.createOscillator(); over.type = "sine";
+    const og = ctx.createGain(); og.gain.value = .25; const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3500;
+    tone.connect(gain); over.connect(og).connect(gain); gain.connect(lp).connect(ctx.destination); tone.start(); over.start();
+    Object.assign(audio, { ctx, gain, tone, over });
+  }
+  if (audio.ctx) on ? audio.ctx.resume() : audio.gain.gain.setTargetAtTime(0, audio.ctx.currentTime, .02);
+}
+
+// ---------- playback ----------------------------------------------------------------------------------------
+const P = { t: 0, playing: false, speed: 1, loop: true };
+let last = performance.now(), fanAngle = 0;
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, .1); last = now;
+  if (P.playing) {
+    P.t += dt / D.dt * P.speed;
+    if (P.t >= D.steps - 1) { if (P.loop) P.t %= D.steps - 1; else { P.t = D.steps - 1; setPlaying(false); } }
+    $("seek").value = Math.floor(P.t);
+  }
+  const k = Math.floor(P.t);
+  fanAngle -= dt * 18 * D.fan[k] * (P.playing ? P.speed : 0) ** .5;
+  fanRotor.rotation.y = fanAngle;
+  slider.position.x = R.slideX(D.position[k] / 1000);
+  setValve(!!D.air[k]);
+  $("time").textContent = `${(P.t * D.dt).toFixed(2)} / ${((D.steps - 1) * D.dt).toFixed(2)} s`;
+  $("readout").innerHTML = `ファン <b>${Math.round(D.fan[k] * 100)} %</b><br>PWM <b>${(D.pwm[k] / 1000).toFixed(2)}</b><br>`
+    + `台車の位置 <b>${(D.position[k] / 1000).toFixed(3)}</b><br>弁 <b>${D.air[k] ? "開" : "閉"}</b><br>`
+    + `目標 <b>${D.voice[k] ? D.cents[k] + " cent" : "—"}</b><br>出た音 <b>${D.sounding[k] ? D.pitch[k] + " cent" : "—"}</b>`;
+  playhead(P.t);
+  if (audio.ctx && audio.on) {
+    const hz = 440 * Math.pow(2, (D.pitch[k] + 300) / 1200), t0 = audio.ctx.currentTime;   // C5 = 0 in the dummy
+    audio.tone.frequency.setTargetAtTime(hz, t0, .005); audio.over.frequency.setTargetAtTime(hz * 2, t0, .005);
+    audio.gain.gain.setTargetAtTime(P.playing && D.sounding[k] ? .12 : 0, t0, .01);
+  }
+  controls.update(); renderer.render(scene, camera); placeLabels();
+  requestAnimationFrame(frame);
+}
+function setPlaying(on) { if (on && P.t >= D.steps - 1) P.t = 0; P.playing = on; $("play").textContent = on ? "❚❚ 停止" : "▶ 再生"; }
+$("play").onclick = () => setPlaying(!P.playing);
+$("seek").oninput = (e) => { P.t = +e.target.value; };
+$("speed").onchange = (e) => { P.speed = +e.target.value; };
+$("loop").onclick = () => { P.loop = !P.loop; $("loop").setAttribute("aria-pressed", P.loop); };
+$("sound").onclick = () => soundOn(!audio.on);
+$("home").onclick = goHome;
+$("names").onclick = () => { const on = labelBox.classList.toggle("hidden") === false; $("names").setAttribute("aria-pressed", on); };
+addEventListener("keydown", (e) => { if (e.code === "Space" && e.target.tagName !== "SELECT") { e.preventDefault(); setPlaying(!P.playing); } });
+function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); drawGraph(); }
+addEventListener("resize", resize); resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

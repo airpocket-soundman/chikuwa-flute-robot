@@ -171,5 +171,10 @@
   // the carriage's x offset for the twin's plunger position (0 = homed at the right, 1 = pushed in)
   const slideX = (position) => SLIDE_HOME + (1 - Math.min(Math.max(position, 0), 1)) * STROKE;
 
-  window.YamabikoRig = { C, Voxels, build, STROKE, SLIDE_HOME, FAN, LEDS, slideX };
+  // the parts' names and where their labels go (null: over the carriage, which moves)
+  const PARTS = [["遠心ファン", [4, 19, -38]], ["弁（サーボ SG90、LED 赤=閉 緑=開）", [4, 23, -16]],
+    ["スライドホイッスル", [40, 13, 2]], ["台車", null], ["DC リニアアクチュエータ", [146, 13, 0]],
+    ["Arduino UNO Q ＋ 自作基板", [84, 15, -17]], ["MEMS マイク", [29, 26, -4]]];
+
+  window.YamabikoRig = { C, Voxels, build, STROKE, SLIDE_HOME, FAN, LEDS, slideX, PARTS };
 })();

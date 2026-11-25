@@ -39,7 +39,7 @@
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="rig.js"></script>
+<script src="rig.js?v=3"></script>
 <script>
 const R = window.YamabikoRig, { C, Voxels, STROKE, SLIDE_HOME } = R;
 const built = R.build();
@@ -133,15 +133,7 @@ wire([[7, 19, -16], [16, 10, -16], [50, 1, -16], [86, 9, -22]], 0xe07b2f);
 wire([[128, 9, 3], [116, 13, 4], [104, 10, 0], [96, 9, -14]], 0xd23b2f);
 
 // ---------- labels -----------------------------------------------------------------------------------
-const parts = [
-  ["遠心ファン", [4, 19, -38]],
-  ["弁（サーボ SG90）", [4, 23, -16]],
-  ["スライドホイッスル", [40, 13, 2]],
-  ["スライド（つまみ）", null],
-  ["DC リニアアクチュエータ", [146, 13, 0]],
-  ["Arduino UNO Q ＋ 自作基板", [84, 14, -17]],
-  ["MEMS マイク", [29, 26, -4]],
-];
+const parts = R.PARTS;
 const labelBox = document.getElementById("labels");
 const labels = parts.map(([text]) => {
   const d = document.createElement("div"); d.className = "label"; d.textContent = text; labelBox.appendChild(d); return d;
