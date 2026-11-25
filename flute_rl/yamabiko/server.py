@@ -367,7 +367,9 @@ class Server:
             np.savez_compressed(out, count=len(errors), shift_cents=shift, sr=SR, **records)
         return {"heard_error_cents": errors, "late_steps": rig.late_steps, "out": out, "shift_cents": shift,
                 "stopped": stopped, "practised": practising,
-                "song_memory": bool(getattr(getattr(runtime, "act", runtime), "nn_slot", 0))}
+                # a step learns from practice with a song memory (nn_slot) or the previous play's record (nn_prev)
+                "song_memory": bool(getattr(getattr(runtime, "act", runtime), "nn_slot", 0)
+                                    or getattr(getattr(runtime, "act", runtime), "nn_prev", False))}
 
     def cmd_tune(self, client, req):
         """Today's flute: the home note and one sweep out to the far end and back at ``pwm`` (the end switch
