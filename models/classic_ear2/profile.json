@@ -1,0 +1,40 @@
+{
+  "name": "classic_ear2",
+  "title": "classic_ear2: 古典制御（PID・観測器・規則の弁）を新しいツインで調整し、練習（反復学習制御）を足した版。耳は ear_08",
+  "doc": "docs/classic.md",
+  "runtime": "classic_runtime.npz",
+  "ear": "nn",
+  "fan": 0.8,
+  "low_cents": -10.0,
+  "high_cents": 1200.0,
+  "valve_us": [
+    1560,
+    1820
+  ],
+  "whistle": {
+    "max_gap_steps": 2
+  },
+  "twin": "twin_y1f80_05_runtime.npz",
+  "gains": {
+    "kp": 30.0,
+    "ki": 2.8475220363720783,
+    "kd": 1.4266220817697326,
+    "i_zone": 0.06,
+    "i_max": 0.25,
+    "hold_tol": 0.002,
+    "hold_release": 0.04,
+    "hold_speed": 0.05,
+    "pitch_ki": 0.0005743075117462175,
+    "trim_max": 0.1,
+    "trim_gate_cents": 150.0,
+    "settle_steps": 25,
+    "valve_lead": 3,
+    "valve_gate": 0.023528330496687754,
+    "valve_wait_steps": 25,
+    "ilc_gain": 1.0,
+    "ilc_shift": 14.0,
+    "ilc_smooth": 5.0,
+    "ilc_max": 0.08
+  },
+  "ear_runtime": "ear_08_runtime.npz"
+}

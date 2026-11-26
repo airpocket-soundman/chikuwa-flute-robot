@@ -22,6 +22,11 @@ Every 10 ms:
 5. **Valve**: open ``valve_lead`` steps before a note (the servo's delay), shut for rests; at a note's start
    it waits (at most ``valve_wait_steps``) until the plunger is within ``valve_gate`` of the note, so the
    glide between notes is not heard.
+6. **Practice (iterative learning control)**, with ``ilc_gain`` > 0: every play records the heard pitch
+   error of each instant (as position, put back to the instant it was emitted: the hearing delay); the next
+   play of the same song (``prepare(keep_song_memory=True)``) adds ``ilc_gain`` x that error, smoothed and
+   taken ``ilc_shift`` steps early (the plunger's response), to the position target of each instant.  The
+   corrections add up play after play (clamped to ``ilc_max``), as a player who practises a passage.
 
 ``export(twin_runtime_arrays, **gains)`` makes the ``.npz``: the twin and controller constants of a fitted twin
 runtime (``twin_*_runtime.npz``) plus the gains.  ``residual_numpy.runtime_for`` picks this class for it.
@@ -36,7 +41,7 @@ from .residual_numpy import A4, SPAN, Runtime, period_ms
 
 CLASSIC_FIELDS = ("kp", "ki", "kd", "i_zone", "i_max", "hold_tol", "hold_release", "hold_speed",
                   "pitch_ki", "trim_max", "trim_gate_cents", "settle_steps",
-                  "valve_lead", "valve_gate", "valve_wait_steps")
+                  "valve_lead", "valve_gate", "valve_wait_steps", "ilc_gain", "ilc_shift", "ilc_smooth", "ilc_max")
 
 DEFAULT_GAINS = dict(       # tuned on the NumPy simulator around twin_y1f80_04 (scripts/yamabiko_classic_export.py)
     kp=20.0,                # PWM per stroke of position error
@@ -54,6 +59,10 @@ DEFAULT_GAINS = dict(       # tuned on the NumPy simulator around twin_y1f80_04 
     valve_lead=3,           # valve commands go this many steps ahead (servo + duct)
     valve_gate=.098,        # open at a note's start only within this many strokes of it ...
     valve_wait_steps=25,    # ... or after this many steps at the latest
+    ilc_gain=0.0,           # practice: share of the last play's error added to the target (0: no practice)
+    ilc_shift=8.0,          # ... taken this many steps early
+    ilc_smooth=9.0,         # ... smoothed over this many steps
+    ilc_max=.08,            # ... the correction at most this many strokes
 )
 
 
@@ -72,7 +81,10 @@ class ClassicRuntime(Runtime):
 
     def __init__(self, arrays):
         super().__init__(arrays)
-        self.g = dict(zip(CLASSIC_FIELDS, self.a["classic.gains"].tolist()))
+        values = self.a["classic.gains"].tolist()          # files from before the practice fields: no practice
+        self.g = {**DEFAULT_GAINS, **dict(zip(CLASSIC_FIELDS, values)), **({} if len(values) == len(CLASSIC_FIELDS)
+                                                                            else {"ilc_gain": 0.0})}
+        self.ilc, self.rec = None, None
         self.self_home = False
 
     def position_for(self, cents):
@@ -109,6 +121,21 @@ class ClassicRuntime(Runtime):
             self.trim = getattr(self, "trim", 0.0)
         self.sounded = 0                                 # steps the current note has been heard
         self.valve_open, self.waiting = False, 0
+        # practice: the last play of this song corrects this one
+        g = self.g
+        same = keep_song_memory and self.rec is not None and len(self.rec[0]) == steps
+        if not same or self.ilc is None or len(self.ilc) != steps:
+            self.ilc = np.zeros(steps)
+        if same and g["ilc_gain"] > 0:
+            err, ok = self.rec
+            k = max(1, int(g["ilc_smooth"]))
+            num = np.convolve(np.where(ok, err, 0.0), np.ones(k) / k, "same")
+            den = np.convolve(ok.astype(float), np.ones(k) / k, "same")
+            smooth = np.where(den > .2, num / np.maximum(den, 1e-6), 0.0)
+            shift = int(g["ilc_shift"])
+            early = np.r_[smooth[shift:], np.zeros(shift)] if shift > 0 else smooth
+            self.ilc = np.clip(self.ilc + g["ilc_gain"] * early, -g["ilc_max"], g["ilc_max"])
+        self.rec = (np.zeros(steps), np.zeros(steps, bool))
 
     def _band(self):
         band = self.band
@@ -119,7 +146,7 @@ class ClassicRuntime(Runtime):
 
     def command(self, t):
         g, dt = self.g, self.c["dt"]
-        x_ref = min(max(self.aim_x[t] + self.trim, 0.0), 1.0)
+        x_ref = min(max(self.aim_x[t] + self.trim + self.ilc[t], 0.0), 1.0)
         e = x_ref - self.position
         if self.holding and abs(e) > g["hold_release"]:
             self.holding = False
@@ -176,6 +203,11 @@ class ClassicRuntime(Runtime):
         if self.voice[t] and self.valid:
             self.sounded += 1
         error = self.cents[t] - self.heard
+        then = t - (SPAN - 1 - self.heard_index)          # the instant the heard pitch was emitted
+        if self.valid and 0 <= then < len(self.cents) and self.voice[then] and abs(self.cents[then] - self.heard) < 300:
+            slope = self.position_for(self.cents[then] + 10.0) - self.position_for(self.cents[then] - 10.0)
+            self.rec[0][then] = (self.cents[then] - self.heard) * slope / 20.0
+            self.rec[1][then] = True
         if (self.valid and self.voice[t] and self.sounded >= g["settle_steps"]
                 and abs(error) < g["trim_gate_cents"]):
             slope = self.position_for(self.cents[t] + 10.0) - self.position_for(self.cents[t] - 10.0)
