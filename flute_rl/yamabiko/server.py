@@ -394,7 +394,9 @@ class Server:
 
     def cmd_step8_start(self, client, req):
         """``start``: "listen" or "again"; the runtimes' paths (ear_runtime, memory_runtime, runtime,
-        valve_runtime, heads); ``shift_cents``; ``out`` (where the play's record goes); ``max_seconds``."""
+        valve_runtime, heads); ``shift_cents``; ``out`` (where the play's record goes); ``max_seconds``;
+        ``clip_pcm16_b64`` (optional, 16 kHz): a recorded whistle heard in place of the microphone while it
+        listens, the listening ended by itself when the clip ends (to compare versions on the same whistle)."""
         from .step8 import Step8
         self.take(client)
         key = tuple(req[k] for k in ("ear_runtime", "memory_runtime", "runtime", "valve_runtime", "heads"))
@@ -418,6 +420,8 @@ class Server:
             "input": (0, 1) if again else (1, 0), "pressed": self.buttons(), "fan": None, "modes": [],
             "stopped": None, "audio_start": None, "late": 0,
             "listen_out": req.get("listen_out"), "listen_start": None, "listen_saved": False,
+            "clip": (np.frombuffer(base64.b64decode(req["clip_pcm16_b64"]), "<i2")
+                     if req.get("clip_pcm16_b64") and not again else None), "clip_pos": 320,
             "log": {k: [] for k in ("heard", "valid", "target_cents", "target_voice", "pwm", "valve")}}
         self.step8_result = None
         return {"started": True, "start": "again" if again else "listen"}
@@ -460,7 +464,19 @@ class Server:
         if ses["pressed"] is not None and now not in (None, ses["pressed"]):
             self.log("step8 stopped by the board button")
             return self._step8_end(ses, "button")
-        out = s8.tick(self.link.audio.latest(320), button=b, double=d, shift=ses["shift"])
+        frame = self.link.audio.latest(320)
+        clip = ses["clip"]
+        if clip is not None and (s8.mode == 1 or (b and s8.mode == 0)):   # listening to the recorded whistle
+            if ses["clip_pos"] <= len(clip):
+                frame = clip[ses["clip_pos"] - 320:ses["clip_pos"]]
+                ses["clip_pos"] += 160
+            elif s8.mode == 1 and not ses.get("clip_done"):
+                ses["clip_done"] = True
+                ses["input"] = (1, 0)                    # the clip has ended: finish listening (next step)
+                frame = np.zeros(320, np.int16)
+            else:
+                frame = np.zeros(320, np.int16)
+        out = s8.tick(frame, button=b, double=d, shift=ses["shift"])
         ses["modes"].append(out["mode"])
         self._step8_listened(ses, out["mode"])
         fan = round(float(out["fan"]), 2) if out["mode"] == "play" else 0.0
