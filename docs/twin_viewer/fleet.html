@@ -127,7 +127,7 @@
         <option value="played">出た音</option><option value="target">目標の音</option>
       </select>
     </div>
-    <div class="note" style="margin-top:6px">選んだ 1 台の音を、出た音程（または目標）から合成して鳴らします。</div>
+    <div class="note" style="margin-top:6px">出た音程（または目標）から合成した音です。1 台表示ではその台だけ、全台表示では正面・近くの台ほど大きく最大 32 台を混ぜて鳴らします。どちらもカメラの向きと距離で音量と左右が変わります（ヘッドホン推奨）。</div>
     <div id="allGraphs" hidden>
       <h2 id="allTitle">全台のグラフ</h2>
       <div class="chips" id="channels">
@@ -665,32 +665,82 @@ function drawPlayheads() {
 }
 
 // ---------- sound (WebAudio, the chosen rig) -------------------------------------------------------
-const audio = { ctx: null, on: false };
+// Sound in space: with all rigs, the (up to) 32 rigs the camera faces most and is nearest to sound together,
+// each louder the more in front and the nearer it is, and set left / right by where it is in the view; with
+// one rig, only that rig, its loudness and side by the camera all the same.
+const VOICES = 32, NEAR_CM = 160;
+const audio = { ctx: null, on: false, voices: [] };
 function soundOn(on) {
   audio.on = on;
   $("sound").setAttribute("aria-pressed", on); $("sound").textContent = on ? "🔊 音 オン" : "🔇 音 オフ";
   if (on && !audio.ctx) {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const gain = ctx.createGain(); gain.gain.value = 0;
-    const tone = ctx.createOscillator(); tone.type = "triangle";
-    const over = ctx.createOscillator(); over.type = "sine";
-    const overGain = ctx.createGain(); overGain.gain.value = .25;
+    const master = ctx.createGain(); master.gain.value = .5;
     const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3500;
-    tone.connect(gain); over.connect(overGain).connect(gain); gain.connect(lp).connect(ctx.destination);
-    tone.start(); over.start();
-    Object.assign(audio, { ctx, gain, tone, over });
+    const comp = ctx.createDynamicsCompressor();             // many voices at once: keep the sum in range
+    master.connect(lp).connect(comp).connect(ctx.destination);
+    for (let i = 0; i < VOICES; i++) {
+      const gain = ctx.createGain(); gain.gain.value = 0;
+      const pan = ctx.createStereoPanner();
+      const tone = ctx.createOscillator(); tone.type = "triangle";
+      const over = ctx.createOscillator(); over.type = "sine";
+      const og = ctx.createGain(); og.gain.value = .25;
+      tone.connect(gain); over.connect(og).connect(gain); gain.connect(pan).connect(master);
+      tone.start(); over.start();
+      audio.voices.push({ gain, pan, tone, over, rig: -1 });
+    }
+    Object.assign(audio, { ctx, master });
   }
-  if (audio.ctx) on ? audio.ctx.resume() : audio.gain.gain.setTargetAtTime(0, audio.ctx.currentTime, .02);
+  if (audio.ctx) {
+    if (on) audio.ctx.resume();
+    else for (const v of audio.voices) v.gain.gain.setTargetAtTime(0, audio.ctx.currentTime, .02);
+  }
+}
+const ear3 = new THREE.Vector3();
+// how a rig sounds from the camera: loudness (front and near) and side (-1 left .. 1 right)
+function heardFrom(i) {
+  const [x, , z] = origin(i);
+  ear3.set(x + 74, 8, z - 14).applyMatrix4(camera.matrixWorldInverse);   // camera space: -z ahead, +x right
+  const d = ear3.length(), ahead = -ear3.z / Math.max(d, 1e-6);
+  const front = Math.pow(Math.max(0, (ahead + .3) / 1.3), 1.5);          // full ahead, fading to the sides, none behind
+  return { loud: front * NEAR_CM / (NEAR_CM + d), front, d,
+           pan: Math.max(-1, Math.min(1, ear3.x / Math.max(Math.abs(ear3.z), 30))) };
 }
 function updateSound(k) {
   if (!audio.ctx || !audio.on) return;
-  const r = S.data.rigs[S.sel], target = $("voiceOf").value === "target";
-  const sounding = S.playing && (target ? r.voice[k] : r.sounding[k]);
-  const cents = target ? r.cents[k] : r.pitch[k];
-  const hz = 440 * Math.pow(2, cents / 1200), now = audio.ctx.currentTime;
-  audio.tone.frequency.setTargetAtTime(hz, now, .005);
-  audio.over.frequency.setTargetAtTime(hz * 2, now, .005);
-  audio.gain.gain.setTargetAtTime(sounding ? .12 : 0, now, .01);
+  const now = audio.ctx.currentTime, target = $("voiceOf").value === "target";
+  // the rigs to hear, loudest first
+  let picks;
+  if (S.mode === "one") picks = [{ i: S.sel, ...heardFrom(S.sel) }];
+  else {
+    picks = [];
+    for (let i = 0; i < N; i++) { const h = heardFrom(i); if (h.loud > 1e-3) picks.push({ i, ...h }); }
+    picks.sort((a, b) => b.loud - a.loud); picks = picks.slice(0, VOICES);
+  }
+  // keep a voice on the rig it already plays, give the free voices to the new ones
+  const want = new Map(picks.map(p => [p.i, p])), free = [];
+  for (const v of audio.voices) { if (!want.has(v.rig)) { v.rig = -1; free.push(v); } else want.get(v.rig).voice = v; }
+  for (const p of picks) if (!p.voice) { p.voice = free.pop(); p.voice.rig = p.i; }
+  // the loudest heard rig sets the level (so the overview is not silent), the others keep their share of it;
+  // all of it a little quieter the farther the nearest one is
+  const top = Math.max(1e-6, ...picks.map(p => p.loud)), dmin = Math.min(...picks.map(p => p.d));
+  const level = Math.max(.35, Math.min(1, 400 / (400 + dmin)));
+  let scale;
+  if (S.mode === "one") scale = 2.5;                       // one rig: its loudness follows the camera's distance
+  else {
+    for (const p of picks) p.loud = p.loud / top;
+    scale = level / Math.sqrt(Math.max(1, picks.reduce((a, p) => a + p.loud, 0)));
+  }
+  for (const v of audio.voices) {
+    const p = want.get(v.rig);
+    if (!p) { v.gain.gain.setTargetAtTime(0, now, .03); continue; }
+    const r = S.data.rigs[p.i];
+    const on = S.playing && (target ? r.voice[k] : r.sounding[k]);
+    const hz = 440 * Math.pow(2, (target ? r.cents[k] : r.pitch[k]) / 1200);
+    v.tone.frequency.setTargetAtTime(hz, now, .005); v.over.frequency.setTargetAtTime(hz * 2, now, .005);
+    v.pan.pan.setTargetAtTime(p.pan, now, .03);
+    v.gain.gain.setTargetAtTime(on ? .2 * p.loud * scale : 0, now, .015);
+  }
 }
 
 // ---------- every frame ------------------------------------------------------------------------------
