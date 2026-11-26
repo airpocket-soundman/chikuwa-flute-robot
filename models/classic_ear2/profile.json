@@ -1,6 +1,6 @@
 {
   "name": "classic_ear2",
-  "title": "classic_ear2: 古典制御（PID・観測器・規則の弁）を新しいツインで調整し、練習（反復学習制御）を足した版。耳は ear_08",
+  "title": "classic_ear2: classic_ear に練習（反復学習制御、強さ 0.5）と、大きく外れた音を位置の推定に使わないゲートを足した版",
   "doc": "docs/classic.md",
   "runtime": "classic_runtime.npz",
   "ear": "nn",
@@ -14,27 +14,28 @@
   "whistle": {
     "max_gap_steps": 2
   },
-  "twin": "twin_y1f80_05_runtime.npz",
+  "twin": "twin_y1f80_04_runtime.npz",
   "gains": {
-    "kp": 30.0,
-    "ki": 2.8475220363720783,
-    "kd": 1.4266220817697326,
+    "kp": 20.0,
+    "ki": 2.6,
+    "kd": 0.72,
     "i_zone": 0.06,
     "i_max": 0.25,
-    "hold_tol": 0.002,
+    "hold_tol": 0.004,
     "hold_release": 0.04,
     "hold_speed": 0.05,
-    "pitch_ki": 0.0005743075117462175,
+    "pitch_ki": 0.0016,
     "trim_max": 0.1,
     "trim_gate_cents": 150.0,
-    "settle_steps": 25,
-    "valve_lead": 3,
-    "valve_gate": 0.023528330496687754,
-    "valve_wait_steps": 25,
-    "ilc_gain": 1.0,
+    "settle_steps": 25.0,
+    "valve_lead": 3.0,
+    "valve_gate": 0.098,
+    "valve_wait_steps": 25.0,
+    "ilc_gain": 0.5,
     "ilc_shift": 14.0,
     "ilc_smooth": 5.0,
-    "ilc_max": 0.08
+    "ilc_max": 0.08,
+    "obs_gate_cents": 200.0
   },
-  "ear_runtime": "ear_08_runtime.npz"
+  "ear_runtime": "ear_06_runtime.npz"
 }

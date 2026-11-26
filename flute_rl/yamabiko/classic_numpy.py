@@ -41,7 +41,7 @@ from .residual_numpy import A4, SPAN, Runtime, period_ms
 
 CLASSIC_FIELDS = ("kp", "ki", "kd", "i_zone", "i_max", "hold_tol", "hold_release", "hold_speed",
                   "pitch_ki", "trim_max", "trim_gate_cents", "settle_steps",
-                  "valve_lead", "valve_gate", "valve_wait_steps", "ilc_gain", "ilc_shift", "ilc_smooth", "ilc_max")
+                  "valve_lead", "valve_gate", "valve_wait_steps", "ilc_gain", "ilc_shift", "ilc_smooth", "ilc_max", "obs_gate_cents")
 
 DEFAULT_GAINS = dict(       # tuned on the NumPy simulator around twin_y1f80_04 (scripts/yamabiko_classic_export.py)
     kp=20.0,                # PWM per stroke of position error
@@ -63,6 +63,7 @@ DEFAULT_GAINS = dict(       # tuned on the NumPy simulator around twin_y1f80_04 
     ilc_shift=8.0,          # ... taken this many steps early
     ilc_smooth=9.0,         # ... smoothed over this many steps
     ilc_max=.08,            # ... the correction at most this many strokes
+    obs_gate_cents=1e4,     # the observer ignores a heard pitch this far from the estimate's (a wrong octave)
 )
 
 
@@ -82,8 +83,7 @@ class ClassicRuntime(Runtime):
     def __init__(self, arrays):
         super().__init__(arrays)
         values = self.a["classic.gains"].tolist()          # files from before the practice fields: no practice
-        self.g = {**DEFAULT_GAINS, **dict(zip(CLASSIC_FIELDS, values)), **({} if len(values) == len(CLASSIC_FIELDS)
-                                                                            else {"ilc_gain": 0.0})}
+        self.g = {**DEFAULT_GAINS, **dict(zip(CLASSIC_FIELDS, values)), **({} if len(values) >= 19 else {"ilc_gain": 0.0})}
         self.ilc, self.rec = None, None
         self.self_home = False
 
@@ -191,6 +191,8 @@ class ClassicRuntime(Runtime):
         self.x_history = np.concatenate([self.x_history[1:], [self.position]])
         self.voice_history = np.concatenate([self.voice_history[1:], [self.voice[t]]])
         usable = self.valid and bool(self.voice_history[self.heard_index])
+        if usable and g["obs_gate_cents"] < 1e3:          # a heard pitch far from where it should be: not used
+            usable = abs(self.heard - self.cents_at(self.x_history[self.heard_index])) < g["obs_gate_cents"]
         if usable:                                        # pitch observer: correct the dead reckoning
             innovation = (self.coef_a - period_ms(self.heard)) / self.coef_b - self.x_history[self.heard_index]
             shift = c["observer_gain"] * innovation
