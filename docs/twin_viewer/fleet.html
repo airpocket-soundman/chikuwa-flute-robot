@@ -76,6 +76,13 @@
     <canvas id="curve" class="chart" height="120"></canvas>
     <h2>保存した回</h2>
     <div id="steps" class="chips"></div>
+    <div id="stepPick" hidden>
+      <input id="stepSlider" type="range" min="0" max="0" value="0" step="1" style="width:100%;accent-color:var(--accent)">
+      <div class="sub" id="stepLabel"></div>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="cont" aria-pressed="false" title="1 回分が終わると次の回へ続ける">⏭ 連続再生（次の回へ）</button>
+    </div>
     <h2 id="cellsTitle">この回の 32 台</h2>
     <div class="stats">
       <div class="stat"><b id="sMae">–</b><span>誤差 cent</span></div>
@@ -361,6 +368,31 @@ const S = { runs: [], run: null, index: null, cache: {}, data: null, step: null,
   speed: 1, mode: "all" };
 
 async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new Error(url); return r.json(); }
+// a packed step (yamabiko_twin_viewer_data.py --binary): gzip of a JSON header and int arrays, unpacked here
+async function getPacked(url) {
+  const r = await fetch(url); if (!r.ok) throw new Error(url);
+  const buf = await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+  const n = new DataView(buf).getUint32(0, true);
+  const head = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, n)));
+  const C = head.count, T = head.steps;
+  let off = 4 + n + ((4 - (4 + n) % 4) % 4);
+  const take = (Type, bytes) => { const a = new Type(buf.slice(off, off + C * T * bytes)); off += C * T * bytes; return a; };
+  const cents = take(Int16Array, 2), pitch = take(Int16Array, 2), heard = take(Int16Array, 2);
+  const pwm = take(Int8Array, 1), pos = take(Uint8Array, 1), flags = take(Uint8Array, 1);
+  head.rigs.forEach((r, i) => {
+    const a = i * T, b = a + T, f = flags.subarray(a, b);
+    Object.assign(r, { cents: cents.subarray(a, b), pitch: pitch.subarray(a, b), heard: heard.subarray(a, b),
+      pwm: Int16Array.from(pwm.subarray(a, b), v => Math.round(v * 1000 / 127)),
+      position: Int16Array.from(pos.subarray(a, b), v => Math.round(v * 1000 / 255)),
+      voice: f.map(v => v & 1), air: f.map(v => (v >> 1) & 1), sounding: f.map(v => (v >> 2) & 1), valid: f.map(v => (v >> 3) & 1) });
+  });
+  return head;
+}
+async function fetchStep(step) {
+  const meta = S.index.saved.find(s => s.step === step);
+  if (!S.cache[step]) S.cache[step] = meta.file.endsWith(".bin.gz") ? getPacked(`data/${S.run}/${meta.file}`) : getJSON(`data/${S.run}/${meta.file}`);
+  return S.cache[step];
+}
 
 async function loadRuns() {
   S.runs = await getJSON("data/runs.json");
@@ -371,14 +403,22 @@ async function loadRuns() {
 async function loadRun(name) {
   S.run = name; S.cache = {};
   S.index = await getJSON(`data/${name}/index.json`);
-  $("steps").innerHTML = S.index.saved.map(s => `<button data-step="${s.step}">${s.step} 回目</button>`).join("");
+  const many = S.index.saved.length > 20;                  // many steps: a slider instead of buttons
+  $("steps").hidden = many; $("stepPick").hidden = !many;
+  $("steps").innerHTML = many ? "" : S.index.saved.map(s => `<button data-step="${s.step}">${s.step} 回目</button>`).join("");
   $("steps").querySelectorAll("button").forEach(b => b.onclick = () => loadStep(+b.dataset.step));
+  $("stepSlider").max = S.index.saved.length - 1;
   await loadStep(S.index.saved[0].step);
 }
 async function loadStep(step) {
   const meta = S.index.saved.find(s => s.step === step);
-  S.cache[step] = S.cache[step] || await getJSON(`data/${S.run}/${meta.file}`);
-  S.data = S.cache[step]; S.step = step;
+  S.data = await fetchStep(step); S.step = step;
+  const at = S.index.saved.indexOf(meta);
+  $("stepSlider").value = at;
+  $("stepLabel").textContent = `${step} 回目（保存 ${at + 1} / ${S.index.saved.length}）  誤差 ${meta.mae} cent`;
+  const next = S.index.saved[at + 1];
+  if (next) fetchStep(next.step);                          // read the next one ahead (continuous play)
+  for (const k of Object.keys(S.cache)) if (Math.abs(S.index.saved.findIndex(s => s.step === +k) - at) > 3) delete S.cache[k];
   buildFleet(S.data.rigs.length);
   if (S.sel >= N) S.sel = 0;
   $("cellsTitle").textContent = `この回の ${N} 台`;
@@ -664,7 +704,12 @@ function frame(now) {
     if (S.playing) {
       S.t += dt / S.data.dt * S.speed;
       if (S.t >= S.data.steps - 1) {
-        if (S.loop) S.t = S.t % (S.data.steps - 1);
+        const at = S.index.saved.findIndex(q => q.step === S.step), next = S.index.saved[at + 1];
+        if (S.cont && next && !S.advancing) {               // continuous: on to the next saved step
+          S.advancing = true; S.t = S.data.steps - 1;
+          loadStep(next.step).then(() => { S.t = 0; S.advancing = false; });
+        } else if (S.advancing) S.t = S.data.steps - 1;
+        else if (S.loop) S.t = S.t % (S.data.steps - 1);
         else { S.t = S.data.steps - 1; setPlaying(false); }
       }
       $("seek").value = Math.floor(S.t);
@@ -738,6 +783,8 @@ function setPlaying(on) {
 $("play").onclick = () => setPlaying(!S.playing);
 $("seek").oninput = (e) => { S.t = +e.target.value; };
 $("speed").onchange = (e) => { S.speed = +e.target.value; };
+$("cont").onclick = () => { S.cont = !S.cont; $("cont").setAttribute("aria-pressed", S.cont); };
+$("stepSlider").oninput = (e) => { const q = S.index.saved[+e.target.value]; if (q) loadStep(q.step); };
 $("partNames").onclick = () => { partsOn = !partsOn; $("partNames").setAttribute("aria-pressed", partsOn); };
 $("loop").onclick = () => { S.loop = !S.loop; $("loop").setAttribute("aria-pressed", S.loop); };
 $("sound").onclick = () => soundOn(!audio.on);

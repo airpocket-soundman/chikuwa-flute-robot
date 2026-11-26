@@ -7,12 +7,19 @@ Writes docs/twin_viewer/data/<name>/index.json (the run and its saved steps) and
 batch: every rig's song, the pitch it played, its PWM, plunger position, air and what it heard, and the rig's
 parameters against the twin).  Numbers are rounded to keep the files small (cents to 1, PWM and position to
 0.001); on/off series are strings of 0 and 1.
+
+With ``--binary`` (for many saved steps, e.g. 128 in a row) every step is step_<n>.bin.gz instead: gzip of
+[uint32 header length][header JSON][pad to 4 bytes][cents int16][pitch int16][heard int16][pwm int8 (x127)]
+[position uint8 (x255)][flags uint8: 1 voice, 2 air, 4 sounding, 8 valid], each (rigs x steps), every
+``--every``-th instant (dt in the header).  The viewer unpacks it in the browser (DecompressionStream).
 """
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import pathlib
+import struct
 
 import numpy as np
 
@@ -55,17 +62,59 @@ def convert(path):
             "steps": int(cents.shape[1]), "dt": .01, "rigs": rigs}
 
 
+def convert_binary(path, every):
+    """One saved step as the packed binary (see the module doc) and its summary."""
+    d = np.load(path)
+    cents, voice, pitch = d["cents"], d["voice"].astype(bool), d["pitch"]
+    rigs = []
+    for i in range(cents.shape[0]):
+        err = np.abs(pitch[i] - cents[i])[voice[i]]
+        params = {}
+        for name in RATIOS:
+            if f"rig_{name}" in d.files:
+                params[name] = round(float(d[f"rig_{name}"][i] / d[f"rig_twin_{name}"][0]), 3)
+        for name, scale in SHIFTS.items():
+            if f"rig_{name}" in d.files:
+                params[name] = round(float((d[f"rig_{name}"][i] - d[f"rig_twin_{name}"][0]) * scale), 3)
+        rigs.append({"params": params, "mae": round(float(err.mean()), 1) if len(err) else None,
+                     "hit": round(float(np.mean(err <= 25)), 3) if len(err) else None})
+    sl = slice(None, None, every)
+    i16 = lambda a: np.clip(np.round(a[:, sl]), -32768, 32767).astype("<i2")
+    flags = (voice.astype(np.uint8) | ((d["air"] >= .5).astype(np.uint8) << 1)
+             | (d["sounding"].astype(bool).astype(np.uint8) << 2) | (d["valid"].astype(bool).astype(np.uint8) << 3))[:, sl]
+    T = flags.shape[1]
+    header = {"step": int(d["step"]), "loss": round(float(d["loss"]), 4), "mae": round(float(d["mae"]), 1),
+              "steps": T, "dt": .01 * every, "count": int(cents.shape[0]), "rigs": rigs}
+    hb = json.dumps(header, separators=(",", ":")).encode()
+    body = [struct.pack("<I", len(hb)), hb, bytes((-len(hb) - 4) % 4),
+            i16(cents).tobytes(), i16(pitch).tobytes(), i16(np.where(d["valid"], d["heard"], 0)).tobytes(),
+            np.clip(np.round(d["pwm"][:, sl] * 127), -127, 127).astype(np.int8).tobytes(),
+            np.clip(np.round(d["position"][:, sl] * 255), 0, 255).astype(np.uint8).tobytes(), flags.tobytes()]
+    return gzip.compress(b"".join(body), 6), header
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folder")
     ap.add_argument("--name", required=True)
     ap.add_argument("--title", default="")
     ap.add_argument("--log", default=None, help="the training log, for the MAE of every 10th step")
+    ap.add_argument("--binary", action="store_true", help="packed gzip files (for many steps)")
+    ap.add_argument("--every", type=int, default=2, help="--binary: keep every n-th instant (2: 20 ms)")
     args = ap.parse_args()
     out = ROOT / "docs" / "twin_viewer" / "data" / args.name
     out.mkdir(parents=True, exist_ok=True)
     steps = []
     for path in sorted(pathlib.Path(args.folder).glob("step_*.npz"), key=lambda p: int(p.stem[5:])):
+        if args.binary:
+            blob, head = convert_binary(path, args.every)
+            name = f"step_{head['step']}.bin.gz"
+            (out / name).write_bytes(blob)
+            hits = [r["hit"] for r in head["rigs"] if r["hit"] is not None]
+            steps.append({"step": head["step"], "loss": head["loss"], "mae": head["mae"],
+                          "hit": round(float(np.mean(hits)), 3), "file": name})
+            print(f"{name}: MAE {head['mae']} cents, {len(blob) // 1024} KB")
+            continue
         data = convert(path)
         name = f"step_{data['step']}.json"
         (out / name).write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
