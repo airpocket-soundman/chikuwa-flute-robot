@@ -1,0 +1,990 @@
+{
+ "name": "nn_f80_t7_tw05_b128_seq",
+ "title": "step7c の演奏 NN を 128 台で：1〜128 回目を連続で",
+ "rigs": 32,
+ "saved": [
+  {
+   "step": 1,
+   "loss": 0.7264,
+   "mae": 77.4,
+   "hit": 0.703,
+   "file": "step_1.bin.gz"
+  },
+  {
+   "step": 2,
+   "loss": 1.1941,
+   "mae": 126.7,
+   "hit": 0.131,
+   "file": "step_2.bin.gz"
+  },
+  {
+   "step": 3,
+   "loss": 1.1191,
+   "mae": 119.3,
+   "hit": 0.09,
+   "file": "step_3.bin.gz"
+  },
+  {
+   "step": 4,
+   "loss": 0.8093,
+   "mae": 88.4,
+   "hit": 0.292,
+   "file": "step_4.bin.gz"
+  },
+  {
+   "step": 5,
+   "loss": 0.8349,
+   "mae": 89.4,
+   "hit": 0.603,
+   "file": "step_5.bin.gz"
+  },
+  {
+   "step": 6,
+   "loss": 1.0827,
+   "mae": 115.9,
+   "hit": 0.211,
+   "file": "step_6.bin.gz"
+  },
+  {
+   "step": 7,
+   "loss": 0.8673,
+   "mae": 94.4,
+   "hit": 0.282,
+   "file": "step_7.bin.gz"
+  },
+  {
+   "step": 8,
+   "loss": 0.7142,
+   "mae": 78.0,
+   "hit": 0.525,
+   "file": "step_8.bin.gz"
+  },
+  {
+   "step": 9,
+   "loss": 0.7964,
+   "mae": 85.5,
+   "hit": 0.543,
+   "file": "step_9.bin.gz"
+  },
+  {
+   "step": 10,
+   "loss": 0.7814,
+   "mae": 85.3,
+   "hit": 0.484,
+   "file": "step_10.bin.gz"
+  },
+  {
+   "step": 11,
+   "loss": 0.6432,
+   "mae": 71.3,
+   "hit": 0.565,
+   "file": "step_11.bin.gz"
+  },
+  {
+   "step": 12,
+   "loss": 0.759,
+   "mae": 82.5,
+   "hit": 0.502,
+   "file": "step_12.bin.gz"
+  },
+  {
+   "step": 13,
+   "loss": 0.729,
+   "mae": 79.8,
+   "hit": 0.502,
+   "file": "step_13.bin.gz"
+  },
+  {
+   "step": 14,
+   "loss": 0.6574,
+   "mae": 72.1,
+   "hit": 0.662,
+   "file": "step_14.bin.gz"
+  },
+  {
+   "step": 15,
+   "loss": 0.6382,
+   "mae": 69.5,
+   "hit": 0.684,
+   "file": "step_15.bin.gz"
+  },
+  {
+   "step": 16,
+   "loss": 0.8019,
+   "mae": 86.0,
+   "hit": 0.649,
+   "file": "step_16.bin.gz"
+  },
+  {
+   "step": 17,
+   "loss": 0.6413,
+   "mae": 69.3,
+   "hit": 0.63,
+   "file": "step_17.bin.gz"
+  },
+  {
+   "step": 18,
+   "loss": 0.6715,
+   "mae": 72.4,
+   "hit": 0.666,
+   "file": "step_18.bin.gz"
+  },
+  {
+   "step": 19,
+   "loss": 0.7077,
+   "mae": 75.9,
+   "hit": 0.7,
+   "file": "step_19.bin.gz"
+  },
+  {
+   "step": 20,
+   "loss": 0.5467,
+   "mae": 60.2,
+   "hit": 0.723,
+   "file": "step_20.bin.gz"
+  },
+  {
+   "step": 21,
+   "loss": 0.717,
+   "mae": 77.0,
+   "hit": 0.687,
+   "file": "step_21.bin.gz"
+  },
+  {
+   "step": 22,
+   "loss": 0.6592,
+   "mae": 71.3,
+   "hit": 0.707,
+   "file": "step_22.bin.gz"
+  },
+  {
+   "step": 23,
+   "loss": 0.6417,
+   "mae": 69.5,
+   "hit": 0.694,
+   "file": "step_23.bin.gz"
+  },
+  {
+   "step": 24,
+   "loss": 0.6193,
+   "mae": 66.5,
+   "hit": 0.722,
+   "file": "step_24.bin.gz"
+  },
+  {
+   "step": 25,
+   "loss": 0.7211,
+   "mae": 77.2,
+   "hit": 0.68,
+   "file": "step_25.bin.gz"
+  },
+  {
+   "step": 26,
+   "loss": 0.6917,
+   "mae": 74.3,
+   "hit": 0.69,
+   "file": "step_26.bin.gz"
+  },
+  {
+   "step": 27,
+   "loss": 0.6746,
+   "mae": 72.6,
+   "hit": 0.708,
+   "file": "step_27.bin.gz"
+  },
+  {
+   "step": 28,
+   "loss": 0.5627,
+   "mae": 62.0,
+   "hit": 0.718,
+   "file": "step_28.bin.gz"
+  },
+  {
+   "step": 29,
+   "loss": 0.6412,
+   "mae": 70.1,
+   "hit": 0.695,
+   "file": "step_29.bin.gz"
+  },
+  {
+   "step": 30,
+   "loss": 0.6292,
+   "mae": 67.4,
+   "hit": 0.725,
+   "file": "step_30.bin.gz"
+  },
+  {
+   "step": 31,
+   "loss": 0.6452,
+   "mae": 70.3,
+   "hit": 0.713,
+   "file": "step_31.bin.gz"
+  },
+  {
+   "step": 32,
+   "loss": 0.7728,
+   "mae": 83.8,
+   "hit": 0.656,
+   "file": "step_32.bin.gz"
+  },
+  {
+   "step": 33,
+   "loss": 0.7052,
+   "mae": 76.6,
+   "hit": 0.662,
+   "file": "step_33.bin.gz"
+  },
+  {
+   "step": 34,
+   "loss": 0.5466,
+   "mae": 58.7,
+   "hit": 0.744,
+   "file": "step_34.bin.gz"
+  },
+  {
+   "step": 35,
+   "loss": 0.6565,
+   "mae": 71.2,
+   "hit": 0.713,
+   "file": "step_35.bin.gz"
+  },
+  {
+   "step": 36,
+   "loss": 0.6244,
+   "mae": 68.8,
+   "hit": 0.708,
+   "file": "step_36.bin.gz"
+  },
+  {
+   "step": 37,
+   "loss": 0.5882,
+   "mae": 64.6,
+   "hit": 0.724,
+   "file": "step_37.bin.gz"
+  },
+  {
+   "step": 38,
+   "loss": 0.6391,
+   "mae": 68.4,
+   "hit": 0.719,
+   "file": "step_38.bin.gz"
+  },
+  {
+   "step": 39,
+   "loss": 0.7454,
+   "mae": 80.1,
+   "hit": 0.692,
+   "file": "step_39.bin.gz"
+  },
+  {
+   "step": 40,
+   "loss": 0.6948,
+   "mae": 74.9,
+   "hit": 0.686,
+   "file": "step_40.bin.gz"
+  },
+  {
+   "step": 41,
+   "loss": 0.6605,
+   "mae": 70.9,
+   "hit": 0.708,
+   "file": "step_41.bin.gz"
+  },
+  {
+   "step": 42,
+   "loss": 0.6145,
+   "mae": 66.2,
+   "hit": 0.732,
+   "file": "step_42.bin.gz"
+  },
+  {
+   "step": 43,
+   "loss": 0.6509,
+   "mae": 69.9,
+   "hit": 0.724,
+   "file": "step_43.bin.gz"
+  },
+  {
+   "step": 44,
+   "loss": 0.5623,
+   "mae": 60.8,
+   "hit": 0.724,
+   "file": "step_44.bin.gz"
+  },
+  {
+   "step": 45,
+   "loss": 0.6501,
+   "mae": 69.5,
+   "hit": 0.71,
+   "file": "step_45.bin.gz"
+  },
+  {
+   "step": 46,
+   "loss": 0.6643,
+   "mae": 71.5,
+   "hit": 0.723,
+   "file": "step_46.bin.gz"
+  },
+  {
+   "step": 47,
+   "loss": 0.6497,
+   "mae": 70.3,
+   "hit": 0.718,
+   "file": "step_47.bin.gz"
+  },
+  {
+   "step": 48,
+   "loss": 0.6946,
+   "mae": 74.9,
+   "hit": 0.69,
+   "file": "step_48.bin.gz"
+  },
+  {
+   "step": 49,
+   "loss": 0.6135,
+   "mae": 66.6,
+   "hit": 0.738,
+   "file": "step_49.bin.gz"
+  },
+  {
+   "step": 50,
+   "loss": 0.6045,
+   "mae": 65.8,
+   "hit": 0.731,
+   "file": "step_50.bin.gz"
+  },
+  {
+   "step": 51,
+   "loss": 0.7328,
+   "mae": 78.6,
+   "hit": 0.692,
+   "file": "step_51.bin.gz"
+  },
+  {
+   "step": 52,
+   "loss": 0.5881,
+   "mae": 64.0,
+   "hit": 0.724,
+   "file": "step_52.bin.gz"
+  },
+  {
+   "step": 53,
+   "loss": 0.6924,
+   "mae": 74.2,
+   "hit": 0.73,
+   "file": "step_53.bin.gz"
+  },
+  {
+   "step": 54,
+   "loss": 0.6573,
+   "mae": 70.5,
+   "hit": 0.724,
+   "file": "step_54.bin.gz"
+  },
+  {
+   "step": 55,
+   "loss": 0.6772,
+   "mae": 73.2,
+   "hit": 0.704,
+   "file": "step_55.bin.gz"
+  },
+  {
+   "step": 56,
+   "loss": 0.6005,
+   "mae": 65.0,
+   "hit": 0.707,
+   "file": "step_56.bin.gz"
+  },
+  {
+   "step": 57,
+   "loss": 0.6685,
+   "mae": 71.2,
+   "hit": 0.722,
+   "file": "step_57.bin.gz"
+  },
+  {
+   "step": 58,
+   "loss": 0.7324,
+   "mae": 78.8,
+   "hit": 0.706,
+   "file": "step_58.bin.gz"
+  },
+  {
+   "step": 59,
+   "loss": 0.714,
+   "mae": 77.7,
+   "hit": 0.666,
+   "file": "step_59.bin.gz"
+  },
+  {
+   "step": 60,
+   "loss": 0.6268,
+   "mae": 68.5,
+   "hit": 0.697,
+   "file": "step_60.bin.gz"
+  },
+  {
+   "step": 61,
+   "loss": 0.6688,
+   "mae": 71.7,
+   "hit": 0.707,
+   "file": "step_61.bin.gz"
+  },
+  {
+   "step": 62,
+   "loss": 0.6285,
+   "mae": 68.8,
+   "hit": 0.698,
+   "file": "step_62.bin.gz"
+  },
+  {
+   "step": 63,
+   "loss": 0.7131,
+   "mae": 77.5,
+   "hit": 0.678,
+   "file": "step_63.bin.gz"
+  },
+  {
+   "step": 64,
+   "loss": 0.6614,
+   "mae": 72.0,
+   "hit": 0.705,
+   "file": "step_64.bin.gz"
+  },
+  {
+   "step": 65,
+   "loss": 0.7314,
+   "mae": 78.4,
+   "hit": 0.695,
+   "file": "step_65.bin.gz"
+  },
+  {
+   "step": 66,
+   "loss": 0.7206,
+   "mae": 77.4,
+   "hit": 0.663,
+   "file": "step_66.bin.gz"
+  },
+  {
+   "step": 67,
+   "loss": 0.6279,
+   "mae": 68.7,
+   "hit": 0.726,
+   "file": "step_67.bin.gz"
+  },
+  {
+   "step": 68,
+   "loss": 0.6938,
+   "mae": 74.7,
+   "hit": 0.715,
+   "file": "step_68.bin.gz"
+  },
+  {
+   "step": 69,
+   "loss": 0.6938,
+   "mae": 74.3,
+   "hit": 0.712,
+   "file": "step_69.bin.gz"
+  },
+  {
+   "step": 70,
+   "loss": 0.6482,
+   "mae": 69.4,
+   "hit": 0.709,
+   "file": "step_70.bin.gz"
+  },
+  {
+   "step": 71,
+   "loss": 0.5394,
+   "mae": 58.4,
+   "hit": 0.722,
+   "file": "step_71.bin.gz"
+  },
+  {
+   "step": 72,
+   "loss": 0.5964,
+   "mae": 64.3,
+   "hit": 0.725,
+   "file": "step_72.bin.gz"
+  },
+  {
+   "step": 73,
+   "loss": 0.6598,
+   "mae": 70.8,
+   "hit": 0.695,
+   "file": "step_73.bin.gz"
+  },
+  {
+   "step": 74,
+   "loss": 0.529,
+   "mae": 57.1,
+   "hit": 0.733,
+   "file": "step_74.bin.gz"
+  },
+  {
+   "step": 75,
+   "loss": 0.6719,
+   "mae": 71.7,
+   "hit": 0.735,
+   "file": "step_75.bin.gz"
+  },
+  {
+   "step": 76,
+   "loss": 0.6938,
+   "mae": 74.3,
+   "hit": 0.706,
+   "file": "step_76.bin.gz"
+  },
+  {
+   "step": 77,
+   "loss": 0.5897,
+   "mae": 63.7,
+   "hit": 0.747,
+   "file": "step_77.bin.gz"
+  },
+  {
+   "step": 78,
+   "loss": 0.6429,
+   "mae": 69.4,
+   "hit": 0.714,
+   "file": "step_78.bin.gz"
+  },
+  {
+   "step": 79,
+   "loss": 0.6409,
+   "mae": 69.0,
+   "hit": 0.721,
+   "file": "step_79.bin.gz"
+  },
+  {
+   "step": 80,
+   "loss": 0.7747,
+   "mae": 82.1,
+   "hit": 0.703,
+   "file": "step_80.bin.gz"
+  },
+  {
+   "step": 81,
+   "loss": 0.6371,
+   "mae": 68.2,
+   "hit": 0.73,
+   "file": "step_81.bin.gz"
+  },
+  {
+   "step": 82,
+   "loss": 0.6135,
+   "mae": 65.7,
+   "hit": 0.745,
+   "file": "step_82.bin.gz"
+  },
+  {
+   "step": 83,
+   "loss": 0.7473,
+   "mae": 79.3,
+   "hit": 0.716,
+   "file": "step_83.bin.gz"
+  },
+  {
+   "step": 84,
+   "loss": 0.6177,
+   "mae": 66.3,
+   "hit": 0.737,
+   "file": "step_84.bin.gz"
+  },
+  {
+   "step": 85,
+   "loss": 0.6483,
+   "mae": 69.4,
+   "hit": 0.729,
+   "file": "step_85.bin.gz"
+  },
+  {
+   "step": 86,
+   "loss": 0.6329,
+   "mae": 68.4,
+   "hit": 0.724,
+   "file": "step_86.bin.gz"
+  },
+  {
+   "step": 87,
+   "loss": 0.6399,
+   "mae": 69.0,
+   "hit": 0.71,
+   "file": "step_87.bin.gz"
+  },
+  {
+   "step": 88,
+   "loss": 0.6425,
+   "mae": 69.3,
+   "hit": 0.709,
+   "file": "step_88.bin.gz"
+  },
+  {
+   "step": 89,
+   "loss": 0.6239,
+   "mae": 66.9,
+   "hit": 0.727,
+   "file": "step_89.bin.gz"
+  },
+  {
+   "step": 90,
+   "loss": 0.6925,
+   "mae": 74.3,
+   "hit": 0.703,
+   "file": "step_90.bin.gz"
+  },
+  {
+   "step": 91,
+   "loss": 0.6703,
+   "mae": 72.1,
+   "hit": 0.699,
+   "file": "step_91.bin.gz"
+  },
+  {
+   "step": 92,
+   "loss": 0.6432,
+   "mae": 69.4,
+   "hit": 0.712,
+   "file": "step_92.bin.gz"
+  },
+  {
+   "step": 93,
+   "loss": 0.657,
+   "mae": 70.4,
+   "hit": 0.721,
+   "file": "step_93.bin.gz"
+  },
+  {
+   "step": 94,
+   "loss": 0.7047,
+   "mae": 75.1,
+   "hit": 0.705,
+   "file": "step_94.bin.gz"
+  },
+  {
+   "step": 95,
+   "loss": 0.5931,
+   "mae": 63.8,
+   "hit": 0.72,
+   "file": "step_95.bin.gz"
+  },
+  {
+   "step": 96,
+   "loss": 0.6637,
+   "mae": 71.4,
+   "hit": 0.731,
+   "file": "step_96.bin.gz"
+  },
+  {
+   "step": 97,
+   "loss": 0.6129,
+   "mae": 65.9,
+   "hit": 0.73,
+   "file": "step_97.bin.gz"
+  },
+  {
+   "step": 98,
+   "loss": 0.5388,
+   "mae": 58.3,
+   "hit": 0.75,
+   "file": "step_98.bin.gz"
+  },
+  {
+   "step": 99,
+   "loss": 0.6355,
+   "mae": 68.2,
+   "hit": 0.722,
+   "file": "step_99.bin.gz"
+  },
+  {
+   "step": 100,
+   "loss": 0.6,
+   "mae": 64.7,
+   "hit": 0.724,
+   "file": "step_100.bin.gz"
+  },
+  {
+   "step": 101,
+   "loss": 0.5795,
+   "mae": 62.7,
+   "hit": 0.723,
+   "file": "step_101.bin.gz"
+  },
+  {
+   "step": 102,
+   "loss": 0.6773,
+   "mae": 72.5,
+   "hit": 0.7,
+   "file": "step_102.bin.gz"
+  },
+  {
+   "step": 103,
+   "loss": 0.5462,
+   "mae": 59.1,
+   "hit": 0.728,
+   "file": "step_103.bin.gz"
+  },
+  {
+   "step": 104,
+   "loss": 0.579,
+   "mae": 63.0,
+   "hit": 0.741,
+   "file": "step_104.bin.gz"
+  },
+  {
+   "step": 105,
+   "loss": 0.5882,
+   "mae": 63.4,
+   "hit": 0.736,
+   "file": "step_105.bin.gz"
+  },
+  {
+   "step": 106,
+   "loss": 0.6052,
+   "mae": 65.3,
+   "hit": 0.734,
+   "file": "step_106.bin.gz"
+  },
+  {
+   "step": 107,
+   "loss": 0.6894,
+   "mae": 73.5,
+   "hit": 0.701,
+   "file": "step_107.bin.gz"
+  },
+  {
+   "step": 108,
+   "loss": 0.602,
+   "mae": 65.0,
+   "hit": 0.734,
+   "file": "step_108.bin.gz"
+  },
+  {
+   "step": 109,
+   "loss": 0.5369,
+   "mae": 58.4,
+   "hit": 0.733,
+   "file": "step_109.bin.gz"
+  },
+  {
+   "step": 110,
+   "loss": 0.6895,
+   "mae": 73.6,
+   "hit": 0.713,
+   "file": "step_110.bin.gz"
+  },
+  {
+   "step": 111,
+   "loss": 0.6381,
+   "mae": 68.5,
+   "hit": 0.739,
+   "file": "step_111.bin.gz"
+  },
+  {
+   "step": 112,
+   "loss": 0.6186,
+   "mae": 66.3,
+   "hit": 0.726,
+   "file": "step_112.bin.gz"
+  },
+  {
+   "step": 113,
+   "loss": 0.6298,
+   "mae": 67.4,
+   "hit": 0.725,
+   "file": "step_113.bin.gz"
+  },
+  {
+   "step": 114,
+   "loss": 0.5579,
+   "mae": 60.0,
+   "hit": 0.742,
+   "file": "step_114.bin.gz"
+  },
+  {
+   "step": 115,
+   "loss": 0.5219,
+   "mae": 56.4,
+   "hit": 0.761,
+   "file": "step_115.bin.gz"
+  },
+  {
+   "step": 116,
+   "loss": 0.6382,
+   "mae": 68.7,
+   "hit": 0.7,
+   "file": "step_116.bin.gz"
+  },
+  {
+   "step": 117,
+   "loss": 0.5582,
+   "mae": 60.4,
+   "hit": 0.727,
+   "file": "step_117.bin.gz"
+  },
+  {
+   "step": 118,
+   "loss": 0.6843,
+   "mae": 73.0,
+   "hit": 0.72,
+   "file": "step_118.bin.gz"
+  },
+  {
+   "step": 119,
+   "loss": 0.6752,
+   "mae": 72.4,
+   "hit": 0.701,
+   "file": "step_119.bin.gz"
+  },
+  {
+   "step": 120,
+   "loss": 0.5921,
+   "mae": 64.0,
+   "hit": 0.714,
+   "file": "step_120.bin.gz"
+  },
+  {
+   "step": 121,
+   "loss": 0.7704,
+   "mae": 81.9,
+   "hit": 0.707,
+   "file": "step_121.bin.gz"
+  },
+  {
+   "step": 122,
+   "loss": 0.606,
+   "mae": 65.5,
+   "hit": 0.715,
+   "file": "step_122.bin.gz"
+  },
+  {
+   "step": 123,
+   "loss": 0.713,
+   "mae": 75.9,
+   "hit": 0.711,
+   "file": "step_123.bin.gz"
+  },
+  {
+   "step": 124,
+   "loss": 0.6318,
+   "mae": 67.8,
+   "hit": 0.708,
+   "file": "step_124.bin.gz"
+  },
+  {
+   "step": 125,
+   "loss": 0.7252,
+   "mae": 77.3,
+   "hit": 0.711,
+   "file": "step_125.bin.gz"
+  },
+  {
+   "step": 126,
+   "loss": 0.5505,
+   "mae": 59.7,
+   "hit": 0.755,
+   "file": "step_126.bin.gz"
+  },
+  {
+   "step": 127,
+   "loss": 0.5924,
+   "mae": 63.6,
+   "hit": 0.741,
+   "file": "step_127.bin.gz"
+  },
+  {
+   "step": 128,
+   "loss": 0.6045,
+   "mae": 65.2,
+   "hit": 0.715,
+   "file": "step_128.bin.gz"
+  }
+ ],
+ "curve": [
+  {
+   "step": 1,
+   "loss": 0.7264,
+   "mae": 77.4
+  },
+  {
+   "step": 10,
+   "loss": 0.7814,
+   "mae": 85.3
+  },
+  {
+   "step": 20,
+   "loss": 0.5467,
+   "mae": 60.2
+  },
+  {
+   "step": 30,
+   "loss": 0.6292,
+   "mae": 67.4
+  },
+  {
+   "step": 40,
+   "loss": 0.6948,
+   "mae": 74.9
+  },
+  {
+   "step": 50,
+   "loss": 0.6045,
+   "mae": 65.8
+  },
+  {
+   "step": 60,
+   "loss": 0.6268,
+   "mae": 68.5
+  },
+  {
+   "step": 70,
+   "loss": 0.6482,
+   "mae": 69.4
+  },
+  {
+   "step": 80,
+   "loss": 0.7747,
+   "mae": 82.1
+  },
+  {
+   "step": 90,
+   "loss": 0.6925,
+   "mae": 74.3
+  },
+  {
+   "step": 100,
+   "loss": 0.6,
+   "mae": 64.7
+  },
+  {
+   "step": 110,
+   "loss": 0.6895,
+   "mae": 73.6
+  },
+  {
+   "step": 120,
+   "loss": 0.5921,
+   "mae": 64.0
+  },
+  {
+   "step": 130,
+   "loss": 0.6009,
+   "mae": 64.6
+  },
+  {
+   "step": 140,
+   "loss": 0.6029,
+   "mae": 64.6
+  },
+  {
+   "step": 150,
+   "loss": 0.6333,
+   "mae": 67.8
+  },
+  {
+   "step": 160,
+   "loss": 0.5719,
+   "mae": 61.5
+  }
+ ]
+}
